@@ -1,0 +1,101 @@
+/* ============================================================
+   THEME — shared design system for ashok281196.github.io
+   "Workbench" palette: cool paper-white bench, navy ink,
+   one saffron signal. System sans display + ui-monospace
+   utility. Zero external assets.
+
+   Canonical token names (older pages used aliases):
+     --bg / --bg-2        surfaces        (was --pitch / --pitch-2)
+     --ink / --ink-dim    text            (was --paper / --paper-dim)
+     --line               light rule      (was --line-soft)
+     --line-strong        strong rule     (was --line)
+
+   Page-specific styles live in index.css / season.css;
+   page content lives in /data.
+   ============================================================ */
+:root{
+  /* surfaces */
+  --bg:#f6f7f9;
+  --bg-2:#eef0f4;
+  --card:#ffffff;
+  --card-2:#fbfcfe;
+  /* ink */
+  --ink:#141d30;
+  --ink-dim:#454f68;
+  --muted:#66708b;
+  /* rules */
+  --line:#e2e5ec;
+  --line-strong:#c9cedb;
+  /* signals */
+  --saffron:#e97b18;
+  --saffron-deep:#b45c07;
+  --saffron-soft:rgba(233,123,24,.10);
+  --navy:#1c3a6e;
+  --chakra:#2f5fae;
+  --ball-red:#b13a2e;
+  --ball-red-soft:rgba(177,58,46,.10);
+  --white-ball:#e9e1c8;
+  --ok:#25804a;
+  /* type */
+  --disp:-apple-system,'Segoe UI',system-ui,'Helvetica Neue',Arial,sans-serif;
+  --mono:ui-monospace,'Cascadia Mono','Segoe UI Mono',Menlo,Consolas,monospace;
+  /* shape & layout */
+  --r:14px;
+  --touch:44px;
+  --wrap-max:860px;
+  --wrap-pad:20px;
+}
+
+/* ================= BASE ================= */
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+body{
+  font-family:var(--disp);
+  background:var(--bg);
+  color:var(--ink);
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;color:inherit;background:none;border:0;cursor:pointer}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--saffron);outline-offset:3px;border-radius:4px}
+::selection{background:var(--saffron);color:#fff}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.wrap{max-width:var(--wrap-max);margin:0 auto;padding:0 var(--wrap-pad)}
+
+/* ================= TOPBAR ================= */
+.topbar{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:18px 0;border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;color:var(--muted);
+}
+.topbar .host{color:var(--ink);font-weight:700}
+.topbar a.host{transition:color .2s}
+.topbar a.host:hover{color:var(--saffron-deep)}
+.topbar .crumb{color:var(--muted);word-break:break-all}
+.topbar .loc{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.topbar .dot{
+  width:7px;height:7px;border-radius:50%;background:var(--saffron);
+  box-shadow:0 0 0 3px var(--saffron-soft);
+}
+@media(max-width:640px){.topbar .crumb{display:none}}
+
+/* ================= EYEBROW ================= */
+.eyebrow{
+  font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;
+  color:var(--saffron-deep);display:flex;align-items:center;gap:10px;
+}
+.eyebrow::after{content:'';flex:1;max-width:64px;height:1px;background:var(--saffron);opacity:.6}
+
+/* ================= FOOTER ================= */
+footer{
+  border-top:1px solid var(--line);
+  font-family:var(--mono);font-size:11px;line-height:1.9;color:var(--muted);
+}
+footer a{color:var(--saffron-deep);font-weight:600}
+footer a:hover{text-decoration:underline}

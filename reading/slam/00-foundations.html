@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 0 — Foundations · SLAM: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar"><a href="index.html">← SLAM: Zero to Hero</a><span>CH 00 / 05</span></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">00</div>
+  <div class="chapter-kicker">Chapter Zero · Read this first</div>
+  <h1>Foundations: the six ideas everything else is built on</h1>
+  <p class="chapter-sub">Before a single algorithm name, let's make sure the problem itself is crystal clear — because SLAM is a weird, circular problem, and once you see the circle, the whole field makes sense.</p>
+</header>
+
+<h2><span class="sec-no">0.1</span>The problem, stated like a human</h2>
+<p>Imagine you wake up in an unfamiliar building with a notepad. Your job: draw a floor plan of the building <em>and</em> mark, at every moment, exactly where you are standing on that floor plan.</p>
+<p>Notice the trap. To draw the walls in the right place on your map, you need to know where <em>you</em> are when you see them. But to know where you are, you need... a map to locate yourself against. Each answer depends on the other. This chicken-and-egg is the whole problem, and it has a name:</p>
+<div class="keypoint"><strong>SLAM</strong> = <strong>S</strong>imultaneous <strong>L</strong>ocalization <strong>A</strong>nd <strong>M</strong>apping. Build the map and track your own position in it — at the same time, from the same noisy sensor data, while moving.</div>
+<p>Why does a robot need this at all? Because GPS doesn't work indoors, under bridges, in warehouses, in tunnels, or precisely enough for a robot that must pass through a 90&nbsp;cm doorway. A robot with no SLAM is a robot that only knows "I told my wheels to spin" — it has no idea what actually happened.</p>
+
+<h2><span class="sec-no">0.2</span>Idea 1 — Odometry: counting your steps</h2>
+<p>The simplest way to track yourself: start at a known point and add up your own motion. Wheels turned 10 times × wheel circumference = you moved 3.1&nbsp;m forward. This is <strong>odometry</strong> (from the Greek <em>hodos</em>, "path"), also called <strong>dead reckoning</strong>.</p>
+<div class="analogy">Close your eyes and walk across a room, counting steps. Twenty steps forward, turn roughly 90°, ten steps more. You have an <em>estimate</em> of where you are. It's not bad! But every step was slightly uneven, your turn wasn't exactly 90°, and those small errors <em>added up</em>. Open your eyes after five minutes of this and you'll be surprised how far off you are.</div>
+<p>That accumulation of error is called <strong>drift</strong>, and it is the villain of this entire book. Odometry error never averages out — it compounds. 1% error per meter sounds great until you've driven 500 meters and you're 5 meters off, which is the difference between "docked at the charger" and "in the pond."</p>
+<dl class="jargon">
+  <dt>Odometry</dt><dd>Estimating your motion incrementally from your own sensors — wheel encoders, an IMU, camera frames, or lidar scans compared to the previous one.</dd>
+  <dt>IMU (Inertial Measurement Unit)</dt><dd>A chip with accelerometers + gyroscopes. Measures acceleration and rotation rate hundreds of times per second. Great for a fraction of a second; drifts terribly if you integrate it alone for long (errors get integrated <em>twice</em> to get position).</dd>
+  <dt>Drift</dt><dd>Accumulated error in an incremental estimate. Small per step, unbounded over time.</dd>
+  <dt>Pose</dt><dd>Position + orientation together. In 2D: (x, y, heading θ). In 3D: (x, y, z) plus 3 rotation angles — "6 degrees of freedom" (6-DOF).</dd>
+</dl>
+
+<h2><span class="sec-no">0.3</span>Idea 2 — Loop closure: recognizing where you've been</h2>
+<p>Here's the escape hatch from drift. Suppose, while blindfold-walking, you occasionally reach out and touch a landmark — "ah, this is the same doorframe I touched five minutes ago." The instant you recognize a previously-visited place, you learn something powerful: <em>however much your step-counting says you've wandered, you are actually back here.</em> You can now go back and correct your whole path — smear the accumulated error across every step you took in between.</p>
+<p>That recognition event is called a <strong>loop closure</strong>, and the correction it triggers is what upgrades mere odometry into SLAM.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <!-- left: drift -->
+  <text x="20" y="28" font-size="13" fill="#b3401e" letter-spacing="2">BEFORE LOOP CLOSURE</text>
+  <path d="M60 240 L120 230 L180 210 L230 170 L260 120 L250 80 L200 60 L150 70" fill="none" stroke="#23201a" stroke-width="3" stroke-dasharray="none"/>
+  <path d="M60 240 L120 235 L185 225 L245 195 L290 150 L295 105 L265 75 L215 78" fill="none" stroke="#b3401e" stroke-width="2.5" stroke-dasharray="6 5"/>
+  <circle cx="60" cy="240" r="7" fill="#0e5f5b"/>
+  <text x="45" y="266" font-size="12" fill="#0e5f5b">start</text>
+  <circle cx="150" cy="70" r="6" fill="#23201a"/>
+  <circle cx="215" cy="78" r="6" fill="#b3401e"/>
+  <line x1="150" y1="70" x2="215" y2="78" stroke="#b3401e" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <text x="152" y="52" font-size="12" fill="#23201a">truth</text>
+  <text x="220" y="100" font-size="12" fill="#b3401e">belief (drifted)</text>
+  <!-- right: after -->
+  <text x="430" y="28" font-size="13" fill="#0e5f5b" letter-spacing="2">AFTER LOOP CLOSURE</text>
+  <path d="M470 240 L530 230 L590 210 L640 170 L670 120 L660 80 L610 60 L560 70" fill="none" stroke="#0e5f5b" stroke-width="3"/>
+  <circle cx="470" cy="240" r="7" fill="#0e5f5b"/>
+  <circle cx="560" cy="70" r="8" fill="none" stroke="#a97b1f" stroke-width="3"/>
+  <text x="500" y="52" font-size="12" fill="#a97b1f">"I've been here!"</text>
+  <text x="455" y="266" font-size="12" fill="#0e5f5b">whole path corrected</text>
+</svg>
+</div>
+<figcaption>Fig 0.1 — Odometry drifts (dashed red). Recognizing a past place lets the system pull the entire trajectory back into shape.</figcaption>
+</figure>
+<div class="keypoint">Odometry = local, smooth, drifts forever. Loop closure = occasional global truth injections. SLAM = odometry + loop closures + an optimizer that reconciles them. Every system in this book, no matter how fancy, is this sentence.</div>
+
+<h2><span class="sec-no">0.4</span>Idea 3 — The map: what are we actually drawing?</h2>
+<p>"Map" can mean several very different data structures, and choosing one is a real engineering decision:</p>
+<table>
+  <tr><th>Map type</th><th>What it stores</th><th>Good for</th></tr>
+  <tr><td><strong>Landmark / feature map</strong></td><td>A sparse cloud of distinctive points ("corner of the poster at x,y,z")</td><td>Localization — cheap to match against</td></tr>
+  <tr><td><strong>Occupancy grid</strong></td><td>The world chopped into cells, each labeled occupied / free / unknown</td><td>Planning safe paths — "can I drive through this cell?"</td></tr>
+  <tr><td><strong>Point cloud</strong></td><td>Raw 3D points from lidar/depth sensors, stitched together</td><td>Visualization, registration, surveying</td></tr>
+  <tr><td><strong>Distance field (TSDF/ESDF)</strong></td><td>Each cell stores <em>how far to the nearest surface</em></td><td>Smooth trajectory optimization (Ch. 1 &amp; 5)</td></tr>
+  <tr><td><strong>Mesh / neural / Gaussian map</strong></td><td>Surfaces, or a learned function you can render from</td><td>Reconstruction, simulation, semantics (Ch. 3 &amp; 4)</td></tr>
+</table>
+<p>Keep the word <strong>"unknown"</strong> in mind for occupancy grids — a good map distinguishes "I know this is empty" from "I've never looked there." An exploring robot lives on that difference.</p>
+
+<h2><span class="sec-no">0.5</span>Idea 4 — Everything is uncertain, so everything is probability</h2>
+<p>Every sensor lies a little. Wheels slip. Lidar ranges have noise. Cameras blur. So SLAM never says "I am at (3.20, 5.10)"; it says "I <em>believe</em> I'm near (3.20, 5.10), give or take this much" — a probability distribution over poses. The math machinery of the field is about maintaining and updating that belief:</p>
+<ul>
+  <li><strong>Predict:</strong> use your motion (odometry) to shift the belief forward — and <em>widen</em> it, because motion adds uncertainty.</li>
+  <li><strong>Correct:</strong> use a sensor observation ("the wall is 2.1&nbsp;m ahead") to <em>narrow</em> the belief — observations remove uncertainty.</li>
+</ul>
+<p>This predict/correct heartbeat is the <strong>Bayes filter</strong>, and its two famous children are the <strong>Kalman filter</strong> (belief is a single Gaussian blob — fast, but can only believe in one place at a time) and the <strong>particle filter</strong> (belief is a swarm of thousands of guesses — can believe in several places at once, which matters in Chapter 5's "kidnapped robot" problem). The bible for all of this is <a href="https://mitpress.mit.edu/9780262201629/probabilistic-robotics/">Probabilistic Robotics — Thrun, Burgard &amp; Fox (MIT Press, 2005)</a>.</p>
+<div class="analogy">Kalman filter = one confident friend pointing at the map saying "we're here-ish." Particle filter = a crowd of 5,000 tourists each dropping a pin; the pins that match what you see out the window survive, the rest get deleted and respawned near the survivors.</div>
+
+<h2><span class="sec-no">0.6</span>Idea 5 — Modern SLAM is an optimization problem (the graph)</h2>
+<p>Filters update a belief step by step and throw the past away. Modern SLAM keeps the past and solves it all at once. Picture a graph:</p>
+<ul>
+  <li><strong>Nodes</strong> = your pose at each moment ("where I was at t=1, t=2, ...").</li>
+  <li><strong>Edges</strong> = measurements <em>connecting</em> poses: "odometry says node 5 is 1&nbsp;m ahead of node 4," "loop closure says node 200 is the same place as node 12."</li>
+</ul>
+<p>Each edge is a soft constraint — a spring. Odometry springs chain the nodes together; a loop closure adds a long-range spring from late in the trajectory back to early. Then you <em>relax the spring network</em>: find the set of poses that stretches all springs the least. That "least total squared stretch" is <strong>least-squares optimization</strong>, and this formulation is called <strong>pose graph optimization</strong> — or in its general form, a <strong>factor graph</strong>. Libraries that solve it: <a href="https://gtsam.org/">GTSAM</a>, <a href="http://ceres-solver.org/">Ceres Solver</a>, <a href="https://github.com/RainerKuemmerle/g2o">g2o</a>.</p>
+<div class="keypoint">When a loop closure "snaps the map into place," what physically happened is: one new spring was added to the graph, and the solver re-relaxed the whole network. Remember the springs — you'll reuse this picture in every chapter.</div>
+<dl class="jargon">
+  <dt>Front-end</dt><dd>The part that processes raw sensor data into constraints: feature matching, scan matching, loop closure detection. Deals with pixels and points.</dd>
+  <dt>Back-end</dt><dd>The optimizer that takes those constraints and solves for the best poses/map. Deals with math. "Front-end proposes, back-end disposes."</dd>
+  <dt>Bundle adjustment (BA)</dt><dd>The camera version of graph optimization: jointly refine camera poses <em>and</em> 3D point positions so that points re-project onto the images where they were actually seen. The gold standard of accuracy in visual SLAM.</dd>
+</dl>
+
+<h2><span class="sec-no">0.7</span>Idea 6 — Coordinate frames: the robot's family tree</h2>
+<p>A robot juggles several coordinate systems at once, and confusing them causes the most embarrassing bugs in robotics. The standard chain (ROS convention, <a href="https://www.ros.org/reps/rep-0105.html">REP 105</a>):</p>
+<pre>map ──► odom ──► base_link ──► (sensor frames: camera, lidar, imu...)</pre>
+<ul>
+  <li><strong>base_link</strong> — the robot's own body. "Forward" for the robot.</li>
+  <li><strong>odom</strong> — where odometry <em>thinks</em> the robot has moved since power-on. Smooth and continuous, but drifts.</li>
+  <li><strong>map</strong> — the globally-correct world frame. The SLAM system publishes the <em>correction</em> between map and odom. This correction can <strong>jump</strong> when a loop closure fires.</li>
+</ul>
+<p>Why this weird split? Because the motor controller must never see the robot's position teleport 30&nbsp;cm mid-motion. Smooth things (steering) live in <code>odom</code>; correct things (global plans) live in <code>map</code>. Chapter 5 turns this into a superpower — it's the single most senior-sounding thing you can say in an interview.</p>
+
+<h2><span class="sec-no">0.8</span>The sensors, in one honest table</h2>
+<table>
+  <tr><th>Sensor</th><th>Gives you</th><th>Loves</th><th>Hates</th></tr>
+  <tr><td><strong>Wheel encoders</strong></td><td>Local motion, cheap</td><td>Hard floors</td><td>Slippage, sand, carpets, stairs</td></tr>
+  <tr><td><strong>IMU</strong></td><td>Rotation + acceleration at 200–1000&nbsp;Hz</td><td>Short timescales, gravity direction</td><td>Long-term integration (drifts in seconds)</td></tr>
+  <tr><td><strong>Camera (mono/stereo/RGB-D)</strong></td><td>Rich texture, semantics, cheap</td><td>Well-lit, textured scenes</td><td>Darkness, blank walls, motion blur; mono can't measure scale</td></tr>
+  <tr><td><strong>LiDAR (2D/3D)</strong></td><td>Precise range, works in the dark</td><td>Geometry-rich scenes</td><td>Long featureless corridors, rain/dust, price</td></tr>
+  <tr><td><strong>GPS/GNSS</strong></td><td>Absolute position outdoors</td><td>Open sky</td><td>Indoors, urban canyons, ~meters of noise</td></tr>
+</table>
+<p>No sensor is sufficient alone — which is why the word <strong>fusion</strong> appears in every system name (LIO = Lidar-Inertial Odometry, VIO = Visual-Inertial Odometry). Sensors are chosen so that one's weakness is another's strength: IMU carries you through the 0.1&nbsp;s the camera is blurred; the camera cancels the IMU's drift.</p>
+
+<h2><span class="sec-no">0.9</span>Your map of the book</h2>
+<p>Now the chapters can be stated in one line each: <strong>Ch.&nbsp;1</strong> does all of the above with lasers. <strong>Ch.&nbsp;2</strong> does it with a $300 depth camera and shows you the bruises. <strong>Ch.&nbsp;3</strong> traces cameras from hand-crafted features to foundation models. <strong>Ch.&nbsp;4</strong> asks precisely where neural networks help. <strong>Ch.&nbsp;5</strong> answers "fine, we have a map — now drive."</p>
+
+<h2><span class="sec-no">0.10</span>Check yourself (interview warm-ups)</h2>
+<details class="qa"><summary>Explain SLAM to a non-engineer in three sentences.</summary><div class="a"><p>A robot in a new building must draw the floor plan while also tracking its own position on that plan — but drawing needs your position and finding your position needs the plan, so both must be estimated together. The robot counts its own motion (which slowly drifts) and corrects itself whenever it recognizes a place it has seen before. Software fuses all of these noisy clues into the single most consistent map-plus-trajectory.</p></div></details>
+<details class="qa"><summary>Why does odometry drift, and why can't better sensors fully fix it?</summary><div class="a"><p>Each incremental motion estimate carries a small error, and position is the <em>sum</em> of all increments — so errors accumulate rather than cancel. Better sensors shrink the per-step error but the sum is still unbounded over time. Only <em>absolute</em> information — recognizing a known place (loop closure), a known map, or GPS — can bound it, because it constrains where you are rather than how you moved.</p></div></details>
+<details class="qa"><summary>What's the difference between a filter-based and a graph-based SLAM back-end?</summary><div class="a"><p>A filter (Kalman/particle) maintains only the <em>current</em> belief and marginalizes the past — cheap, online, but a mistake baked in stays in. A graph keeps (a subset of) all past poses as variables and re-optimizes them whenever new constraints arrive — so a loop closure can retroactively fix the whole trajectory. Modern systems are graph-based, often with a filter (or fixed-lag smoother) running the fast odometry front-end.</p></div></details>
+<details class="qa"><summary>Why do robots separate the map frame from the odom frame?</summary><div class="a"><p>Odometry is smooth but drifting; SLAM corrections are accurate but arrive as discrete jumps. Controllers steering the wheels must see a smooth pose (odom→base_link), while planners need the globally correct one (map). Publishing the correction as a separate map→odom transform lets a loop-closure jump update plans without teleporting the robot under its controller — full story in Chapter 5.</p></div></details>
+
+<nav class="booknav">
+  <a href="index.html"><span class="dir">← Back</span>Cover &amp; contents</a>
+  <a href="01-lidar-slam.html"><span class="dir">Next →</span>Ch. 1 — LiDAR SLAM &amp; the mapping pipeline</a>
+</nav>
+
+</div>
+</body>
+</html>

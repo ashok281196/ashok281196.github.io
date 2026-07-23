@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SLAM: Zero to Hero — A Field Book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <div class="cover">
+    <div class="cover-kicker">A field book for the robotics interview · 2026 edition</div>
+    <h1>SLAM<br><span class="accent">from zero</span> to hero</h1>
+    <p class="cover-sub">How robots figure out <em>where they are</em> and <em>what the world looks like</em> — explained from scratch, one honest chapter at a time. No prior SLAM knowledge assumed. Every paper named and linked.</p>
+    <div class="cover-rule"></div>
+  </div>
+
+  <h2><span class="sec-no">Before you start</span>How to read this book</h2>
+  <p>Read <strong>Chapter 0 first</strong>, even if it feels basic. Everything else in the book is built on the six ideas in that chapter — odometry, drift, loop closure, the map, optimization, and coordinate frames. Once those click, the fancy stuff (factor graphs, Gaussian splatting, differentiable bundle adjustment) turns out to be variations on the same six ideas wearing different costumes.</p>
+  <p>Each chapter follows the same rhythm: <em>the intuition first</em>, then the real machinery, then the systems people actually run, then a linked reading list, and finally interview questions with worked answers hidden behind click-to-reveal panels — try answering out loud before you open them.</p>
+  <div class="keypoint">SLAM is one problem asked two ways at once: <em>"Where am I?"</em> (localization) and <em>"What does the world look like?"</em> (mapping). The cruel joke is that each answer requires the other. That circularity is the entire field.</div>
+
+  <h2><span class="sec-no">Contents</span>The six chapters</h2>
+  <nav class="toc">
+    <a href="00-foundations.html">
+      <span class="t-num">00</span>
+      <span><span class="t-title">Foundations</span><span class="t-sub">What SLAM even is. Odometry, drift, loop closure, frames, and why probability runs the show.</span></span>
+      <span class="t-tag">Start here</span>
+    </a>
+    <a href="01-lidar-slam.html">
+      <span class="t-num">01</span>
+      <span><span class="t-title">LiDAR SLAM &amp; the Mapping Pipeline</span><span class="t-sub">Scan matching, factor graphs, LOAM to FAST-LIO2, and OctoMap vs the distance fields that replaced it.</span></span>
+      <span class="t-tag">Geometry</span>
+    </a>
+    <a href="02-rtabmap.html">
+      <span class="t-num">02</span>
+      <span><span class="t-title">RTAB-Map + RealSense D435i</span><span class="t-sub">The cheapest credible indoor SLAM rig, and every way it bites you in the field.</span></span>
+      <span class="t-tag">Hands-on</span>
+    </a>
+    <a href="03-visual-slam.html">
+      <span class="t-num">03</span>
+      <span><span class="t-title">Visual SLAM — the State of the Art</span><span class="t-sub">Six eras from ORB features to foundation models that hallucinate geometry in one forward pass.</span></span>
+      <span class="t-tag">SOTA</span>
+    </a>
+    <a href="04-learning-slam.html">
+      <span class="t-num">04</span>
+      <span><span class="t-title">Learning-Based SLAM</span><span class="t-sub">Where machine learning actually plugs in — and where it still loses to forty-year-old geometry.</span></span>
+      <span class="t-tag">ML × SLAM</span>
+    </a>
+    <a href="05-planning-nav.html">
+      <span class="t-num">05</span>
+      <span><span class="t-title">Planning, Navigation &amp; Localization</span><span class="t-sub">What the robot does with the map: costmaps, A* to MPPI, and the frame contract that holds it all together.</span></span>
+      <span class="t-tag">Autonomy</span>
+    </a>
+  </nav>
+
+  <h2><span class="sec-no">Promise</span>What "hero" means here</h2>
+  <p>By the last page you should be able to: draw the SLAM pipeline from memory on a whiteboard; explain why a map "jumps" during loop closure and why the wheels don't jump with it; argue when to use a camera versus a lidar; sort any "AI + SLAM" question into three clean buckets; and name the 2023–2026 systems that replaced the classics — with the paper links to prove it.</p>
+  <p style="font-family:var(--mono); font-size:13px; color:var(--ink-soft); margin-top:50px;">Compiled July 2026 · Built for study, not for citation · All external links go to the original papers, docs, or repos.</p>
+
+</div>
+</body>
+</html>
