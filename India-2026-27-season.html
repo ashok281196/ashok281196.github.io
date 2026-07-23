@@ -1,0 +1,728 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>India Men's Season 2026-27</title>
+<style>
+/* ============================================================
+   DESIGN: "Day at the ground" — workbench edition
+   Matches the landing page (index.html): cool paper-white bench,
+   navy ink, one saffron signal. Signature kept: every match is a
+   ticket stub — perforated tear line, big tabular date, format
+   encoded by ball colour (red ball = Test, white ball = ODI/T20I).
+   System sans display + ui-monospace utility. Zero external assets.
+   ============================================================ */
+:root{
+  --pitch:#f6f7f9;
+  --pitch-2:#eef0f4;
+  --card:#ffffff;
+  --card-2:#fbfcfe;
+  --paper:#141d30;
+  --paper-dim:#454f68;
+  --muted:#66708b;
+  --line:#c9cedb;
+  --line-soft:#e2e5ec;
+  --saffron:#e97b18;
+  --saffron-deep:#b45c07;
+  --saffron-soft:rgba(233,123,24,.10);
+  --ball-red:#b13a2e;
+  --ball-red-soft:rgba(177,58,46,.10);
+  --white-ball:#e9e1c8;
+  --chakra:#2f5fae;
+  --ok:#25804a;
+
+  --disp:-apple-system,'Segoe UI',system-ui,'Helvetica Neue',Arial,sans-serif;
+  --mono:ui-monospace,'Cascadia Mono','Segoe UI Mono',Menlo,Consolas,monospace;
+
+  --r:14px;
+  --touch:44px;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;-webkit-text-size-adjust:100%}
+@media(prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+}
+body{
+  font-family:var(--disp);
+  background:
+    radial-gradient(1000px 500px at 90% -10%, rgba(233,123,24,.05), transparent 55%),
+    radial-gradient(800px 500px at -10% 105%, rgba(47,95,174,.05), transparent 55%),
+    var(--pitch);
+  color:var(--paper);
+  min-height:100vh;
+  -webkit-font-smoothing:antialiased;
+}
+button{font-family:inherit;color:inherit;background:none;border:0;cursor:pointer}
+a{color:inherit;text-decoration:none}
+:focus-visible{outline:2px solid var(--saffron);outline-offset:2px;border-radius:4px}
+::selection{background:var(--saffron);color:#fff}
+.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+
+.wrap{max-width:1080px;margin:0 auto;padding:0 16px}
+
+/* ================= HERO: the season ticket ================= */
+.hero{padding:40px 0 6px;position:relative}
+.ticket-hero{
+  display:grid;grid-template-columns:1fr 150px;grid-template-rows:1fr auto;
+  background:linear-gradient(160deg,var(--card-2),var(--card));
+  border:1px solid var(--line);border-radius:var(--r);
+  box-shadow:0 18px 40px rgba(20,29,48,.08);
+  overflow:hidden;
+}
+.th-body{grid-column:1;padding:34px 40px 26px;min-width:0}
+.eyebrow{
+  font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;
+  color:var(--saffron-deep);display:flex;align-items:center;gap:10px;
+}
+.eyebrow::after{content:'';flex:1;max-width:64px;height:1px;background:var(--saffron);opacity:.6}
+h1{
+  margin-top:12px;
+  font-size:clamp(34px,7vw,68px);
+  font-weight:900;line-height:.95;letter-spacing:-.03em;text-transform:uppercase;
+}
+h1 em{font-style:normal;color:var(--saffron-deep)}
+.hero-sub{
+  margin-top:12px;color:var(--muted);font-size:clamp(13px,3.4vw,15px);
+  max-width:64ch;line-height:1.6;
+}
+.th-stats{
+  grid-column:1;display:flex;flex-wrap:wrap;
+  font-family:var(--mono);border-top:1px solid var(--line);
+}
+.hstat{
+  padding:14px 28px 16px;display:flex;flex-direction:column;gap:2px;
+  border-right:1px solid var(--line);
+}
+.hstat:first-child{padding-left:40px}
+.hstat:last-child{border-right:0}
+.hstat b{font-size:22px;font-weight:700;color:var(--paper)}
+.hstat span{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.hstat.sfr b{color:var(--saffron-deep)}
+.hstat.red b{color:var(--ball-red)}
+
+/* tear-off stub on the right */
+.th-stub{
+  grid-column:2;grid-row:1/3;position:relative;
+  border-left:2px dashed rgba(20,29,48,.18);
+  background:var(--saffron-soft);
+  display:flex;flex-direction:column;align-items:center;justify-content:space-between;
+  gap:16px;padding:22px 0;
+}
+.th-stub::before,.th-stub::after{
+  content:'';position:absolute;left:-9px;width:16px;height:16px;border-radius:50%;
+  background:var(--pitch);border:1px solid var(--line);
+}
+.th-stub::before{top:-9px}
+.th-stub::after{bottom:-9px}
+.th-vert{
+  writing-mode:vertical-rl;white-space:nowrap;
+  font-family:var(--mono);font-size:10px;font-weight:700;
+  letter-spacing:.32em;text-transform:uppercase;color:var(--saffron-deep);
+}
+.th-barcode{
+  flex:1;width:30px;min-height:40px;max-height:130px;border-radius:2px;opacity:.8;
+  background:repeating-linear-gradient(180deg,
+    var(--paper) 0 2px,transparent 2px 5px,
+    var(--paper) 5px 6px,transparent 6px 11px,
+    var(--paper) 11px 14px,transparent 14px 17px,
+    var(--paper) 17px 18px,transparent 18px 23px);
+}
+.th-no{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--muted);
+  white-space:nowrap;
+}
+@media(max-width:640px){
+  /* stub becomes a slim tear-off strip across the top */
+  .ticket-hero{grid-template-columns:1fr;grid-template-rows:auto auto auto}
+  .th-stub{
+    grid-column:1;grid-row:1;
+    flex-direction:row;align-items:center;justify-content:space-between;
+    gap:12px;padding:10px 16px;
+    border-left:0;border-bottom:2px dashed rgba(20,29,48,.18);
+  }
+  .th-stub::before{top:auto;bottom:-9px;left:-9px}
+  .th-stub::after{top:auto;bottom:-9px;left:auto;right:-9px}
+  .th-vert{writing-mode:horizontal-tb;font-size:9px;letter-spacing:.22em}
+  .th-barcode{
+    width:auto;height:18px;min-height:0;max-height:none;flex:1;max-width:110px;
+    background:repeating-linear-gradient(90deg,
+      var(--paper) 0 2px,transparent 2px 5px,
+      var(--paper) 5px 6px,transparent 6px 11px,
+      var(--paper) 11px 14px,transparent 14px 17px,
+      var(--paper) 17px 18px,transparent 18px 23px);
+  }
+  .th-body{grid-row:2;padding:22px 22px 18px}
+  .th-stats{grid-row:3}
+  .hstat{padding:12px 14px 14px}
+  .hstat:first-child{padding-left:22px}
+}
+
+/* ================= SEASON RAIL (jump nav) ================= */
+.rail-outer{
+  position:sticky;top:0;z-index:30;margin-top:28px;
+  background:rgba(246,247,249,.92);
+  backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);
+}
+.rail{
+  display:flex;gap:8px;overflow-x:auto;
+  padding:12px 16px;
+  max-width:1080px;margin:0 auto;
+  scrollbar-width:none;-ms-overflow-style:none;
+}
+.rail::-webkit-scrollbar{display:none}
+.rail a{
+  flex-shrink:0;display:inline-flex;align-items:center;gap:9px;
+  height:var(--touch);padding:0 15px;border-radius:999px;
+  border:1px solid var(--line);background:var(--pitch-2);
+  transition:border-color .2s,background .2s;
+  line-height:1;
+}
+.rail a:hover{border-color:var(--saffron)}
+.rail a .fl{font-size:16px}
+.rail a .mo{
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  color:var(--muted);text-transform:uppercase;
+  padding-right:9px;border-right:1px solid var(--line);
+}
+.rail a .op{font-size:12.5px;font-weight:700;white-space:nowrap}
+.rail a.past{opacity:.5}
+.rail a.past:hover{opacity:.85}
+.rail a.live{border-color:var(--saffron);background:var(--saffron-soft)}
+.rail a.live .mo{color:var(--saffron-deep);border-right-color:rgba(233,123,24,.4)}
+.rail-inner{position:relative;max-width:1080px;margin:0 auto}
+.rail-btn{
+  position:absolute;top:50%;transform:translateY(-50%);z-index:2;
+  width:36px;height:36px;border-radius:50%;
+  border:1px solid var(--line);background:var(--card);color:var(--paper);
+  display:none;align-items:center;justify-content:center;
+  box-shadow:0 4px 14px rgba(20,29,48,.14);
+  transition:border-color .2s;
+}
+.rail-btn:hover{border-color:var(--saffron)}
+.rail-btn.show{display:flex}
+.rail-btn.prev{left:8px}
+.rail-btn.next{right:8px}
+.rail-btn svg{width:15px;height:15px;stroke:var(--paper);stroke-width:3;fill:none;stroke-linecap:round;stroke-linejoin:round}
+
+/* ================= TOUR SECTION ================= */
+main{padding:56px 0 56px;display:flex;flex-direction:column;gap:34px}
+.tour{scroll-margin-top:112px;padding-bottom:14px;border-bottom:1px solid var(--line-soft)}
+.tour:last-child{border-bottom:0}
+
+.tour-head{
+  display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;
+  gap:10px 20px;padding-bottom:12px;border-bottom:2px solid var(--line);
+  cursor:pointer;
+}
+.tour-head:hover .btn-fold{border-color:var(--saffron)}
+.tour-head-l{min-width:0}
+.tour-kicker{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--muted);display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:8px;
+}
+.tour-kicker .loc{color:var(--paper);font-weight:700}
+.side{
+  display:inline-block;padding:2px 8px;border-radius:4px;
+  font-weight:700;letter-spacing:.14em;
+}
+.side.home{background:var(--saffron-soft);color:var(--saffron-deep)}
+.side.away{background:rgba(47,95,174,.12);color:var(--chakra)}
+.tour-title{
+  font-size:clamp(24px,6vw,42px);font-weight:900;letter-spacing:-.02em;
+  line-height:1.05;text-transform:uppercase;margin-top:2px;
+  display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;
+}
+.tour-title .fl{font-size:.75em}
+.status{
+  font-family:var(--mono);font-size:10px;letter-spacing:.16em;text-transform:uppercase;
+  padding:4px 10px;border-radius:999px;border:1px solid;align-self:center;
+}
+.status.up{color:var(--ok);border-color:rgba(37,128,74,.35)}
+.status.soon{color:var(--saffron-deep);border-color:rgba(233,123,24,.5);background:var(--saffron-soft)}
+.status.done{color:var(--muted);border-color:var(--line)}
+
+.tour-head-r{
+  display:flex;align-items:center;gap:14px;
+  font-family:var(--mono);font-size:12px;color:var(--paper-dim);
+}
+.tour-dates{white-space:nowrap}
+.btn-fold{
+  min-width:var(--touch);min-height:var(--touch);
+  display:grid;place-items:center;border-radius:12px;
+  border:1px solid var(--line);background:var(--pitch-2);
+  transition:transform .3s,border-color .2s;
+}
+.btn-fold svg{width:14px;height:14px;stroke:var(--paper);stroke-width:3;fill:none;stroke-linecap:round;stroke-linejoin:round}
+.tour.open .btn-fold{transform:rotate(180deg);border-color:var(--saffron)}
+
+.tour-meta{
+  margin-top:10px;display:flex;flex-wrap:wrap;gap:6px 8px;align-items:center;
+}
+.chip{
+  font-family:var(--mono);font-size:11px;padding:5px 11px;border-radius:6px;
+  border:1px solid var(--line);background:var(--pitch-2);color:var(--paper-dim);
+  white-space:nowrap;
+}
+.chip.fmt{color:var(--paper);border-color:var(--line);font-weight:700}
+.chip .ball{
+  display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px;
+  vertical-align:0;
+}
+.ball.red{background:var(--ball-red);box-shadow:0 0 0 1px rgba(0,0,0,.3) inset}
+.ball.white{background:var(--white-ball);box-shadow:0 0 0 1px rgba(0,0,0,.25) inset}
+
+/* collapsible body */
+.fold{max-height:0;overflow:hidden;transition:max-height .45s cubic-bezier(.4,0,.2,1)}
+.fold-inner{padding-top:18px;display:flex;flex-direction:column;gap:16px}
+
+/* filter tabs */
+.filters{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.tabs{display:inline-flex;gap:4px;background:var(--pitch-2);padding:4px;border-radius:10px;border:1px solid var(--line)}
+.tabs button{
+  min-height:36px;padding:0 14px;border-radius:7px;
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+  color:var(--muted);transition:color .2s,background .2s;
+}
+.tabs button:hover{color:var(--paper)}
+.tabs button.on{background:var(--saffron);color:#fff;font-weight:700}–
+.tz{font-family:var(--mono);font-size:11px;color:var(--muted)}
+
+/* ================= TICKET STUBS ================= */
+.tickets{display:grid;grid-template-columns:1fr;gap:14px}
+@media(min-width:680px){.tickets{grid-template-columns:1fr 1fr}}
+@media(min-width:1000px){.tickets{grid-template-columns:1fr 1fr 1fr}}
+
+.ticket{
+  position:relative;display:grid;grid-template-columns:92px 1fr;
+  background:linear-gradient(160deg,var(--card-2),var(--card));
+  border:1px solid var(--line);border-radius:var(--r);
+  overflow:hidden;
+  transition:transform .18s ease,border-color .2s,box-shadow .2s;
+}
+.ticket:hover{transform:translateY(-2px);border-color:var(--saffron);box-shadow:0 14px 30px rgba(20,29,48,.10)}
+.ticket.done{opacity:.62}
+.ticket.done:hover{opacity:.85}
+
+/* stub (left): big date, perforated tear line with notches */
+.stub{
+  position:relative;padding:14px 10px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;
+  border-right:2px dashed rgba(20,29,48,.18);
+  background:rgba(20,29,48,.035);
+  text-align:center;
+}
+.stub::before,.stub::after{
+  content:'';position:absolute;right:-9px;width:16px;height:16px;border-radius:50%;
+  background:var(--pitch);border:1px solid var(--line);
+}
+.stub::before{top:-9px}
+.stub::after{bottom:-9px}
+.stub .dow{font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted)}
+.stub .dd{font-family:var(--mono);font-size:26px;font-weight:700;line-height:1.05;color:var(--paper)}
+.stub .mm{font-family:var(--mono);font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--saffron-deep)}
+.stub .rng{font-family:var(--mono);font-size:13px;font-weight:700;line-height:1.3;color:var(--paper)}
+
+/* body (right) */
+.tk-body{padding:13px 14px 11px;min-width:0;display:flex;flex-direction:column}
+.tk-top{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px}
+.tk-num{
+  font-family:var(--mono);font-size:10.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;
+  display:inline-flex;align-items:center;gap:7px;
+  padding:3px 9px;border-radius:5px;
+}
+.tk-num.f-TEST{background:var(--ball-red-soft);color:var(--ball-red)}
+.tk-num.f-ODI{background:rgba(20,29,48,.06);color:var(--paper-dim)}
+.tk-num.f-T20I{background:var(--saffron-soft);color:var(--saffron-deep)}
+.tk-time{font-family:var(--mono);font-size:10.5px;color:var(--muted);white-space:nowrap}
+.tk-city{
+  font-size:17px;font-weight:800;letter-spacing:-.01em;line-height:1.25;
+}
+.tk-venue{margin-top:3px;font-size:12px;color:var(--muted);line-height:1.5}
+.tk-note{margin-top:8px;font-family:var(--mono);font-size:10.5px;color:var(--saffron-deep)}
+
+/* insight strip */
+.insight{
+  border-left:3px solid var(--saffron);
+  background:var(--pitch-2);border-radius:0 10px 10px 0;
+  padding:12px 15px;font-size:12.5px;line-height:1.65;color:var(--paper-dim);
+}
+.insight b{color:var(--paper)}
+
+/* footer */
+footer{
+  border-top:1px solid var(--line);padding:22px 0 40px;
+  font-family:var(--mono);font-size:10.5px;line-height:1.8;color:var(--muted);
+}
+
+/* mobile tightening */
+@media(max-width:640px){
+  /* keep fold button beside the title instead of wrapping below it */
+  .tour-head{flex-wrap:nowrap;align-items:center}
+  .tour-head-l{min-width:0;flex:1}
+  .tour-head-r .tour-dates{display:none}
+  /* kicker: one quiet line — drop format counts, they're inside the fold */
+  .fmt-sep,.fmts{display:none}
+  .tour-kicker{font-size:10px;letter-spacing:.12em;gap:6px;margin-bottom:6px}
+  .tour-title{font-size:clamp(22px,5.6vw,30px);gap:4px 10px}
+  .status{font-size:9px;padding:3px 8px;letter-spacing:.12em}
+  /* city chips: one horizontally scrollable row instead of a tall block */
+  .tour-meta{
+    flex-wrap:nowrap;overflow-x:auto;padding-bottom:4px;
+    scrollbar-width:none;-ms-overflow-style:none;
+  }
+  .tour-meta::-webkit-scrollbar{display:none}
+}
+@media(max-width:480px){
+  .hero{padding-top:24px}
+  .hstat{padding:8px 11px;min-width:0;flex:1}
+  .hstat b{font-size:17px}
+  .ticket{grid-template-columns:80px 1fr}
+  .stub .dd{font-size:22px}
+  .filters{flex-direction:column;align-items:flex-start}
+}
+</style>
+</head>
+<body>
+
+<div class="wrap hero">
+  <div class="ticket-hero">
+    <div class="th-body">
+      <div class="eyebrow">Team India · Senior Men · Fixture Book</div>
+      <h1>Season <em>2026&#8211;27</em></h1>
+      <p class="hero-sub">July in England to the Border-Gavaskar finale in Ahmedabad next March — every ticket below names the ground.</p>
+    </div>
+    <div class="th-stats mono">
+      <div class="hstat"><b>8</b><span>Tours</span></div>
+      <div class="hstat sfr"><b>47</b><span>Matches</span></div>
+      <div class="hstat red"><b>9</b><span>Tests</span></div>
+      <div class="hstat"><b>26</b><span>Grounds</span></div>
+    </div>
+    <div class="th-stub" aria-hidden="true">
+      <span class="th-vert">Admit All</span>
+      <span class="th-barcode"></span>
+      <span class="th-no">&#8470; IND-26/27</span>
+    </div>
+  </div>
+</div>
+
+<nav class="rail-outer" aria-label="Season timeline">
+  <div class="rail-inner">
+    <button class="rail-btn prev" id="railPrev" aria-label="Scroll timeline left"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+    <button class="rail-btn next" id="railNext" aria-label="Scroll timeline right"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+    <div class="rail" id="rail"></div>
+  </div>
+</nav>
+
+<main class="wrap" id="tours"></main>
+
+<div class="wrap">
+  <footer>
+    Home fixtures per BCCI's official 2026-27 season announcement · Away tours per ECB, Zimbabwe Cricket, SLC and NZC · Fixtures subject to change.<br>
+    India's men also defend Asian Games gold in Aichi-Nagoya, Japan (Sep 19 – Oct 4, 2026); that draw is announced separately.
+    Home-venue stadiums shown are each city's international ground.
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+const TOURS = [
+  {
+    id:'eng', title:'Tour of England', opponent:'England', oppFlag:'\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}',
+    home:false, country:'England & Wales', dates:'Jul 1 – 19, 2026', month:'JUL',
+    status:'Completed', tag:'White-ball tour', fmtCounts:'5 T20I · 3 ODI', fmtList:['T20I','ODI'], open:false,
+    insight:'<b>England swept the T20Is 4-0 and took the ODIs 2-1.</b> Shubman Gill debuted as ODI captain; the Lord\u2019s finale on Jul 19 closed the tour.',
+    matches:[
+      {num:'1st T20I',format:'T20I',dow:'Wed',dd:'01',mm:'Jul',time:'10:00 PM IST',stadium:'Riverside Ground',city:'Chester-le-Street',country:'England',done:true,note:'5:30 PM local · day-night'},
+      {num:'2nd T20I',format:'T20I',dow:'Sat',dd:'04',mm:'Jul',time:'7:00 PM IST',stadium:'Old Trafford',city:'Manchester',country:'England',done:true,note:'2:30 PM local'},
+      {num:'3rd T20I',format:'T20I',dow:'Tue',dd:'07',mm:'Jul',time:'10:00 PM IST',stadium:'Trent Bridge',city:'Nottingham',country:'England',done:true,note:''},
+      {num:'4th T20I',format:'T20I',dow:'Thu',dd:'09',mm:'Jul',time:'10:00 PM IST',stadium:'County Ground',city:'Bristol',country:'England',done:true,note:''},
+      {num:'5th T20I',format:'T20I',dow:'Sat',dd:'11',mm:'Jul',time:'7:00 PM IST',stadium:'Utilita Bowl',city:'Southampton',country:'England',done:true,note:''},
+      {num:'1st ODI',format:'ODI',dow:'Tue',dd:'14',mm:'Jul',time:'Day-night',stadium:'Edgbaston',city:'Birmingham',country:'England',done:true,note:'Gill\u2019s first ODI as captain'},
+      {num:'2nd ODI',format:'ODI',dow:'Thu',dd:'16',mm:'Jul',time:'Day-night',stadium:'Sophia Gardens',city:'Cardiff',country:'Wales',done:true,note:'Only fixture in Wales'},
+      {num:'3rd ODI',format:'ODI',dow:'Sun',dd:'19',mm:'Jul',time:'Series finale',stadium:'Lord\u2019s',city:'London',country:'England',done:true,note:'Home of Cricket'}
+    ]
+  },
+  {
+    id:'zimaway', title:'Tour of Zimbabwe', opponent:'Zimbabwe', oppFlag:'\u{1F1FF}\u{1F1FC}',
+    home:false, country:'Zimbabwe', dates:'Jul 23 – 26, 2026', month:'JUL',
+    status:'Starting Soon', tag:'Shreyas Iyer captains', fmtCounts:'3 T20I', fmtList:['T20I'], open:true,
+    insight:'All three T20Is at <b>Harare Sports Club</b>. A young side led by Shreyas Iyer (Tilak Varma vice-captain) rebuilds after T20I series defeats to Ireland and England. VVS Laxman is stand-in head coach.',
+    matches:[
+      {num:'1st T20I',format:'T20I',dow:'Thu',dd:'23',mm:'Jul',time:'4:30 PM IST',stadium:'Harare Sports Club',city:'Harare',country:'Zimbabwe',done:false,note:'1:00 PM local'},
+      {num:'2nd T20I',format:'T20I',dow:'Sat',dd:'25',mm:'Jul',time:'4:30 PM IST',stadium:'Harare Sports Club',city:'Harare',country:'Zimbabwe',done:false,note:''},
+      {num:'3rd T20I',format:'T20I',dow:'Sun',dd:'26',mm:'Jul',time:'4:30 PM IST',stadium:'Harare Sports Club',city:'Harare',country:'Zimbabwe',done:false,note:'Back-to-back with 2nd T20I'}
+    ]
+  },
+  {
+    id:'slaway', title:'Tour of Sri Lanka', opponent:'Sri Lanka', oppFlag:'\u{1F1F1}\u{1F1F0}',
+    home:false, country:'Sri Lanka', dates:'Aug 15 – 27, 2026', month:'AUG',
+    status:'Upcoming', tag:'WTC 2025-27', fmtCounts:'2 Tests', fmtList:['TEST'], open:true,
+    insight:'Both Tests count toward the <b>WTC 2025-27 cycle</b> — India sit 5th (48.15 PCT), Sri Lanka 6th. First Test tour of the island since the 3-0 sweep in 2017; spin-friendly surfaces expected.',
+    matches:[
+      {num:'1st Test',format:'TEST',dow:'Sat',rng:'15\u201319',mm:'Aug',time:'10:00 AM',stadium:'Galle International Cricket Stadium',city:'Galle',country:'Sri Lanka',done:false,note:'Series opener by the fort'},
+      {num:'2nd Test',format:'TEST',dow:'Sun',rng:'23\u201327',mm:'Aug',time:'10:00 AM',stadium:'Sinhalese Sports Club',city:'Colombo',country:'Sri Lanka',done:false,note:'Decider at the SSC'}
+    ]
+  },
+  {
+    id:'wi', title:'West Indies in India', opponent:'West Indies', oppFlag:'\u{1F334}',
+    home:true, country:'India', dates:'Sep 27 – Oct 17, 2026', month:'SEP',
+    status:'Upcoming', tag:'Home season opener', fmtCounts:'3 ODI · 5 T20I', fmtList:['ODI','T20I'], open:true,
+    insight:'India\u2019s <b>2026-27 home international season begins here</b> — the first of 22 home matches across 17 cities announced by the BCCI.',
+    matches:[
+      {num:'1st ODI',format:'ODI',dow:'Sun',dd:'27',mm:'Sep',time:'2:00 PM IST',stadium:'Greenfield International Stadium',city:'Trivandrum',country:'India',done:false,note:'Kerala'},
+      {num:'2nd ODI',format:'ODI',dow:'Wed',dd:'30',mm:'Sep',time:'2:00 PM IST',stadium:'ACA Stadium, Barsapara',city:'Guwahati',country:'India',done:false,note:'Assam'},
+      {num:'3rd ODI',format:'ODI',dow:'Sat',dd:'03',mm:'Oct',time:'2:00 PM IST',stadium:'Maharaja Yadavindra Singh Stadium, Mullanpur',city:'New Chandigarh',country:'India',done:false,note:'Punjab'},
+      {num:'1st T20I',format:'T20I',dow:'Tue',dd:'06',mm:'Oct',time:'7:00 PM IST',stadium:'Ekana Cricket Stadium',city:'Lucknow',country:'India',done:false,note:'Uttar Pradesh'},
+      {num:'2nd T20I',format:'T20I',dow:'Fri',dd:'09',mm:'Oct',time:'7:00 PM IST',stadium:'JSCA International Stadium',city:'Ranchi',country:'India',done:false,note:'Jharkhand'},
+      {num:'3rd T20I',format:'T20I',dow:'Sun',dd:'11',mm:'Oct',time:'7:00 PM IST',stadium:'Holkar Cricket Stadium',city:'Indore',country:'India',done:false,note:'Madhya Pradesh'},
+      {num:'4th T20I',format:'T20I',dow:'Wed',dd:'14',mm:'Oct',time:'7:00 PM IST',stadium:'Rajiv Gandhi International Stadium',city:'Hyderabad',country:'India',done:false,note:'Telangana'},
+      {num:'5th T20I',format:'T20I',dow:'Sat',dd:'17',mm:'Oct',time:'7:00 PM IST',stadium:'M. Chinnaswamy Stadium',city:'Bengaluru',country:'India',done:false,note:'Karnataka'}
+    ]
+  },
+  {
+    id:'nz', title:'Tour of New Zealand', opponent:'New Zealand', oppFlag:'\u{1F1F3}\u{1F1FF}',
+    home:false, country:'New Zealand', dates:'Oct 22 – Dec 1, 2026', month:'OCT',
+    status:'Upcoming', tag:'Largest inbound tour in NZ history', fmtCounts:'5 T20I · 5 ODI · 2 Tests', fmtList:['T20I','ODI','TEST'], open:true,
+    insight:'Only India\u2019s <b>third all-format tour of New Zealand</b> (after 2008-09 and 2019-20). A T20 World Cup final rematch, a 5-ODI audition for the 2027 World Cup, then two WTC Tests.',
+    matches:[
+      {num:'1st T20I',format:'T20I',dow:'Thu',dd:'22',mm:'Oct',time:'1:30 PM IST',stadium:'Hagley Oval',city:'Christchurch',country:'New Zealand',done:false,note:''},
+      {num:'2nd T20I',format:'T20I',dow:'Sat',dd:'24',mm:'Oct',time:'1:30 PM IST',stadium:'Hagley Oval',city:'Christchurch',country:'New Zealand',done:false,note:''},
+      {num:'3rd T20I',format:'T20I',dow:'Tue',dd:'27',mm:'Oct',time:'1:30 PM IST',stadium:'HNRY Stadium',city:'Wellington',country:'New Zealand',done:false,note:''},
+      {num:'4th T20I',format:'T20I',dow:'Fri',dd:'30',mm:'Oct',time:'1:30 PM IST',stadium:'Eden Park',city:'Auckland',country:'New Zealand',done:false,note:''},
+      {num:'5th T20I',format:'T20I',dow:'Sun',dd:'01',mm:'Nov',time:'1:30 PM IST',stadium:'Seddon Park',city:'Hamilton',country:'New Zealand',done:false,note:''},
+      {num:'1st ODI',format:'ODI',dow:'Wed',dd:'04',mm:'Nov',time:'8:30 AM IST',stadium:'Eden Park',city:'Auckland',country:'New Zealand',done:false,note:'Day-night'},
+      {num:'2nd ODI',format:'ODI',dow:'Sat',dd:'07',mm:'Nov',time:'8:30 AM IST',stadium:'HNRY Stadium',city:'Wellington',country:'New Zealand',done:false,note:'Day-night'},
+      {num:'3rd ODI',format:'ODI',dow:'Tue',dd:'10',mm:'Nov',time:'8:30 AM IST',stadium:'Seddon Park',city:'Hamilton',country:'New Zealand',done:false,note:'Day-night'},
+      {num:'4th ODI',format:'ODI',dow:'Fri',dd:'13',mm:'Nov',time:'8:30 AM IST',stadium:'Bay Oval',city:'Mount Maunganui',country:'New Zealand',done:false,note:'Day-night'},
+      {num:'5th ODI',format:'ODI',dow:'Sun',dd:'15',mm:'Nov',time:'8:30 AM IST',stadium:'Bay Oval',city:'Mount Maunganui',country:'New Zealand',done:false,note:'Day-night'},
+      {num:'1st Test',format:'TEST',dow:'Thu',rng:'19\u201323',mm:'Nov',time:'3:30 AM IST',stadium:'Basin Reserve',city:'Wellington',country:'New Zealand',done:false,note:'WTC 2025-27'},
+      {num:'2nd Test',format:'TEST',dow:'Fri',rng:'27\u20131',mm:'Nov-Dec',time:'3:30 AM IST',stadium:'Hagley Oval',city:'Christchurch',country:'New Zealand',done:false,note:'WTC 2025-27'}
+    ]
+  },
+  {
+    id:'slhome', title:'Sri Lanka in India', opponent:'Sri Lanka', oppFlag:'\u{1F1F1}\u{1F1F0}',
+    home:true, country:'India', dates:'Dec 13 – 27, 2026', month:'DEC',
+    status:'Upcoming', tag:'Year-end white-ball series', fmtCounts:'3 ODI · 3 T20I', fmtList:['ODI','T20I'], open:true,
+    insight:'A December white-ball assignment doubling as <b>ODI World Cup 2027 preparation</b>, closing India\u2019s 2026 calendar with a Pune T20I on Dec 27.',
+    matches:[
+      {num:'1st ODI',format:'ODI',dow:'Sun',dd:'13',mm:'Dec',time:'2:00 PM IST',stadium:'Arun Jaitley Stadium',city:'Delhi',country:'India',done:false,note:'Day-night'},
+      {num:'2nd ODI',format:'ODI',dow:'Wed',dd:'16',mm:'Dec',time:'2:00 PM IST',stadium:'M. Chinnaswamy Stadium',city:'Bengaluru',country:'India',done:false,note:'Day-night'},
+      {num:'3rd ODI',format:'ODI',dow:'Sat',dd:'19',mm:'Dec',time:'2:00 PM IST',stadium:'Narendra Modi Stadium',city:'Ahmedabad',country:'India',done:false,note:'Day-night'},
+      {num:'1st T20I',format:'T20I',dow:'Tue',dd:'22',mm:'Dec',time:'7:00 PM IST',stadium:'Niranjan Shah Stadium',city:'Rajkot',country:'India',done:false,note:'Gujarat'},
+      {num:'2nd T20I',format:'T20I',dow:'Thu',dd:'24',mm:'Dec',time:'7:00 PM IST',stadium:'Barabati Stadium',city:'Cuttack',country:'India',done:false,note:'Odisha'},
+      {num:'3rd T20I',format:'T20I',dow:'Sun',dd:'27',mm:'Dec',time:'7:00 PM IST',stadium:'MCA Stadium, Gahunje',city:'Pune',country:'India',done:false,note:'Maharashtra'}
+    ]
+  },
+  {
+    id:'zimhome', title:'Zimbabwe in India', opponent:'Zimbabwe', oppFlag:'\u{1F1FF}\u{1F1FC}',
+    home:true, country:'India', dates:'Jan 3 – 9, 2027', month:'JAN',
+    status:'Upcoming', tag:'New year ODIs', fmtCounts:'3 ODI', fmtList:['ODI'], open:true,
+    insight:'Zimbabwe\u2019s <b>first bilateral tour of India in over a decade</b> — three afternoon ODIs at three iconic grounds, feeding straight into World Cup 2027 planning.',
+    matches:[
+      {num:'1st ODI',format:'ODI',dow:'Sun',dd:'03',mm:'Jan',time:'2:00 PM IST',stadium:'Eden Gardens',city:'Kolkata',country:'India',done:false,note:'West Bengal'},
+      {num:'2nd ODI',format:'ODI',dow:'Wed',dd:'06',mm:'Jan',time:'2:00 PM IST',stadium:'Rajiv Gandhi International Stadium',city:'Hyderabad',country:'India',done:false,note:'Telangana'},
+      {num:'3rd ODI',format:'ODI',dow:'Sat',dd:'09',mm:'Jan',time:'2:00 PM IST',stadium:'Wankhede Stadium',city:'Mumbai',country:'India',done:false,note:'Maharashtra'}
+    ]
+  },
+  {
+    id:'aus', title:'Border-Gavaskar Trophy', opponent:'Australia', oppFlag:'\u{1F1E6}\u{1F1FA}',
+    home:true, country:'India', dates:'Jan 21 – Mar 3, 2027', month:'JAN',
+    status:'Upcoming', tag:'Season showpiece · WTC 2025-27', fmtCounts:'5 Tests', fmtList:['TEST'], open:true,
+    insight:'The marquee series of the season — a full <b>five-Test Border-Gavaskar Trophy at home</b>, likely decisive for India\u2019s WTC final hopes. Guwahati hosts a BGT Test for the first time.',
+    matches:[
+      {num:'1st Test',format:'TEST',dow:'Thu',rng:'21\u201325',mm:'Jan',time:'9:30 AM IST',stadium:'VCA Stadium, Jamtha',city:'Nagpur',country:'India',done:false,note:'Maharashtra'},
+      {num:'2nd Test',format:'TEST',dow:'Fri',rng:'29\u20132',mm:'Jan-Feb',time:'9:30 AM IST',stadium:'MA Chidambaram Stadium (Chepauk)',city:'Chennai',country:'India',done:false,note:'Tamil Nadu'},
+      {num:'3rd Test',format:'TEST',dow:'Thu',rng:'11\u201315',mm:'Feb',time:'9:00 AM IST',stadium:'ACA Stadium, Barsapara',city:'Guwahati',country:'India',done:false,note:'Assam · earlier start'},
+      {num:'4th Test',format:'TEST',dow:'Fri',rng:'19\u201323',mm:'Feb',time:'9:30 AM IST',stadium:'JSCA International Stadium',city:'Ranchi',country:'India',done:false,note:'Jharkhand'},
+      {num:'5th Test',format:'TEST',dow:'Sat',rng:'27\u20133',mm:'Feb-Mar',time:'9:30 AM IST',stadium:'Narendra Modi Stadium',city:'Ahmedabad',country:'India',done:false,note:'Gujarat · series finale'}
+    ]
+  }
+];
+
+const filters = {};
+TOURS.forEach(t => filters[t.id] = 'ALL');
+
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function ballFor(f){return f==='TEST' ? '<span class="ball red"></span>' : '<span class="ball white"></span>';}
+function statusCls(s){return s==='Completed'?'done':(s==='Starting Soon'?'soon':'up');}
+
+function ticketHTML(t,m){
+  const dateBlock = m.rng
+    ? `<span class="dow">${esc(m.dow)}</span><span class="rng">${esc(m.rng)}</span><span class="mm">${esc(m.mm)}</span>`
+    : `<span class="dow">${esc(m.dow)}</span><span class="dd">${esc(m.dd)}</span><span class="mm">${esc(m.mm)}</span>`;
+  return `
+  <article class="ticket ${m.done?'done':''}">
+    <div class="stub" aria-hidden="true">${dateBlock}</div>
+    <div class="tk-body">
+      <div class="tk-top">
+        <span class="tk-num f-${m.format}">${ballFor(m.format)}${esc(m.num)}</span>
+        <span class="tk-time">${esc(m.time)}</span>
+      </div>
+      <div class="tk-city">${esc(m.city)}</div>
+      <div class="tk-venue">${esc(m.stadium)} · ${esc(m.country)}</div>
+      ${m.note ? `<div class="tk-note">${esc(m.note)}</div>` : ''}
+    </div>
+  </article>`;
+}
+
+function foldHTML(t){
+  const f = filters[t.id];
+  const tickets = t.matches.filter(m => f==='ALL' || m.format===f).map(m => ticketHTML(t,m)).join('');
+  const tabs = ['ALL',...t.fmtList].map(x =>
+    `<button class="${x===f?'on':''}" data-tour="${t.id}" data-fmt="${x}">${x}</button>`).join('');
+  const showTabs = t.fmtList.length > 1;
+  return `
+  <div class="fold-inner">
+    ${showTabs ? `<div class="filters"><div class="tabs">${tabs}</div><span class="tz">${t.home?'All times IST':'Times shown in IST'}</span></div>`
+               : `<div class="filters"><span class="tz">${t.home?'All times IST':'Times shown in IST'}</span></div>`}
+    <div class="tickets">${tickets}</div>
+    <div class="insight">${t.insight}</div>
+  </div>`;
+}
+
+function tourHTML(t){
+  return `
+  <section class="tour ${t.open?'open':''}" id="${t.id}">
+    <div class="tour-head">
+      <div class="tour-head-l">
+        <div class="tour-kicker">
+          <span class="side ${t.home?'home':'away'}">${t.home?'Home':'Away'}</span>
+          <span class="loc">${esc(t.country)}</span>
+          <span class="sep">·</span><span>${esc(t.dates)}</span>
+          <span class="sep fmt-sep">·</span><span class="fmts">${esc(t.fmtCounts)}</span>
+        </div>
+        <h2 class="tour-title"><span class="fl">${t.oppFlag}</span>${esc(t.title)}
+          <span class="status ${statusCls(t.status)}">${esc(t.status)}</span></h2>
+      </div>
+      <div class="tour-head-r">
+        <span class="tour-dates mono">${t.matches.length} matches</span>
+        <button class="btn-fold" data-tour="${t.id}" aria-expanded="${t.open}" aria-label="Toggle ${esc(t.title)}">
+          <svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+      </div>
+    </div>
+    <div class="tour-meta">
+      ${[...new Set(t.matches.map(m=>m.city))].map(c=>`<span class="chip">${esc(c)}</span>`).join('')}
+    </div>
+    <div class="fold" id="fold-${t.id}">${foldHTML(t)}</div>
+  </section>`;
+}
+
+function railHTML(){
+  return TOURS.map(t=>{
+    const cls = t.status==='Completed' ? 'past' : (t.status==='Starting Soon' ? 'live' : '');
+    return `<a href="#${t.id}" class="${cls}">
+      <span class="fl">${t.oppFlag}</span>
+      <span class="mo">${t.month}</span>
+      <span class="op">${esc(t.opponent)}</span>
+    </a>`;
+  }).join('');
+}
+
+function syncFold(id, open, animate){
+  const el = document.getElementById('fold-'+id);
+  const sec = document.getElementById(id);
+  if(!el) return;
+  if(!animate) el.style.transition='none';
+  el.style.maxHeight = open ? el.scrollHeight+'px' : '0px';
+  sec.classList.toggle('open', open);
+  const btn = sec.querySelector('.btn-fold');
+  if(btn) btn.setAttribute('aria-expanded', open);
+  if(!animate){ void el.offsetHeight; el.style.transition=''; }
+}
+
+function initOpen(){
+  // only the nearest upcoming tour opens by default
+  const target = TOURS.find(t => t.status === 'Starting Soon')
+              || TOURS.find(t => t.status === 'Upcoming');
+  TOURS.forEach(t => { t.open = (t === target); });
+}
+
+function render(){
+  document.getElementById('rail').innerHTML = railHTML();
+  document.getElementById('tours').innerHTML = TOURS.map(tourHTML).join('');
+  TOURS.forEach(t => syncFold(t.id, t.open, false));
+}
+
+document.addEventListener('click', e => {
+  const head = e.target.closest('.tour-head');
+  if(head){
+    const t = TOURS.find(x => x.id === head.closest('.tour').id);
+    const willOpen = !t.open;
+    TOURS.forEach(x => { if(x.open && x !== t){ x.open = false; syncFold(x.id, false, true); } });
+    t.open = willOpen;
+    syncFold(t.id, t.open, true);
+    return;
+  }
+  const tab = e.target.closest('.tabs button');
+  if(tab){
+    const id = tab.dataset.tour;
+    filters[id] = tab.dataset.fmt;
+    const t = TOURS.find(x => x.id === id);
+    const el = document.getElementById('fold-'+id);
+    el.innerHTML = foldHTML(t);
+    if(t.open){
+      el.style.transition='none';
+      el.style.maxHeight = el.scrollHeight+'px';
+      void el.offsetHeight;
+      el.style.transition='';
+    }
+  }
+});
+
+let rz=null;
+window.addEventListener('resize', () => {
+  clearTimeout(rz);
+  rz=setTimeout(()=>TOURS.forEach(t=>t.open&&syncFold(t.id,true,false)),150);
+});
+
+// tapping a rail pill expands that tour (closing others) and scrolls to it
+const SMOOTH = matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+document.addEventListener('click', e => {
+  const link = e.target.closest('.rail a');
+  if(link){
+    e.preventDefault();
+    const id = link.getAttribute('href').slice(1);
+    const t = TOURS.find(x => x.id === id);
+    if(!t) return;
+    // sync folds instantly so heights are final before we measure scroll target
+    TOURS.forEach(x => { if(x.open && x !== t){ x.open = false; syncFold(x.id, false, false); } });
+    if(!t.open){ t.open = true; syncFold(id, true, false); }
+    const sec = document.getElementById(id);
+    const railH = document.querySelector('.rail-outer').offsetHeight;
+    const top = sec.getBoundingClientRect().top + window.scrollY - railH - 24;
+    window.scrollTo({top, behavior: SMOOTH});
+    history.replaceState(null, '', '#' + id);
+  }
+});
+
+// rail overflow: edge buttons + vertical-wheel-to-horizontal scroll
+const railEl = document.getElementById('rail');
+const railPrev = document.getElementById('railPrev');
+const railNext = document.getElementById('railNext');
+function updateRailBtns(){
+  const overflow = railEl.scrollWidth > railEl.clientWidth + 4;
+  railPrev.classList.toggle('show', overflow && railEl.scrollLeft > 4);
+  railNext.classList.toggle('show', overflow && railEl.scrollLeft + railEl.clientWidth < railEl.scrollWidth - 4);
+}
+railPrev.addEventListener('click', () => railEl.scrollBy({left: -railEl.clientWidth * 0.7, behavior: SMOOTH}));
+railNext.addEventListener('click', () => railEl.scrollBy({left: railEl.clientWidth * 0.7, behavior: SMOOTH}));
+railEl.addEventListener('scroll', updateRailBtns, {passive: true});
+railEl.addEventListener('wheel', e => {
+  if(Math.abs(e.deltaY) > Math.abs(e.deltaX)){
+    e.preventDefault();
+    railEl.scrollLeft += e.deltaY;
+  }
+}, {passive: false});
+window.addEventListener('resize', updateRailBtns);
+
+initOpen();
+render();
+updateRailBtns();
+</script>
+</body>
+</html>
