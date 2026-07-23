@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ch. 4 · Visual SLAM: the State of the Art · SLAM: Zero to Hero</title>
+<title>Ch. 4 · Visual SLAM: The State of the Art · SLAM: Zero to Hero</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -16,7 +16,7 @@
 <header class="chapter-head">
   <div class="chapter-num">04</div>
   <div class="chapter-kicker">Chapter Four · Cameras, Six Eras</div>
-  <h1>Visual SLAM: the State of the Art</h1>
+  <h1>Visual SLAM: The State of the Art</h1>
   <p class="chapter-sub">Ten years ago the answer was "ORB-SLAM." Today the answer is a taxonomy. Learn the six eras and you can place any paper, product, or interview question on the map in one sentence.</p>
 </header>
 
@@ -94,7 +94,7 @@
 </ul>
 <div class="keypoint">VIO is what you run when the map is a means; SLAM is what you run when the map is an end. Interviewers use "how would you estimate the drone's state" to test whether you reach for the smaller, correct tool.</div>
 
-<h2><span class="sec-no">4.5</span>Era 3, Learned Front-Ends: the Pragmatic Production Answer</h2>
+<h2><span class="sec-no">4.5</span>Era 3, Learned Front-Ends: The Pragmatic Production Answer</h2>
 <p>The observation behind era 3: classical geometric back-ends are near-optimal, and what actually breaks in the field is <em>appearance</em>. Detecting and matching features under blur, weak texture, glare, and day/night change is where missions die. So replace exactly those parts with networks and keep the geometric guarantees:</p>
 <ul>
   <li><strong><a href="https://arxiv.org/abs/1712.07629">SuperPoint (DeTone et al., 2018)</a></strong>: learned keypoint detector and descriptor. The training story is worth retelling: it teaches itself on synthetic corners, then bootstraps to real images by "homographic adaptation," no human labels anywhere. Alternatives with different trade-offs: DISK (differentiable, denser) and ALIKED (lighter, deformable).</li>
@@ -133,7 +133,7 @@ python demo.py \
 <p>Sanity checks: (1) VRAM overflow → lower <code>PATCHES_PER_FRAME</code> or <code>BUFFER_SIZE</code> in <code>config/default.yaml</code>, the knobs that trade memory for robustness; (2) trajectory in wrong scale → normal, this is monocular VO, align with scale correction in evo; (3) stutter at start → the first seconds initialize the patch graph, judge nothing before frame 100; (4) wrong calib file → poses go to soup immediately, check image resolution matches the calib line.</p>
 </div>
 
-<h2><span class="sec-no">4.7</span>Era 5, Neural-Rendering SLAM: the Map Is a Renderer</h2>
+<h2><span class="sec-no">4.7</span>Era 5, Neural-Rendering SLAM: The Map Is a Renderer</h2>
 <p>Radical inversion: make the <em>map</em> a differentiable rendering function. To track the camera, render what the map predicts you would see from a guessed pose, and optimize the pose (and the map) until the render matches the real image. Tracking and mapping become the same operation, gradient descent on image difference.</p>
 <ul>
   <li><strong>The NeRF wave:</strong> iMAP (Sucar et al., 2021) put a single MLP map inside a live SLAM loop; <a href="https://arxiv.org/abs/2112.12130">NICE-SLAM (2022)</a> swapped in hierarchical feature grids so bigger rooms fit; Co-SLAM, ESLAM, and Point-SLAM (2023) refined the representation. The shared bottleneck: NeRF rendering is slow, and SLAM needs to render constantly.</li>
@@ -142,7 +142,7 @@ python demo.py \
 <p><strong>Why care:</strong> the output is a dense, photorealistic map you can re-render from any viewpoint. For inspection, telepresence, digital twins, and simulation assets, that is the product.</p>
 <p><strong>The honest critique to voice out loud</strong> (interviewers respect it): benchmarks are mostly room-scale RGB-D; drift handling, loop closure, and metric scale outdoors still lag geometric systems; and compute is heavy. As of early 2026 this is the <em>reconstruction</em> answer, not the <em>navigation-stack</em> answer. A robot that needs a costmap tonight should read Chapter 3.</p>
 
-<h2><span class="sec-no">4.8</span>Era 6, Feed-Forward Geometry: the Frontier</h2>
+<h2><span class="sec-no">4.8</span>Era 6, Feed-Forward Geometry: The Frontier</h2>
 <p>Every previous era <em>solves</em> for geometry per scene. Era 6 asks: what if a transformer, trained on millions of scenes, just <em>predicts</em> the geometry in one forward pass?</p>
 <ul>
   <li><strong><a href="https://arxiv.org/abs/2312.14132">DUSt3R (Wang et al., CVPR 2024)</a></strong>: feed two images into a transformer, uncalibrated, it does not even need the camera intrinsics. Out come dense <strong>pointmaps</strong>: a 3D point for every pixel, already expressed in a shared coordinate frame. No feature matching, no triangulation; the network has internalized geometry as a prior. <strong>MASt3R</strong> (ECCV 2024) adds metric scale and a matching head.</li>

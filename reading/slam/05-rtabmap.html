@@ -53,7 +53,7 @@ update:   multiply by the BoW likelihood of the current image
   <dt>Keyframe</dt><dd>A frame selected for long-term storage. Keeping all 30 fps forever is pointless; consecutive frames are nearly identical.</dd>
 </dl>
 
-<h3>STM, WM, LTM: the Memory That Keeps the CPU Bounded</h3>
+<h3>STM, WM, LTM: The Memory That Keeps the CPU Bounded</h3>
 <p>A naive system compares each new frame against every past location, so cost grows with map size until real time dies. RTAB-Map's fix is shaped like human memory, and it is the reason the system exists:</p>
 <ul>
   <li><strong>Short-Term Memory (STM).</strong> New nodes enter here first (<code>Mem/STMSize</code>, default 10 nodes). STM nodes are exempt from loop-closure detection, because you would trivially "recognize" the place you saw one second ago. STM is also where node weights are set: if consecutive images look alike, the robot is lingering, and the location's weight goes up.</li>

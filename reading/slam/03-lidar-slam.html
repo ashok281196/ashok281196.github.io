@@ -195,7 +195,7 @@ until change in error &lt; epsilon, or max iterations
   <li><strong>Loop factors</strong>: relative poses from verified loop closures, wrapped in a robust kernel.</li>
   <li><strong>GPS factors</strong> (outdoor): unary position constraints, added sparsely, typically only when the GPS covariance is small and the graph has drifted enough to make them informative. LIO-SAM does exactly this.</li>
 </ul>
-<p><strong>Keyframing policy</strong> is the quiet decision that controls cost. You do not add every scan to the graph; you add a keyframe when the robot has moved enough for the new scan to say something new. Typical thresholds: 1 m of translation or 10 to 15 degrees of rotation, plus a time cap so a parked robot does not go silent. Too dense and the graph balloons with redundant, correlated factors; too sparse and loop closures have nothing nearby to latch onto and deskew priors get stale. Solvers are GTSAM's iSAM2 (incremental, re-linearizes only what changed) or Ceres in batch; see <a href="https://gtsam.org/">GTSAM</a> and <a href="http://ceres-solver.org/">Ceres</a>. When a loop closure fires and the whole map visibly snaps into place in rviz, what you are watching is this graph relaxing.</p>
+<p><strong>Keyframing policy</strong> is the quiet decision that controls cost. You do not add every scan to the graph; you add a keyframe when the robot has moved enough for the new scan to say something new. Typical thresholds: 1 m of translation or 10 to 15 degrees of rotation, plus a time cap so a parked robot does not go silent. Too dense and the graph balloons with redundant, correlated factors; too sparse and loop closures have nothing nearby to latch onto and deskew priors get stale. Solvers are GTSAM's iSAM2 (incremental, re-linearizes only what changed) or Ceres in batch; see <a href="https://gtsam.org/">GTSAM</a> and <a href="http://ceres-solver.org/">Ceres</a>. When a loop closure fires and the whole map visibly snaps into place in the viewer, what you are watching is this graph relaxing.</p>
 <dl class="jargon">
   <dt>Keyframe</dt><dd>A scan promoted to a graph node because it was sufficiently far, in distance or angle, from the previous one. Everything else is used for odometry and discarded.</dd>
   <dt>IMU preintegration</dt><dd>The trick (Forster et al., 2015) of summarizing all IMU samples between two keyframes into a single factor whose value can be corrected for bias changes without re-integrating. It is what makes IMUs usable in graph back-ends.</dd>
@@ -235,33 +235,28 @@ until change in error &lt; epsilon, or max iterations
   <tr><td>GLIM (2024)</td><td>factor graph, GPU matching</td><td>voxel/submap hybrid</td><td>tight</td><td>modular back end with real global optimization</td></tr>
 </table>
 <div class="setup">
-<p><strong>Setup B: FAST-LIO2 on a Public Bag, This Weekend</strong></p>
-<p><strong>Goal:</strong> run state-of-the-art LIO on recorded data and learn its three classic failure modes on purpose. <strong>Prereqs:</strong> the original <a href="https://github.com/hku-mars/FAST_LIO">FAST_LIO</a> is ROS 1; the cleanest path in 2026 is Ubuntu 20.04 + ROS Noetic in Docker, or a community ROS 2 port (several exist on GitHub under FAST_LIO_ROS2; APIs drift, so check the port's README against the original). Commands below are the ROS 1 original. You need ~8 GB RAM and no GPU.</p>
-<pre># deps: Livox SDK + driver (required even for non-Livox lidars, it is a build dep)
-mkdir -p ~/fastlio_ws/src &amp;&amp; cd ~/fastlio_ws/src
-git clone https://github.com/Livox-SDK/livox_ros_driver.git
-git clone --recursive https://github.com/hku-mars/FAST_LIO.git   # --recursive pulls ikd-Tree
-cd ~/fastlio_ws &amp;&amp; catkin_make &amp;&amp; source devel/setup.bash</pre>
-<p>Grab a bag: the FAST_LIO README links sample Livox Avia bags; for a spinning lidar, any Ouster+IMU dataset works (NTU VIRAL, or a Hilti SLAM Challenge sequence). The config file is where beginners die, so know these fields in <code>config/ouster64.yaml</code>:</p>
-<pre>common:
-    lid_topic: "/os_cloud_node/points"   # MUST match the bag: rosbag info your.bag
-    imu_topic: "/os_cloud_node/imu"
-    time_sync_en: false                  # true only if lidar and IMU clocks disagree
-preprocess:
-    lidar_type: 3                        # 1 Livox, 2 Velodyne, 3 Ouster
-    scan_line: 64
-    blind: 4                             # ignore returns closer than 4 m (the robot itself)
+<p><strong>Setup B: KISS-ICP on a Public Dataset, This Weekend</strong></p>
+<p><strong>Goal:</strong> run a state-of-the-art lidar odometry on recorded data with two shell commands, then break it on purpose to learn what deskew and voxel size actually do. KISS-ICP is a C++ core with Python bindings and a CLI; no framework, no build system, no drivers. <strong>Prereqs:</strong> Python 3.10+, ~8 GB RAM, no GPU.</p>
+<pre>pip install "kiss-icp[all]"    # [all] adds the built-in visualizer
+
+# grab data: a KITTI odometry sequence is the classic starting point
+# (kitti odometry "velodyne laser data", sequence 00, ~4 GB)
+# any folder of .bin / .ply / .pcd scans also works
+kiss_icp_pipeline --visualize ~/data/kitti-odometry/dataset/sequences/00</pre>
+<p>The pipeline auto-detects common dataset layouts (KITTI, MulRan, PARIS-LUCO, plain scan folders). Every knob lives in one small YAML you can pass with <code>--config</code>; these are the fields that matter:</p>
+<pre># config.yaml
+data:
+    deskew: true            # motion-compensate each scan; needs per-point timestamps
+    max_range: 100.0        # clamp to the sensor's honest range
+    min_range: 3.0          # drop returns off the robot's own body
 mapping:
-    acc_cov: 0.1
-    gyr_cov: 0.1
-    extrinsic_T: [ 0.0, 0.0, 0.0 ]       # lidar origin in IMU frame, meters
-    extrinsic_R: [ 1, 0, 0,
-                   0, 1, 0,
-                   0, 0, 1 ]             # from your calibration or the sensor datasheet</pre>
-<pre>roslaunch fast_lio mapping_ouster64.launch    # terminal 1, opens rviz
-rosbag play your_dataset.bag                  # terminal 2</pre>
-<p><strong>What you should see:</strong> a dense colored cloud growing in rviz with crisp, single-thickness walls, a smooth <code>/Odometry</code> stream at the lidar rate (10 Hz on most bags), and per-scan processing times well under the 100 ms budget in the console.</p>
-<p><strong>Sanity checks and classic symptoms:</strong> (1) The first 1 to 2 seconds of the bag must be stationary; FAST-LIO estimates gravity and gyro bias then, and a bag that starts mid-motion yields a map tilted or flying away immediately. (2) Verify per-point timestamps exist (<code>rostopic echo -n1 --noarr</code> the cloud and look for a <code>t</code> or <code>time</code> field); without them deskew silently degrades and walls curve during turns. (3) If the map is fine in translation but doubles or smears on every rotation, your <code>extrinsic_R</code> is wrong; if there is a constant offset that grows with speed, suspect <code>extrinsic_T</code> or time sync. (4) Watch RAM: the map is never pruned by default, and a 30-minute bag can eat several GB, which is your cue to look at the loop-closure-equipped systems instead.</p>
+    voxel_size: 1.0         # local map resolution, meters; the main speed/accuracy dial
+    max_points_per_voxel: 20
+adaptive_threshold:
+    initial_threshold: 2.0  # ICP correspondence gate, adapts as you drive</pre>
+<p><strong>What you should see:</strong> the visualizer shows the accumulated local map with crisp, single-thickness walls and the estimated trajectory; the console reports per-scan runtime (a few tens of ms on a laptop CPU) and writes the poses to <code>results/</code> in TUM and KITTI formats when the run ends, ready for Chapter 7's evo scoring.</p>
+<p><strong>Break it on purpose, then explain what you saw:</strong> (1) Set <code>deskew: false</code> and re-run: during fast turns walls curve and double, which is section 3.3 made visible. (2) Set <code>voxel_size: 3.0</code>: runtime drops, drift grows, the accuracy/speed dial in one experiment. (3) Find a corridor-heavy sequence and watch along-corridor drift with perfect-looking walls: degeneracy (section 3.9) does not show up in the residuals. (4) If your own sensor's scans lack per-point timestamps, deskew silently cannot help you; check the field exists before blaming the algorithm.</p>
+<p>The same experiment with tight IMU coupling is FAST-LIO2's territory (C++, builds against its bundled ikd-Tree); its config asks for exactly the Chapter 2 items: IMU noise densities, <code>extrinsic_T</code>/<code>extrinsic_R</code> between lidar and IMU, and honest per-point timestamps. A run that starts mid-motion tilts the whole map because gravity and gyro bias are estimated in the first stationary seconds.</p>
 </div>
 
 <h2><span class="sec-no">3.9</span>Degeneracy, the LiDAR Killer</h2>
@@ -294,46 +289,62 @@ rosbag play your_dataset.bag                  # terminal 2</pre>
 </div>
 
 <h2><span class="sec-no">3.10</span>2D SLAM Still Pays Salaries</h2>
-<p>A planar lidar on a flat floor is a solved problem with mature tooling, and a large share of deployed AMRs, cleaning robots, and warehouse fleets run exactly this. Do not let the 3D literature convince you 2D is beneath you; it is cheaper in every dimension that matters commercially: a $100 2D lidar versus a $4,000 3D one, single-digit percent CPU, and a map that Nav2 consumes directly with zero conversion (Chapter 8).</p>
+<p>A planar lidar on a flat floor is a solved problem with mature tooling, and a large share of deployed AMRs, cleaning robots, and warehouse fleets run exactly this. Do not let the 3D literature convince you 2D is beneath you; it is cheaper in every dimension that matters commercially: a $100 2D lidar versus a $4,000 3D one, single-digit percent CPU, and a map every grid planner consumes directly with zero conversion (Chapter 8).</p>
 <p><strong>gmapping</strong> is the name your interviewer over 40 will mention. It is a Rao-Blackwellized particle filter (Chapter 1): each particle carries a full map hypothesis, and importance weighting plus resampling keep the plausible ones alive. It worked, it shipped on the PR2 and a thousand robots after, and its weaknesses (particle depletion on big loops, memory per particle, no life-long operation) are exactly what its successor fixed. Treat it as history you can explain, not something you deploy in 2026.</p>
-<p><strong><a href="https://github.com/SteveMacenski/slam_toolbox">SLAM Toolbox (Macenski)</a></strong> is the ROS 2 default and the thing you will actually run. Under the hood it is Karto's scan matcher plus a Ceres pose graph, but its production features are the reason it won: <strong>lifelong mapping</strong> (open yesterday's map, keep refining it today), <strong>serialized pose graphs</strong> (save the graph itself, not just a rendered image, so the map stays editable and extendable), a <strong>localization mode</strong> (freeze the graph, keep matching against it), and interactive tools to delete bad nodes from a map you otherwise like. When flat-floor assumptions hold, choose it and move on to the actual product problem.</p>
+<p>The modern open-source reference is <strong><a href="https://github.com/SteveMacenski/slam_toolbox">SLAM Toolbox (Macenski)</a></strong>, a C++ codebase built from Karto's scan matcher plus a Ceres pose graph. Its production features are the reason it won: <strong>lifelong mapping</strong> (open yesterday's map, keep refining it today), <strong>serialized pose graphs</strong> (save the graph itself, not just a rendered image, so the map stays editable and extendable), a <strong>localization mode</strong> (freeze the graph, keep matching against it), and tools to delete bad nodes from a map you otherwise like. Whatever stack you assemble, those four features are the checklist a production 2D mapper has to meet.</p>
 <p>When is 2D the wrong call? Ramps and multi-floor sites (the planar assumption breaks), overhanging obstacles the scan plane misses (forklift tines at chest height are the canonical incident report), and outdoor terrain. The moment any of those appear, you pay the 3D tax. Until then, 2D wins on cost, compute, and maturity.</p>
 <div class="setup">
-<p><strong>Setup A: SLAM Toolbox on ROS 2 Jazzy, Zero Hardware</strong></p>
-<p><strong>Goal:</strong> build a 2D map in simulation, watch a loop closure snap in rviz, and save both map products for reuse in Chapter 8. <strong>Prereqs:</strong> Ubuntu 24.04, ROS 2 Jazzy installed. Everything runs in Gazebo, no robot needed.</p>
-<pre>sudo apt install ros-jazzy-slam-toolbox ros-jazzy-turtlebot3-gazebo \
-  ros-jazzy-turtlebot3-teleop ros-jazzy-nav2-map-server
-# if turtlebot3-gazebo is missing from your mirror, build the ROBOTIS
-# turtlebot3_simulations repo (jazzy branch) in a workspace instead
-export TURTLEBOT3_MODEL=burger
-ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py            # terminal 1</pre>
-<p>Save the parameters below as <code>mapper_params.yaml</code>. These are the ones that matter; everything omitted keeps the stock default from <code>mapper_params_online_async.yaml</code> in the package.</p>
-<pre>slam_toolbox:
-  ros__parameters:
-    mode: mapping
-    odom_frame: odom
-    map_frame: map
-    base_frame: base_footprint
-    scan_topic: /scan
-    resolution: 0.05               # 5 cm cells; halving this quadruples map cost
-    max_laser_range: 12.0          # clamp to the lidar's honest range, not its datasheet
-    minimum_travel_distance: 0.3   # add a graph node every 30 cm...
-    minimum_travel_heading: 0.3    # ...or ~17 deg of turn; raise both on big sites
-    map_update_interval: 5.0
-    do_loop_closing: true
-    loop_search_maximum_distance: 4.0        # radius search for candidates, meters
-    loop_match_minimum_response_coarse: 0.35 # raise if you ever see a false closure
-    loop_match_minimum_response_fine: 0.45</pre>
-<pre>ros2 launch slam_toolbox online_async_launch.py \
-  slam_params_file:=./mapper_params.yaml use_sim_time:=true          # terminal 2
-ros2 run turtlebot3_teleop teleop_keyboard                           # terminal 3
-rviz2   # add Map (topic /map) and LaserScan displays, fixed frame: map</pre>
-<p>Drive a full lap of the world and come back to where you started. Watch the map edges misalign slightly as drift accumulates, then <em>snap</em> into agreement when the loop closes: that snap is the pose graph relaxing, live. Then save both products:</p>
-<pre>mkdir -p ~/maps
-ros2 run nav2_map_server map_saver_cli -f ~/maps/tb3_world           # PGM + YAML for Nav2
-ros2 service call /slam_toolbox/serialize_map \
-  slam_toolbox/srv/SerializePoseGraph "{filename: '$HOME/maps/tb3_world'}"  # editable graph</pre>
-<p><strong>Sanity checks and classic symptoms:</strong> (1) <code>ros2 run tf2_tools view_frames</code> must show map → odom → base_footprint; if slam_toolbox is not publishing map → odom, your <code>base_frame</code> or <code>scan_topic</code> is wrong. (2) "Message filter dropping messages" spam means TF timing trouble; confirm <code>use_sim_time:=true</code> on every node. (3) Double walls after fast spins mean the scan matcher is being outrun: turn slower, or raise <code>minimum_travel_heading</code> so nodes are added less often mid-spin. (4) A map that shears once and never recovers usually means a false loop closure; raise the two <code>loop_match_minimum_response</code> thresholds and rebuild.</p>
+<p><strong>Setup A: a Complete Pose-Graph SLAM in 60 Lines of Python (Open3D)</strong></p>
+<p><strong>Goal:</strong> build the whole Chapter 3 skeleton yourself: scan matching for odometry, a loop-closure constraint, pose-graph optimization, and the before/after snap, on real data, in pure Python. <strong>Prereqs:</strong> <code>pip install open3d numpy</code> (Open3D ships demo point-cloud fragments, so no dataset download is needed).</p>
+<pre>import open3d as o3d
+import numpy as np
+
+# three overlapping indoor fragments from Open3D's bundled demo data
+paths = o3d.data.DemoICPPointClouds().paths
+clouds = [o3d.io.read_point_cloud(p).voxel_down_sample(0.05) for p in paths]
+for c in clouds:
+    c.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(0.1, 30))
+
+def register(src, dst):
+    # point-to-plane ICP, section 3.4 in one call
+    result = o3d.pipelines.registration.registration_icp(
+        src, dst, max_correspondence_distance=0.15,
+        estimation_method=o3d.pipelines.registration
+            .TransformationEstimationPointToPlane())
+    info = o3d.pipelines.registration.get_information_matrix_from_point_clouds(
+        src, dst, 0.15, result.transformation)
+    return result.transformation, info
+
+# odometry chain: 0->1, 1->2   (consecutive scan matching)
+graph = o3d.pipelines.registration.PoseGraph()
+graph.nodes.append(o3d.pipelines.registration.PoseGraphNode(np.eye(4)))
+odom = np.eye(4)
+for i in range(len(clouds) - 1):
+    T, info = register(clouds[i], clouds[i + 1])
+    odom = T @ odom
+    graph.nodes.append(o3d.pipelines.registration.PoseGraphNode(np.linalg.inv(odom)))
+    graph.edges.append(o3d.pipelines.registration.PoseGraphEdge(
+        i, i + 1, T, info, uncertain=False))
+
+# loop closure: 0->2 directly (the long-range spring from section 3.6)
+T02, info02 = register(clouds[0], clouds[2])
+graph.edges.append(o3d.pipelines.registration.PoseGraphEdge(
+    0, 2, T02, info02, uncertain=True))
+
+# relax the spring network
+o3d.pipelines.registration.global_optimization(
+    graph,
+    o3d.pipelines.registration.GlobalOptimizationLevenbergMarquardt(),
+    o3d.pipelines.registration.GlobalOptimizationConvergenceCriteria(),
+    o3d.pipelines.registration.GlobalOptimizationOption(
+        max_correspondence_distance=0.15, edge_prune_threshold=0.25))
+
+merged = o3d.geometry.PointCloud()
+for node, cloud in zip(graph.nodes, clouds):
+    merged += o3d.geometry.PointCloud(cloud).transform(node.pose)
+o3d.visualization.draw_geometries([merged])</pre>
+<p><strong>What you should see:</strong> a merged room where the three fragments agree: single-thickness walls, one table instead of three ghostly ones. Comment out the loop-closure edge block and re-run to see the drifted version; the difference between the two windows is the entire point of pose-graph SLAM.</p>
+<p><strong>Things to try:</strong> (1) Perturb the odometry chain (multiply one T by a small rotation) and watch global optimization pull it back using the loop edge. (2) Set <code>uncertain=False</code> on the loop edge and inflate its transform with a deliberate error: a trusted-but-wrong loop closure shears the whole map, which is why Chapter 1's robust kernels exist. (3) Swap in your own scans (.pcd/.ply of any room) and re-run; voxel size and correspondence distance are the two knobs to retune. (4) Halve <code>voxel_down_sample(0.025)</code>: accuracy up, runtime up, the same dial as every production system.</p>
 </div>
 
 <h2><span class="sec-no">3.11</span>Map Products</h2>
@@ -349,7 +360,7 @@ ros2 service call /slam_toolbox/serialize_map \
 <table>
   <tr><th>Map Product</th><th>Resolution</th><th>Ballpark Size</th></tr>
   <tr><td>2D occupancy grid (PGM + YAML)</td><td>5 cm</td><td>2000 x 2000 cells, 4 MB raw, under 1 MB compressed</td></tr>
-  <tr><td>SLAM Toolbox serialized posegraph</td><td>n/a</td><td>tens of MB (it stores the raw scans per node)</td></tr>
+  <tr><td>Serialized pose graph (graph + raw scans per node)</td><td>n/a</td><td>tens of MB</td></tr>
   <tr><td>Registered raw point cloud</td><td>full</td><td>10 to 30 M points, 160 to 500 MB as PCD</td></tr>
   <tr><td>OctoMap (.bt file)</td><td>10 cm</td><td>5 to 20 MB on disk, much more in RAM</td></tr>
   <tr><td>TSDF (voxblox)</td><td>10 cm, 40 cm truncation</td><td>30 to 100 MB in RAM, surface band only</td></tr>
@@ -397,10 +408,10 @@ ros2 service call /slam_toolbox/serialize_map \
 <p>Cartographer for 2D indoor mapping with a weak or absent IMU, when you want the built-in occupancy grid output and a pure-localization mode as one package. FAST-LIO2 for 3D, aggressive motion, and a decent IMU, when you need the fastest, most robust odometry and are willing to assemble loop closure and map products around it yourself. Different jobs: a complete 2D system versus a best-in-class 3D odometry engine.</p>
 </div></details>
 <details class="qa"><summary>When does 2D SLAM beat 3D, honestly?</summary><div class="a">
-<p>Flat single-floor sites with walls in the scan plane: warehouses, hospitals, offices. There, 2D wins on sensor cost (roughly 100 versus several thousand dollars), compute (single-digit percent of one core), tooling maturity (SLAM Toolbox's lifelong mapping and localization mode), and the fact that Nav2 eats the occupancy grid directly. It loses the moment the planar assumption breaks: ramps, multiple floors, overhangs the scan plane misses (forklift tines are the canonical incident), or outdoor terrain. The senior answer names the boundary rather than a winner.</p>
+<p>Flat single-floor sites with walls in the scan plane: warehouses, hospitals, offices. There, 2D wins on sensor cost (roughly 100 versus several thousand dollars), compute (single-digit percent of one core), tooling maturity (lifelong mapping and localization modes are solved problems in 2D), and the fact that grid planners eat the occupancy map directly. It loses the moment the planar assumption breaks: ramps, multiple floors, overhangs the scan plane misses (forklift tines are the canonical incident), or outdoor terrain. The senior answer names the boundary rather than a winner.</p>
 </div></details>
 <details class="qa"><summary>Design a mapping stack for a robot you know well. Which pieces from this chapter, and why?</summary><div class="a">
-<p>Structure the answer as the skeleton. Pick an odometry engine: KISS-ICP first as the baseline, FAST-LIO2 if there is a good IMU and 3D lidar, SLAM Toolbox if the site is flat and the lidar is planar. Add Scan Context proposals with GICP verification for loop closure, a GTSAM pose graph with robust kernels on the loop edges, and keyframes at 1 m or 15 degrees. Then generate two map products: an occupancy grid (Bonxai or OctoMap) for planning and coverage, and a TSDF/ESDF (nvblox if there is a Jetson) for smooth trajectory optimization. Close by naming the failure mode you would monitor, minimum Hessian eigenvalue for degeneracy, because connecting the pipeline to operations is what makes the answer land.</p>
+<p>Structure the answer as the skeleton. Pick an odometry engine: KISS-ICP first as the baseline, FAST-LIO2 if there is a good IMU and 3D lidar, a Karto-class 2D scan matcher if the site is flat and the lidar is planar. Add Scan Context proposals with GICP verification for loop closure, a GTSAM pose graph with robust kernels on the loop edges, and keyframes at 1 m or 15 degrees. Then generate two map products: an occupancy grid (Bonxai or OctoMap) for planning and coverage, and a TSDF/ESDF (nvblox if there is a Jetson) for smooth trajectory optimization. Close by naming the failure mode you would monitor, minimum Hessian eigenvalue for degeneracy, because connecting the pipeline to operations is what makes the answer land.</p>
 </div></details>
 
 <nav class="booknav" id="booknav"></nav>

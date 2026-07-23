@@ -1,12 +1,12 @@
 "use strict";
 
 /* ============================================================
-   BOOK UI — shared navigation components for the field book.
+   BOOK UI - shared navigation components for the field book.
    Requires book.js (BOOK). Fills, when present on the page:
-     #booktop  — topbar (chapters: back to contents + CH n/N;
+     #booktop  - topbar (chapters: back to contents + CH n/N;
                  contents page: back to the site index)
-     #toc      — chapter list on the contents page
-     #booknav  — prev/next navigation at the end of a chapter
+     #toc      - chapter list on the contents page
+     #booknav  - prev/next navigation at the end of a chapter
    ============================================================ */
 
 (function(){

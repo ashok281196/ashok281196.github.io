@@ -132,29 +132,42 @@ gyro bias ≈ 0.02 °/s, leaking gravity into the horizontal:
 </figure>
 
 <div class="setup">
-<p><strong>Goal: measure your actual IMU's noise density and bias instability with <code>allan_variance_ros</code>, and put real numbers into a VIO config.</strong></p>
-<p>Prereqs: any IMU publishing <code>sensor_msgs/Imu</code> at 100&nbsp;Hz or more, a machine that can sit untouched for an afternoon. The reference tool (<a href="https://github.com/ori-drs/allan_variance_ros">ori-drs/allan_variance_ros</a>) is a ROS&nbsp;1 package; if your stack is ROS&nbsp;2 Jazzy on Ubuntu 24.04, record there and convert the bag with <code>rosbags-convert</code> (<code>pip install rosbags</code>), or run the tool in a <code>ros:noetic</code> Docker container.</p>
-<pre>mkdir -p ~/catkin_ws/src &amp;&amp; cd ~/catkin_ws/src
-git clone https://github.com/ori-drs/allan_variance_ros.git
-cd ~/catkin_ws &amp;&amp; catkin build allan_variance_ros
-source devel/setup.bash</pre>
-<p>Recording protocol: bolt the IMU to something heavy, on foam, on a desk nobody touches. Constant temperature (no sunny windowsill, no HVAC vent). Record at least <strong>3 hours</strong> static; longer is better because the bias-instability floor lives at large averaging times.</p>
-<pre>rosbag record /imu0 -O imu_static.bag        # go do something else for 3+ h
+<p><strong>Goal: measure your actual IMU's noise density and bias instability with pure Python (<code>allantools</code>), and put real numbers into a VIO config.</strong></p>
+<p>Prereqs: any IMU you can log to CSV at 100&nbsp;Hz or more (every vendor SDK does this; for a RealSense, <code>pip install pyrealsense2</code> and log the gyro/accel streams), Python 3.10+, and a machine that can sit untouched for an afternoon.</p>
+<pre>pip install allantools numpy matplotlib
 
-# reorder by timestamp, then compute:
-rosrun allan_variance_ros cookbag.py --input imu_static.bag \
-    --output imu_cooked.bag
-rosrun allan_variance_ros allan_variance ~/bags/imu_folder config.yaml
-rosrun allan_variance_ros analysis.py --data allan_variance.csv</pre>
-<p>Where <code>config.yaml</code> holds <code>imu_topic</code>, <code>imu_rate</code>, <code>measure_rate</code>, and <code>sequence_time</code> (check the README for the exact current keys). The analysis step fits the slopes of Fig 2.2 for all six axes and prints Kalibr-format numbers, which drop straight into an OpenVINS <code>kalibr_imu_chain.yaml</code>:</p>
-<pre>imu0:
-  accelerometer_noise_density: 2.0e-03   # [m/s^2/sqrt(Hz)]
-  accelerometer_random_walk:   3.0e-04   # [m/s^3/sqrt(Hz)]
-  gyroscope_noise_density:     1.7e-04   # [rad/s/sqrt(Hz)]
-  gyroscope_random_walk:       2.0e-05   # [rad/s^2/sqrt(Hz)]
-  rostopic: /imu0
-  update_rate: 200</pre>
-<p>(VINS-Fusion calls the same four numbers <code>acc_n</code>, <code>gyr_n</code>, <code>acc_w</code>, <code>gyr_w</code>.) Standard practice is to inflate the measured values 3 to 10× before use, because a moving robot adds vibration and temperature swings the static test never saw.</p>
+# log_imu.py, RealSense flavor: writes t,gx,gy,gz,ax,ay,az rows
+import pyrealsense2 as rs, csv
+pipe = rs.pipeline(); cfg = rs.config()
+cfg.enable_stream(rs.stream.gyro);  cfg.enable_stream(rs.stream.accel)
+pipe.start(cfg)
+with open('imu_static.csv','w',newline='') as f:
+    w = csv.writer(f)
+    while True:
+        frames = pipe.wait_for_frames()
+        for fr in frames:
+            m = fr.as_motion_frame()
+            d = m.get_motion_data()
+            w.writerow([m.get_timestamp()/1000.0, fr.profile.stream_type(), d.x, d.y, d.z])</pre>
+<p>Recording protocol: bolt the IMU to something heavy, on foam, on a desk nobody touches. Constant temperature (no sunny windowsill, no HVAC vent). Record at least <strong>3 hours</strong> static; longer is better because the bias-instability floor lives at large averaging times.</p>
+<pre># allan.py: Allan deviation per axis, straight off the CSV
+import numpy as np, allantools, matplotlib.pyplot as plt
+data = np.loadtxt('gyro_x.csv')          # one axis, rad/s, at rate fs
+fs = 200.0
+taus, ad, _, _ = allantools.oadev(data, rate=fs, data_type='freq',
+                                  taus='decade')
+plt.loglog(taus, ad); plt.xlabel('tau [s]'); plt.ylabel('Allan dev')
+plt.savefig('allan_gyro_x.png')
+
+N = ad[np.argmin(np.abs(taus - 1.0))]    # noise density  [rad/s/sqrt(Hz)]
+B = ad.min() / 0.664                     # bias instability [rad/s]
+print(f'noise density ~ {N:.3e}, bias instability ~ {B:.3e}')</pre>
+<p>Run it for all six axes (three gyro, three accel). The four numbers every VIO config demands, whatever it names them:</p>
+<pre>accelerometer_noise_density: 2.0e-03   # [m/s^2/sqrt(Hz)]   from accel tau=1s
+accelerometer_random_walk:   3.0e-04   # [m/s^3/sqrt(Hz)]   from accel +1/2 slope
+gyroscope_noise_density:     1.7e-04   # [rad/s/sqrt(Hz)]   from gyro tau=1s
+gyroscope_random_walk:       2.0e-05   # [rad/s^2/sqrt(Hz)] from gyro +1/2 slope</pre>
+<p>Standard practice is to inflate the measured values 3 to 10× before use, because a moving robot adds vibration and temperature swings the static test never saw.</p>
 <p>Sanity checks: (1) the short-τ region should be a clean −½ slope; kinks there mean vibration reached the sensor. (2) If the curve never flattens, your bag was too short to see bias instability; record longer. (3) All three axes of each sensor should give similar values; one wild axis means a mechanical resonance or a dying part. (4) You should land within a factor of 2 to 5 of the datasheet; a factor of 50 means the test setup, not the IMU.</p>
 </div>
 
@@ -167,7 +180,7 @@ rosrun allan_variance_ros analysis.py --data allan_variance.csv</pre>
                                ⎣  0   0   1 ⎦
 
 fx, fy: focal length in pixels     cx, cy: principal point</pre>
-<p>Real lenses bend this. <strong>Radial distortion</strong> (coefficients k1, k2, k3) makes straight lines bow outward or inward toward the image edges; <strong>tangential distortion</strong> (p1, p2) comes from the lens sitting slightly tilted relative to the sensor. Together these form the Brown-Conrady or "plumb bob" model, <code>pinhole-radtan</code> in Kalibr's vocabulary. Wide-angle and fisheye lenses beyond about 120° need a different parameterization entirely; the <strong>equidistant</strong> (Kannala-Brandt) model, <code>pinhole-equi</code>, maps the incidence angle θ to radius r = f·θ and stays well-behaved out to the edges where radtan falls apart.</p>
+<p>Real lenses bend this. <strong>Radial distortion</strong> (coefficients k1, k2, k3) makes straight lines bow outward or inward toward the image edges; <strong>tangential distortion</strong> (p1, p2) comes from the lens sitting slightly tilted relative to the sensor. Together these form the Brown-Conrady or "plumb bob" model, the default in OpenCV's calibration API. Wide-angle and fisheye lenses beyond about 120° need a different parameterization entirely; the <strong>equidistant</strong> (Kannala-Brandt) model, <code>pinhole-equi</code>, maps the incidence angle θ to radius r = f·θ and stays well-behaved out to the edges where radtan falls apart.</p>
 <h3>Rolling vs Global Shutter</h3>
 <p>A <strong>global shutter</strong> exposes every pixel simultaneously: one photo, one instant. A <strong>rolling shutter</strong> reads the sensor row by row over 10 to 30&nbsp;ms, so the bottom of the image is a photograph of a slightly later world than the top. Yaw at 1&nbsp;rad/s with a 30&nbsp;ms readout and the last row has rotated 1.7° relative to the first; at a 600&nbsp;px focal length that is roughly 18 pixels of shear on a vertical edge. A feature-based SLAM that assumes a single pose per image is now fitting geometry to a smeared impossibility.</p>
 <figure>
@@ -230,41 +243,48 @@ D435i-class rig: B = 0.05 m, f = 640 px, σ_d ≈ 0.25 px
 <p>The supporting cast, one line each. <strong>Radar</strong>: sees through fog, rain, and dust that blind lidar, at the price of sparse, noisy, multipath-prone returns. <strong>UWB anchors</strong>: 10 to 30&nbsp;cm indoor positioning from time-of-flight to fixed beacons, great when you own the building, useless when you don't. <strong>Event cameras</strong>: report per-pixel brightness changes with microsecond latency and no motion blur, spectacular for fast motion and HDR scenes, still exotic on the software side. <strong>Magnetometer</strong>: absolute heading outdoors, hallucination generator inside any steel building. <strong>Barometer</strong>: relative altitude to about a meter, drifts with the weather, standard on drones for the vertical axis.</p>
 
 <h2><span class="sec-no">2.7</span>Extrinsic Calibration</h2>
-<p>An extrinsic is a rigid transform between two frames on the robot: <code>T_body_sensor</code> maps a point expressed in the sensor frame into the body frame, p<sub>body</sub> = T<sub>body_sensor</sub> · p<sub>sensor</sub>, as a 4×4 SE(3) matrix (Chapter 1). Half of all extrinsics bugs are convention bugs, so adopt the naming discipline where the frame order is in the variable name and stick to it; if a matrix is called <code>T_cam_imu</code>, it takes IMU-frame points to camera-frame points, and its inverse is <code>T_imu_cam</code>, no exceptions, no "I think this one goes the other way." (Kalibr's output files annotate exactly this, and people still get it backwards.)</p>
-<p>Intrinsics come first, always: you cannot place a camera relative to an IMU while the camera's own focal length is wrong. The standard tool is a planar target. Checkerboards are printable anywhere but must be fully visible in every image and carry a 180° ambiguity; an <strong>AprilGrid</strong> (a lattice of AprilTags) is better on every axis, because each tag has a unique ID, partial views still contribute corners, and orientation is never ambiguous. OpenCV's calibration module handles the checkerboard workflow; Kalibr prefers the AprilGrid and so should you.</p>
-<p><strong>Camera-IMU</strong> extrinsics are the hard, load-bearing case for VIO, and <a href="https://github.com/ethz-asl/kalibr">Kalibr</a> (Furgale, Rehder, Siegwart) is the standard tool. It fits a continuous-time B-spline to the rig trajectory and jointly estimates the spline, the gravity direction, <code>T_cam_imu</code>, and the camera-IMU <strong>time offset</strong>, which is why the same paper appears again in section 2.8. It needs motion that excites all axes; a calibration bag recorded by someone gently panning left and right is unobservable and the tool will happily output garbage with small-looking residuals.</p>
+<p>An extrinsic is a rigid transform between two frames on the robot: <code>T_body_sensor</code> maps a point expressed in the sensor frame into the body frame, p<sub>body</sub> = T<sub>body_sensor</sub> · p<sub>sensor</sub>, as a 4×4 SE(3) matrix (Chapter 1). Half of all extrinsics bugs are convention bugs, so adopt the naming discipline where the frame order is in the variable name and stick to it; if a matrix is called <code>T_cam_imu</code>, it takes IMU-frame points to camera-frame points, and its inverse is <code>T_imu_cam</code>, no exceptions, no "I think this one goes the other way." (Calibration reports annotate exactly this, and people still get it backwards.)</p>
+<p>Intrinsics come first, always: you cannot place a camera relative to an IMU while the camera's own focal length is wrong. The standard tool is a planar target. Checkerboards are printable anywhere but must be fully visible in every image and carry a 180° ambiguity; an <strong>AprilGrid</strong> (a lattice of AprilTags) is better on every axis, because each tag has a unique ID, partial views still contribute corners, and orientation is never ambiguous. OpenCV's calibration module handles the checkerboard workflow end to end; its ArUco module detects AprilTag-style grids when you outgrow checkerboards.</p>
+<p><strong>Camera-IMU</strong> extrinsics are the hard, load-bearing case for VIO. The reference method (Furgale, Rehder, Siegwart, the <a href="https://github.com/ethz-asl/kalibr">Kalibr</a> paper) fits a continuous-time B-spline to the rig trajectory and jointly estimates the spline, the gravity direction, <code>T_cam_imu</code>, and the camera-IMU <strong>time offset</strong>. Whatever implements it, the physics is the same: it needs motion that excites all axes, and a calibration log recorded by someone gently panning left and right is unobservable, so the tool will happily output garbage with small-looking residuals. The worked setup below gets you the practical 90% (intrinsics, time offset, measured extrinsics) in pure Python.</p>
 <p><strong>LiDAR-camera</strong> calibration has mostly gone targetless: modern methods align depth edges and reflectivity gradients in the point cloud against intensity edges in the image, refined with mutual information or direct photometric cost. A practical, maintained implementation is <a href="https://github.com/koide3/direct_visual_lidar_calibration">koide3/direct_visual_lidar_calibration</a>, which gets you within a degree from a single scene plus a rough initial guess.</p>
 <p>When one of the two devices gives you poses rather than raw overlapping data (a tracking camera, a robot arm flange, a motion capture rig), the tool is <strong>hand-eye calibration</strong>: collect paired relative motions A (device 1) and B (device 2), then solve AX&nbsp;=&nbsp;XB for the fixed transform X between them. Tsai-Lenz (1989) is the classical closed-form solution; every robotics library ships one. The requirement that trips people is rotation diversity: motions about at least two independent axes, or the translation component of X is unobservable.</p>
 <h3>How Good Is Good</h3>
-<p>Numbers to hold your work against. Camera intrinsics: reprojection RMS below 0.5&nbsp;px, below 0.3&nbsp;px with a good target and lighting; above 1&nbsp;px means bad corners, a flexing target, or the wrong distortion model. Kalibr camera-IMU: mean reprojection error under 1&nbsp;px, gyro and accel residuals consistent with your section 2.3 noise numbers, time offset stable across two independent runs to well under a millisecond. And the sanity number that makes rotation errors visceral: 0.5° of extrinsic rotation error displaces a point at 10&nbsp;m range by 8.7&nbsp;cm. Your map at range is only as good as your angles.</p>
+<p>Numbers to hold your work against. Camera intrinsics: reprojection RMS below 0.5&nbsp;px, below 0.3&nbsp;px with a good target and lighting; above 1&nbsp;px means bad corners, a flexing target, or the wrong distortion model. Joint camera-IMU calibration: mean reprojection error under 1&nbsp;px, gyro and accel residuals consistent with your section 2.3 noise numbers, time offset stable across two independent runs to well under a millisecond. And the sanity number that makes rotation errors visceral: 0.5° of extrinsic rotation error displaces a point at 10&nbsp;m range by 8.7&nbsp;cm. Your map at range is only as good as your angles.</p>
 <div class="keypoint">A calibration is not a file, it is a claim with an expiration date. Bolts settle, plastic creeps, temperature swings move lenses. Good teams version calibration files like code, log the date and rig serial number, and re-verify after any crash, shipping, or seasonal temperature change.</div>
 
 <div class="setup">
-<p><strong>Goal: calibrate camera-IMU extrinsics and time offset with Kalibr, and know whether to believe the output.</strong></p>
-<p>Prereqs: Ubuntu 24.04 host with Docker; a rig with a camera (20&nbsp;Hz is plenty for calibration) and an IMU (200&nbsp;Hz), both publishing in ROS with driver-side timestamps; your IMU noise numbers from the Setup in 2.3. Kalibr runs happily in its ROS&nbsp;1 container; record in ROS&nbsp;2 and convert with <code>rosbags-convert</code>.</p>
-<pre>git clone https://github.com/ethz-asl/kalibr.git
-cd kalibr &amp;&amp; docker build -t kalibr -f Dockerfile_ros1_20_04 .
-docker run -it --rm -v ~/calib:/data kalibr</pre>
-<p>Print an AprilGrid and describe it. Generate the PDF, print on A3 or larger, tape it dead flat to something rigid, then measure a printed tag edge with calipers (printers rescale silently) and put the <em>measured</em> size in the YAML:</p>
-<pre>rosrun kalibr kalibr_create_target_pdf --type apriltag \
-    --nx 6 --ny 6 --tsize 0.055 --tspace 0.3
+<p><strong>Goal: calibrate camera intrinsics and the camera-IMU time offset with nothing but Python and OpenCV, and know whether to believe the output.</strong></p>
+<p>Prereqs: Python 3.10+ with <code>opencv-python</code>, <code>numpy</code>, <code>scipy</code>; a printed checkerboard (9×6 inner corners works) taped dead flat to something rigid, with a square edge measured by calipers because printers rescale silently; a way to grab frames and IMU samples with device timestamps (OpenCV <code>VideoCapture</code> plus your IMU SDK's CSV logger from the 2.3 setup).</p>
+<pre>pip install opencv-python numpy scipy
 
-# /data/target.yaml
-target_type: 'aprilgrid'
-tagCols: 6
-tagRows: 6
-tagSize: 0.055        # measured, meters
-tagSpacing: 0.3       # gap / tagSize ratio</pre>
-<p>Camera intrinsics first (grid fixed, move the camera slowly through the whole field of view, near and far, tilted views included), then the joint camera-IMU bag. For that one: fix exposure short to kill motion blur, light the grid well, keep it mostly in frame, and record 60 to 90 seconds of deliberate excitation: rotate about each of the three axes in turn, translate along each, then mix. Brisk, not violent.</p>
-<pre>rosrun kalibr kalibr_calibrate_cameras --bag /data/cam_static.bag \
-    --topics /cam0/image_raw --models pinhole-radtan \
-    --target /data/target.yaml
-
-rosrun kalibr kalibr_calibrate_imu_camera --bag /data/imu_cam.bag \
-    --cam /data/camchain-cam_static.yaml --imu /data/imu.yaml \
-    --target /data/target.yaml</pre>
-<p>The report (a results text file plus a PDF of plots) gives you: reprojection error statistics, <code>T_cam_imu</code> as a 4×4 matrix, and <code>timeshift_cam_imu</code> annotated in the file as <code>t_imu = t_cam + shift</code>. Read all three before celebrating.</p>
-<p>Sanity checks: (1) The time offset should be a few milliseconds at most on a USB rig and near zero on a hardware-triggered one; tens of milliseconds means your driver is stamping frames on arrival, and you should fix that at the source rather than trust one calibrated constant. (2) Physical plausibility: the translation in <code>T_cam_imu</code> should match a ruler held to the rig to about a centimeter, the axes should match how the parts are actually mounted, and the estimated gravity direction in the report should point the way down actually was during recording. (3) The residual plots should look like unstructured noise around zero; slow sinusoids in the reprojection residuals mean an unmodeled time offset or rolling shutter. (4) Run the whole thing twice with fresh bags; extrinsics agreeing to a millimeter-and-a-tenth-of-a-degree is your real error bar.</p>
+# intrinsics.py: 30-50 views of the board, whole field of view,
+# near and far, tilted views included
+import cv2, glob, numpy as np
+CB = (9, 6); SQ = 0.024                    # inner corners, measured meters
+objp = np.zeros((CB[0]*CB[1], 3), np.float32)
+objp[:, :2] = np.mgrid[0:CB[0], 0:CB[1]].T.reshape(-1, 2) * SQ
+obj, img = [], []
+for path in glob.glob('views/*.png'):
+    gray = cv2.imread(path, cv2.IMREAD_GRAYSCALE)
+    ok, corners = cv2.findChessboardCorners(gray, CB)
+    if not ok: continue
+    corners = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1),
+        (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-3))
+    obj.append(objp); img.append(corners)
+rms, K, dist, rvecs, tvecs = cv2.calibrateCamera(obj, img, gray.shape[::-1], None, None)
+print('reprojection RMS [px]:', rms); print('K =', K); print('dist =', dist.ravel())</pre>
+<p>Time offset next, by cross-correlation. The camera and the IMU both witness every rotation; the lag that best aligns their two views of it <em>is</em> the time offset. Wave the rig side to side over the board for 60 seconds while logging both streams:</p>
+<pre># timeoffset.py: gyro magnitude vs image-derived rotation rate
+import numpy as np
+from scipy.signal import correlate
+# cam_rate[t]: per-frame rotation angle from solvePnP on the board,
+#              divided by frame dt   (len N, at camera rate)
+# gyr_rate[t]: |gyro| resampled onto the same uniform time grid
+c = correlate(cam_rate - cam_rate.mean(), gyr_rate - gyr_rate.mean(), 'full')
+lag = c.argmax() - (len(gyr_rate) - 1)
+print(f'camera lags IMU by {lag * dt * 1000:.1f} ms')</pre>
+<p>Extrinsics last. On most rigs the rotation part of <code>T_cam_imu</code> is a clean 90°-multiple you can read off the mechanical drawing, and the translation is a ruler measurement, both then refined online by the estimator. When one device gives you poses (a tracking camera, a robot arm), solve it properly with <code>cv2.calibrateHandEye</code> on 20+ paired motions. The fully joint spline-based calibration of everything at once is what dedicated offline calibrators automate; the checks below tell you whether you need one.</p>
+<p>Sanity checks: (1) Intrinsics RMS under 0.5&nbsp;px, and rerunning with a fresh set of views moves fx, fy by less than half a percent. (2) The time offset should be a few milliseconds at most on a USB rig and near zero on a hardware-triggered one; tens of milliseconds means your driver is stamping frames on arrival, and you should fix that at the source rather than trust one calibrated constant. (3) The cross-correlation peak should be sharp and lonely; a broad or multi-peaked curve means not enough rotation excitation, re-record with brisker motion. (4) Physical plausibility: translations match a ruler to a centimeter, axes match how the parts are mounted. (5) Run everything twice; agreement is your real error bar.</p>
 </div>
 
 <h2><span class="sec-no">2.8</span>Time Is a Sensor Too</h2>
@@ -275,14 +295,14 @@ rosrun kalibr kalibr_calibrate_imu_camera --bag /data/imu_cam.bag \
 <div class="analogy">Badly synced video and audio is instantly obvious: 20 ms of lip-sync error makes a film unwatchable. Your SLAM stack watches lips and hears audio from clocks that were never introduced to each other, and unlike you it has no idea anything is wrong; it just quietly believes the mismatch.</div>
 <p>The first discipline is <em>where</em> the timestamp is taken. A frame should carry the time its exposure happened (mid-exposure, by convention), stamped by the driver from the device's own reported capture time. What you often get instead is the time the image finally arrived through USB and got a header slapped on, which floats by 5 to 30&nbsp;ms with bus load and CPU mood. Jitter this size makes a mockery of the 3-pixel arithmetic above.</p>
 <p>The gold standard is hardware. The IMU (or a dedicated board) generates a trigger pulse that <em>causes</em> each exposure, and the camera's strobe output confirms it, so the correspondence is physical rather than statistical. GNSS receivers provide <strong>PPS</strong>, a pulse at the top of every second, to which lidars and computers discipline their clocks. Between machines, <strong>PTP</strong> (IEEE 1588, or gPTP/802.1AS in its automotive profile) achieves sub-microsecond sync on hardware-timestamping NICs, versus the milliseconds of ordinary NTP. Milliseconds are fine for logging; they are not fine for fusion.</p>
-<p>In ROS 2, <code>message_filters</code> with the <code>ApproximateTime</code> policy pairs up messages whose stamps are close. Understand what it does and does not do: it <em>selects</em> plausible pairs, it does not <em>correct</em> stamps. Feeding it arrival-time-stamped garbage yields confidently matched garbage. Estimator-side time offset estimation (Kalibr offline, or VINS/OpenVINS online <code>estimate_td</code>) can absorb one constant offset, but nothing downstream can absorb jitter.</p>
+<p>In software, pairing streams means matching measurements whose stamps are close (nearest-neighbor association with a tolerance, which is a five-line function over two sorted arrays). Understand what such pairing does and does not do: it <em>selects</em> plausible pairs, it does not <em>correct</em> stamps. Feeding it arrival-time-stamped garbage yields confidently matched garbage. Estimator-side time offset estimation (offline cross-correlation as in the 2.7 setup, or online estimation inside the VIO) can absorb one constant offset, but nothing downstream can absorb jitter.</p>
 <dl class="jargon">
   <dt>PPS</dt><dd>Pulse per second. An electrical edge at each second boundary, usually from a GNSS receiver, used to discipline other clocks.</dd>
   <dt>PTP / gPTP</dt><dd>Precision Time Protocol over Ethernet. Sub-microsecond clock agreement with hardware timestamping; gPTP is the 802.1AS profile.</dd>
   <dt>Strobe</dt><dd>Camera output pin that fires during exposure. Wire it to a timestamping input and you know exactly when each frame happened.</dd>
   <dt>Mid-exposure stamp</dt><dd>The convention that a frame's time is the middle of its exposure window, not its start, end, or arrival.</dd>
 </dl>
-<div class="warfield">Field classics: USB cameras buffer 3 or 4 frames internally when the host stalls, then deliver them in a burst; arrival-time stamping turns that burst into physically impossible motion. Bags lie too: <code>rosbag record</code> under CPU load writes its own receive times, and a bag re-timestamped by a well-meaning script will replay beautifully while every inter-sensor relationship in it is fiction. Always fuse on <code>header.stamp</code>, replay with <code>--clock</code> and <code>use_sim_time</code>, and before trusting any new rig, plot camera-stamp deltas against IMU-stamp deltas for one minute; the pathology is usually visible to the naked eye.</div>
+<div class="warfield">Field classics: USB cameras buffer 3 or 4 frames internally when the host stalls, then deliver them in a burst; arrival-time stamping turns that burst into physically impossible motion. Log files lie too: a logger under CPU load writes its own receive times, and a log re-timestamped by a well-meaning script will replay beautifully while every inter-sensor relationship in it is fiction. Always fuse on the device's capture stamp, never the arrival time, and before trusting any new rig, plot camera-stamp deltas against IMU-stamp deltas for one minute; the pathology is usually visible to the naked eye.</div>
 
 <h2><span class="sec-no">2.9</span>Picking a Sensor Suite</h2>
 <p>Sensor selection is a budget exercise against your failure modes, not a shopping spree. Three worked bills of materials, with rough 2026 prices, each chosen to feed specific chapters of this book.</p>
@@ -290,11 +310,11 @@ rosrun kalibr kalibr_calibrate_imu_camera --bag /data/imu_cam.bag \
 <table>
   <tr><th>Item</th><th>Pick</th><th>Rough price</th><th>Why</th></tr>
   <tr><td>RGB-D + IMU</td><td>RealSense D435i</td><td>$360</td><td>Depth, color, and an internal IMU on one USB cable; Chapter 5's exact sensor</td></tr>
-  <tr><td>2D lidar</td><td>RPLIDAR A1M8</td><td>$100</td><td>360° coverage for AMCL localization and costmaps in Chapter 8</td></tr>
+  <tr><td>2D lidar</td><td>RPLIDAR A1M8</td><td>$100</td><td>360° coverage for particle-filter localization and costmaps in Chapter 8</td></tr>
   <tr><td>Base + encoders</td><td>Kobuki-class used base</td><td>$150</td><td>Wheel odometry for RTAB-Map's odom input, bumpers included</td></tr>
   <tr><td>Compute</td><td>Raspberry Pi 5, 8 GB</td><td>$80</td><td>Runs RTAB-Map indoors at modest rates</td></tr>
 </table>
-<p>This is deliberately Chapter 5's rig. Its weaknesses are known and survivable indoors: rolling-shutter RGB (keep turns gentle), 5&nbsp;cm stereo baseline (useless past ~5&nbsp;m, fine in rooms), USB timestamps (calibrate the offset with Kalibr and keep motion moderate).</p>
+<p>This is deliberately Chapter 5's rig. Its weaknesses are known and survivable indoors: rolling-shutter RGB (keep turns gentle), 5&nbsp;cm stereo baseline (useless past ~5&nbsp;m, fine in rooms), USB timestamps (calibrate the offset as in the 2.7 setup and keep motion moderate).</p>
 <h3>Outdoor UGV, About $8k</h3>
 <table>
   <tr><th>Item</th><th>Pick</th><th>Rough price</th><th>Why</th></tr>
@@ -312,7 +332,7 @@ rosrun kalibr kalibr_calibrate_imu_camera --bag /data/imu_cam.bag \
   <tr><td>Camera</td><td>Arducam OV9281 global shutter mono</td><td>$60</td><td>6 grams; global shutter is non-negotiable at drone yaw rates</td></tr>
   <tr><td>IMU</td><td>ICM-42688 on the flight controller</td><td>included</td><td>Consumer grade is fine, VIO corrects it every frame</td></tr>
   <tr><td>Height + flow</td><td>ToF rangefinder + optical flow board</td><td>$35</td><td>Bounded altitude and a velocity prior for the tough moments</td></tr>
-  <tr><td>Compute</td><td>Raspberry Pi CM4 on carrier</td><td>$90</td><td>Runs a trimmed OpenVINS at reduced rate; heavy lifting streams to ground</td></tr>
+  <tr><td>Compute</td><td>Raspberry Pi CM4 on carrier</td><td>$90</td><td>Runs a lightweight VIO at reduced rate; heavy lifting streams to ground</td></tr>
   <tr><td>Airframe</td><td>Motors, ESC, FC, frame</td><td>$250</td><td>The whole point of 249 g is skipping a regulatory class</td></tr>
 </table>
 <p>Here weight is the currency, not dollars. No lidar makes the cut at this mass, so this platform lives entirely on Chapter 4's visual-inertial methods, and every gram of sensor must justify itself against flight time.</p>
@@ -320,23 +340,22 @@ rosrun kalibr kalibr_calibrate_imu_camera --bag /data/imu_cam.bag \
 
 <h2><span class="sec-no">2.10</span>Reading List</h2>
 <a class="paper" href="https://github.com/ethz-asl/kalibr"><span class="p-title">Kalibr: Unified Temporal and Spatial Calibration for Multi-Sensor Systems</span><span class="p-meta">Furgale, Rehder, Siegwart · IROS 2013 · github.com/ethz-asl/kalibr</span><span class="p-why">The continuous-time calibration paper and the tool everyone actually runs; the wiki alone is a course in calibration hygiene.</span></a>
-<a class="paper" href="https://github.com/ethz-asl/kalibr/wiki"><span class="p-title">Extending Kalibr: IMU Intrinsics and Multi-IMU Calibration</span><span class="p-meta">Rehder, Nikolic, Schneider, Hinzmann, Siegwart · ICRA 2016</span><span class="p-why">Scale factors, axis misalignment, and multiple IMUs; the paper behind Kalibr's IMU models beyond plain bias-plus-noise.</span></a>
-<a class="paper" href="https://github.com/ori-drs/allan_variance_ros"><span class="p-title">allan_variance_ros</span><span class="p-meta">Oxford Robotics Institute · maintained tool · github.com/ori-drs/allan_variance_ros</span><span class="p-why">The path from a boring 3-hour static bag to the four noise numbers every VIO config demands.</span></a>
+<a class="paper" href="https://github.com/aewallin/allantools"><span class="p-title">allantools: Allan Deviation in Pure Python</span><span class="p-meta">Wallin et al. · maintained library · github.com/aewallin/allantools</span><span class="p-why">The path from a boring 3-hour static CSV to the four noise numbers every VIO config demands, no framework required.</span></a>
 <a class="paper" href="https://arxiv.org/abs/1711.02508"><span class="p-title">Quaternion Kinematics for the Error-State Kalman Filter</span><span class="p-meta">Joan Solà · 2017 · arXiv:1711.02508</span><span class="p-why">The reference for IMU error-state modeling; read it once slowly and every VIO codebase becomes legible.</span></a>
 <a class="paper" href="https://arxiv.org/abs/1512.02363"><span class="p-title">On-Manifold Preintegration for Real-Time Visual-Inertial Odometry</span><span class="p-meta">Forster, Carlone, Dellaert, Scaramuzza · TRO 2017 · arXiv:1512.02363</span><span class="p-why">How a thousand IMU samples become one factor; the bridge between this chapter's noise models and Chapter 1's graphs.</span></a>
 <a class="paper" href="https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html"><span class="p-title">OpenCV Camera Calibration Documentation</span><span class="p-meta">OpenCV project · living docs</span><span class="p-why">The plumb-bob and fisheye models with runnable code; where every practitioner's first reprojection error came from.</span></a>
 <a class="paper" href="https://github.com/puzzlepaint/camera_calibration"><span class="p-title">Why Having 10,000 Parameters in Your Camera Model Is Better Than Twelve</span><span class="p-meta">Schöps, Larsson, Pollefeys, Sattler · CVPR 2020 · github.com/puzzlepaint/camera_calibration</span><span class="p-why">A bracing argument that parametric lens models leave accuracy on the table, plus a tool to prove it on your own lens.</span></a>
 <a class="paper" href="https://arxiv.org/abs/1808.00558"><span class="p-title">Direct Sparse Odometry With Rolling Shutter</span><span class="p-meta">Schubert, Demmel, Usenko, Stückler, Cremers · ECCV 2018 · arXiv:1808.00558</span><span class="p-why">What it costs to model per-row exposure time properly, and how much accuracy you lose if you refuse to.</span></a>
-<a class="paper" href="https://www.ros.org/reps/rep-0105.html"><span class="p-title">REP 105: Coordinate Frames for Mobile Platforms</span><span class="p-meta">ROS Enhancement Proposal · Meeussen 2010</span><span class="p-why">Three pages that prevent a thousand frame bugs; the contract your extrinsics plug into, developed further in Chapter 8.</span></a>
+<a class="paper" href="https://www.ros.org/reps/rep-0105.html"><span class="p-title">Coordinate Frames for Mobile Platforms (REP 105)</span><span class="p-meta">Meeussen · 2010 · three-page convention document</span><span class="p-why">Born in one ecosystem but now the industry's shared vocabulary for map, odom, and body frames; the contract your extrinsics plug into, developed further in Chapter 8.</span></a>
 
 <h2><span class="sec-no">2.11</span>Interview Questions</h2>
 <details class="qa"><summary>Why does a cheap IMU drift to uselessness in seconds while wheel odometry lasts for minutes?</summary><div class="a"><p>Wheel odometry integrates a velocity-level measurement once, so a bias produces error growing linearly in time. An IMU reaches position by integrating acceleration twice, so an accelerometer bias grows quadratically, and worse, a gyro bias tilts the gravity estimate and leaks a slice of 9.81&nbsp;m/s² into the horizontal axes, giving cubic growth. Put numbers on it: a 2&nbsp;mg accel bias alone is a meter of error after ten seconds. That is why IMUs are used as short-horizon bridges between exteroceptive updates, never as standalone position sensors.</p></div></details>
 <details class="qa"><summary>Rolling versus global shutter: what is the actual tradeoff, and when is rolling acceptable?</summary><div class="a"><p>Global shutter exposes all pixels at one instant, so one pose explains the whole image; rolling shutter reads rows over 10 to 30&nbsp;ms, so fast motion shears the image, roughly f·ω·t_readout pixels of skew (about 18&nbsp;px at 1&nbsp;rad/s, 600&nbsp;px focal length, 30&nbsp;ms readout). Rolling sensors are cheaper and often have better pixels, which is why phones and the D435i's color camera use them. Rolling is acceptable when angular rates are low relative to readout time (slow indoor platforms) or when the estimator explicitly models per-row time, as rolling-shutter-aware VIO does. On a drone, buy global shutter.</p></div></details>
 <details class="qa"><summary>How would you verify an extrinsic calibration in the field, with no target available?</summary><div class="a"><p>Use the world as the target. For lidar-camera: project the point cloud into the image and check that depth discontinuities land on intensity edges (poles, door frames, building corners) at several ranges, since rotation errors grow with distance. For camera-IMU: run the VIO stack and watch the residuals and the online-estimated extrinsic correction; a healthy calibration shows unstructured residuals and a correction that stays near identity. For lidar-body: drive a loop and look for a double-walled map, the classic signature of a rotated sensor. A ruler check on translations catches gross errors in thirty seconds.</p></div></details>
-<details class="qa"><summary>What actually breaks if the camera and IMU disagree by 20 ms, and what does it look like?</summary><div class="a"><p>During rotation the estimator fuses image features against IMU states from the wrong instant; at 1&nbsp;rad/s and 600&nbsp;px focal length, 20&nbsp;ms is about 12 pixels of systematic error, indistinguishable in form from a bad extrinsic. Symptoms: the system looks fine in slow motion, then residuals spike and scale or bias estimates swim whenever the rig turns fast, and calibration "keeps going bad." A constant offset can be estimated away (Kalibr offline, estimate_td online), but timestamp jitter cannot, which is why stamping frames at exposure in the driver matters more than any single calibrated constant.</p></div></details>
+<details class="qa"><summary>What actually breaks if the camera and IMU disagree by 20 ms, and what does it look like?</summary><div class="a"><p>During rotation the estimator fuses image features against IMU states from the wrong instant; at 1&nbsp;rad/s and 600&nbsp;px focal length, 20&nbsp;ms is about 12 pixels of systematic error, indistinguishable in form from a bad extrinsic. Symptoms: the system looks fine in slow motion, then residuals spike and scale or bias estimates swim whenever the rig turns fast, and calibration "keeps going bad." A constant offset can be estimated away (cross-correlation offline, time-offset states online), but timestamp jitter cannot, which is why stamping frames at exposure in the driver matters more than any single calibrated constant.</p></div></details>
 <details class="qa"><summary>Walk me through the stereo baseline tradeoff.</summary><div class="a"><p>Depth error is σ_Z ≈ Z²·σ_d/(f·B), so a wider baseline B divides far-field error proportionally: doubling the baseline halves depth noise at every range. The costs are a larger minimum overlap distance (near objects fall outside both views or exceed disparity search range), a physically larger and floppier rig where sub-tenth-degree flex silently invalidates the calibration, and harder stereo matching from more perspective difference between views. So a 5&nbsp;cm baseline device like the D435i is an indoor sensor by construction, and automotive stereo runs baselines of many tens of centimeters with rigid metal cross-members.</p></div></details>
 <details class="qa"><summary>When does RTK GNSS beat SLAM outright, and when can it not?</summary><div class="a"><p>Under open sky with a base station link, RTK gives 1&nbsp;cm absolute, drift-free position at 10&nbsp;Hz, which beats any SLAM system's global accuracy; for farm fields, mines, and survey work it is the right answer and SLAM is overhead. It cannot help indoors, in tunnels, or under canopy, degrades to float mode or multipath fiction in urban canyons while sometimes reporting high confidence, and it only gives position of an antenna, not orientation (unless dual-antenna) and not a map. Real outdoor autonomy fuses both: RTK bounds global drift, SLAM provides the local geometry, obstacle map, and continuity through outages.</p></div></details>
-<details class="qa"><summary>What is the difference between noise density and bias instability, and how do you measure each?</summary><div class="a"><p>Noise density is the white, uncorrelated fuzz on each sample, quoted per √Hz; it sets how fast integrated error grows as √t and it is what the estimator's measurement noise should reflect. Bias instability is a slow random wander of the sensor's zero point, the reason yesterday's bias estimate is stale today, and it sets the floor on long-duration accuracy. Both are read off an Allan deviation plot from a long static log: the −½ slope at short averaging times gives noise density (read at τ = 1&nbsp;s), and the flat minimum gives bias instability. Tools like allan_variance_ros automate the fit; you inflate the results several-fold before putting them in a VIO config.</p></div></details>
+<details class="qa"><summary>What is the difference between noise density and bias instability, and how do you measure each?</summary><div class="a"><p>Noise density is the white, uncorrelated fuzz on each sample, quoted per √Hz; it sets how fast integrated error grows as √t and it is what the estimator's measurement noise should reflect. Bias instability is a slow random wander of the sensor's zero point, the reason yesterday's bias estimate is stale today, and it sets the floor on long-duration accuracy. Both are read off an Allan deviation plot from a long static log: the −½ slope at short averaging times gives noise density (read at τ = 1&nbsp;s), and the flat minimum gives bias instability. Libraries like allantools automate the fit; you inflate the results several-fold before putting them in a VIO config.</p></div></details>
 <details class="qa"><summary>Why does auto-exposure bother direct visual methods so much more than feature-based ones?</summary><div class="a"><p>Direct methods minimize photometric error: they assume the same 3D point yields the same pixel intensity across frames, so a global exposure or gain step between frames violates the core measurement model everywhere at once, looking like the entire scene changed. Feature methods only need descriptors and corner positions to survive, and ORB-style descriptors are built with illumination invariance, so they lose a few matches instead of the model. The remedies are locking exposure when the scene allows, calibrating the camera's response curve and vignette so brightness changes can be modeled, or estimating affine brightness parameters per frame as DSO does.</p></div></details>
 <details class="qa"><summary>Your wheel-odometry robot curves left on straightaways, consistently. What do you do?</summary><div class="a"><p>Consistent means systematic, and systematic means calibratable. The two usual suspects are unequal effective wheel diameters (produces curvature proportional to speed) and a wrong effective wheelbase (shows up as heading error proportional to commanded turning). Run UMBmark: drive a measured square both clockwise and counterclockwise, and the pattern of endpoint errors separates the two effects and yields correction factors. Then remember the corrections are conditional on surface and load: recalibrate on the deployment floor, and expect carpet or a payload shift to move the numbers by a percent or two.</p></div></details>
 <details class="qa"><summary>Why timestamp a camera frame at mid-exposure rather than at start, end, or arrival?</summary><div class="a"><p>An exposure integrates light over a window, so the image is best explained by the camera's pose near the center of that window; stamping at the middle minimizes the worst-case model error to half the exposure time, symmetrically. Start or end stamps add a systematic half-exposure offset that a moving estimator will absorb into whatever state fits, usually the extrinsic or the time offset. Arrival time is worst of all: it adds transport delay plus jitter of 5 to 30&nbsp;ms on USB, and jitter can never be calibrated away. The principle generalizes: stamp every measurement at the physical instant the world was sampled, as close to the silicon as the driver allows.</p></div></details>
