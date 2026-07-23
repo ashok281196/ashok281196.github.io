@@ -463,3 +463,10 @@ hr { border: none; border-top: 1px solid var(--line); margin: 40px 0; }
   .toc .t-num { font-size: 32px; }
   .toc .t-title { font-size: 21px; }
 }
+
+/* ---------- syntax colour (see book-ui.js highlighter) ---------- */
+pre .tok-com { color: #86795f; font-style: italic; }
+pre .tok-str { color: #d9a15e; }
+pre .tok-num { color: #8fc0b5; }
+pre .tok-kw  { color: #e08563; }
+pre .tok-key { color: #9ec6c2; }

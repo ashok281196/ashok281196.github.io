@@ -47,3 +47,61 @@
     nav.innerHTML = prev + next;
   }
 })();
+
+/* ============================================================
+   SYNTAX COLOUR — a tiny highlighter for the book's pre blocks.
+   No dependencies. Language comes from a `language-*` class on
+   the inner <code> when present, otherwise a content heuristic.
+   Tokens: comments, strings, numbers, keywords, yaml keys.
+   ============================================================ */
+
+(function(){
+  function escHtml(s){
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  const KEYWORDS = {
+    python: 'def|return|import|from|for|while|if|elif|else|in|is|not|and|or|class|with|as|try|except|raise|lambda|pass|break|continue|None|True|False|print|assert|yield|global|nonlocal',
+    bash: 'sudo|apt|install|pip|pip3|git|clone|cd|mkdir|wget|curl|unzip|echo|export|source|cmake|make|mv|cp|rm|set|python3|python|conda|activate|tar|kill|wait|sleep|chmod',
+    cpp: 'auto|int|float|double|void|bool|char|const|constexpr|class|struct|public|private|protected|return|if|else|for|while|new|delete|template|typename|namespace|using|include|true|false|nullptr|static|virtual|override',
+    yaml: 'true|false|null'
+  };
+
+  function detectLang(codeEl, text){
+    const m = codeEl && /language-([\w+]+)/.exec(codeEl.className || '');
+    if(m) return m[1] === 'text' ? null : m[1];
+    if(/^\s*(import |from [\w.]+ import |def |import\b)/m.test(text) || /\bnp\.|plt\.|self\./.test(text)) return 'python';
+    if(/^\s*(\$ |sudo |pip3? |git |cmake |wget |unzip |mkdir |cd |source |conda |apt )/m.test(text)) return 'bash';
+    if(/^[ \t]*[\w./-]+:(\s|$)/m.test(text) && !/=/.test(text)) return 'yaml';
+    return null;
+  }
+
+  function highlight(src, lang){
+    const comment = lang === 'cpp' ? '\\/\\/[^\\n]*' : '#[^\\n]*';
+    const kw = KEYWORDS[lang] || '';
+    let pattern = `(${comment})` +
+      `|('(?:[^'\\\\\\n]|\\\\.)*'|"(?:[^"\\\\\\n]|\\\\.)*")` +
+      `|(\\b\\d+(?:\\.\\d+)?(?:e[+-]?\\d+)?\\b)`;
+    if(lang === 'yaml') pattern += `|(^[ \\t]*[\\w./-]+)(?=\\s*:)`;
+    if(kw) pattern += `|\\b(${kw})\\b`;
+    const re = new RegExp(pattern, 'gm');
+    let out = '', last = 0, m;
+    while((m = re.exec(src)) !== null){
+      out += escHtml(src.slice(last, m.index));
+      const cls = m[1] ? 'tok-com' : m[2] ? 'tok-str' : m[3] ? 'tok-num'
+                : (lang === 'yaml' && m[4]) ? 'tok-key' : 'tok-kw';
+      out += '<span class="' + cls + '">' + escHtml(m[0]) + '</span>';
+      last = m.index + m[0].length;
+    }
+    return out + escHtml(src.slice(last));
+  }
+
+  document.querySelectorAll('pre').forEach(pre => {
+    const codeEl = pre.querySelector('code');
+    const target = codeEl || pre;
+    const text = target.textContent;
+    const lang = detectLang(codeEl, text);
+    if(!lang || !KEYWORDS.hasOwnProperty(lang)) return;
+    target.innerHTML = highlight(text, lang);
+  });
+})();

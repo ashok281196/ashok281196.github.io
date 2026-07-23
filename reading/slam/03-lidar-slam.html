@@ -82,12 +82,12 @@
 <h2><span class="sec-no">3.3</span>Deskew, the Rolling-Shutter Problem of Lasers</h2>
 <p>A spinning lidar takes about 100 ms to complete one revolution. The scan is not a photograph; it is a 100 ms exposure. If the robot moved during the sweep, points captured early and points captured late live in different frames, and treating them as one rigid snapshot smears the geometry.</p>
 <p>How bad is it? Run the numbers. At 1 m/s of straight-line motion, the sensor moves 10 cm during the sweep. Walls come out 10 cm thick instead of 2 cm, and scan-to-map matching mostly soaks it up; you lose accuracy, not the mission. Rotation is another animal. At 15 rad/s (a drone flipping, or a handheld scanner being waved carelessly), the frame turns about 86 degrees within one sweep. A point 10 m away appears displaced by roughly 13 m from where it belongs. No matcher recovers from that.</p>
-<pre>sweep time      0.1 s  (10 Hz spinning lidar)
+<pre><code class="language-text">sweep time      0.1 s  (10 Hz spinning lidar)
 translation:    smear ≈ v · 0.1 s
                 1 m/s  → 10 cm      annoying, survivable
 rotation:       smear ≈ 2 r sin(ω · 0.05 s)   at range r
                 1 rad/s,  r = 10 m → 1.0 m    matcher struggles
-                15 rad/s, r = 10 m → 13.6 m   matcher dead</pre>
+                15 rad/s, r = 10 m → 13.6 m   matcher dead</code></pre>
 <p>The practical rule falls out of the table: translation degrades deskew-free scans linearly and gently, rotation destroys them, and the damage scales with range.</p>
 <p>The fix is to estimate the motion <em>during</em> the sweep and re-project every point to a common instant, usually the sweep end. Three grades of sophistication:</p>
 <p><strong>Constant velocity.</strong> Assume the last inter-scan twist held during this sweep, interpolate each point's pose by its timestamp. Free, no extra sensor, and what KISS-ICP ships with. Fails exactly when acceleration is high, which is when you needed it most.</p>
@@ -100,7 +100,7 @@ rotation:       smear ≈ 2 r sin(ω · 0.05 s)   at range r
 
 <h3>Point-to-Point ICP, the Ancestor</h3>
 <p>Iterative Closest Point, Besl and McKay, 1992. The loop:</p>
-<pre>given: source scan P, target map Q, initial guess T0
+<pre><code class="language-text">given: source scan P, target map Q, initial guess T0
 repeat:
   1. transform:    P' = T · P
   2. correspond:   for each p' in P', find nearest q in Q   (kd-tree)
@@ -108,7 +108,7 @@ repeat:
   4. solve:        T* = argmin_T  Σ ||T·p - q||²             (closed form: SVD)
   5. update:       T = T*
 until change in error &lt; epsilon, or max iterations
-</pre>
+</code></pre>
 <p>Step 4 has a closed-form solution (subtract centroids, SVD of the cross-covariance, rotation from the orthogonal factors). The loop converges because each step provably does not increase the error. What it converges <em>to</em> depends entirely on the initial guess, which is the subject of the warfield box below.</p>
 
 <h3>Point-to-Plane, Why It Wins on Real Buildings</h3>
@@ -237,14 +237,14 @@ until change in error &lt; epsilon, or max iterations
 <div class="setup">
 <p><strong>Setup B: KISS-ICP on a Public Dataset, This Weekend</strong></p>
 <p><strong>Goal:</strong> run a state-of-the-art lidar odometry on recorded data with two shell commands, then break it on purpose to learn what deskew and voxel size actually do. KISS-ICP is a C++ core with Python bindings and a CLI; no framework, no build system, no drivers. <strong>Prereqs:</strong> Python 3.10+, ~8 GB RAM, no GPU.</p>
-<pre>pip install "kiss-icp[all]"    # [all] adds the built-in visualizer
+<pre><code class="language-bash">pip install "kiss-icp[all]"    # [all] adds the built-in visualizer
 
 # grab data: a KITTI odometry sequence is the classic starting point
 # (kitti odometry "velodyne laser data", sequence 00, ~4 GB)
 # any folder of .bin / .ply / .pcd scans also works
-kiss_icp_pipeline --visualize ~/data/kitti-odometry/dataset/sequences/00</pre>
+kiss_icp_pipeline --visualize ~/data/kitti-odometry/dataset/sequences/00</code></pre>
 <p>The pipeline auto-detects common dataset layouts (KITTI, MulRan, PARIS-LUCO, plain scan folders). Every knob lives in one small YAML you can pass with <code>--config</code>; these are the fields that matter:</p>
-<pre># config.yaml
+<pre><code class="language-yaml"># config.yaml
 data:
     deskew: true            # motion-compensate each scan; needs per-point timestamps
     max_range: 100.0        # clamp to the sensor's honest range
@@ -253,7 +253,7 @@ mapping:
     voxel_size: 1.0         # local map resolution, meters; the main speed/accuracy dial
     max_points_per_voxel: 20
 adaptive_threshold:
-    initial_threshold: 2.0  # ICP correspondence gate, adapts as you drive</pre>
+    initial_threshold: 2.0  # ICP correspondence gate, adapts as you drive</code></pre>
 <p><strong>What you should see:</strong> the visualizer shows the accumulated local map with crisp, single-thickness walls and the estimated trajectory; the console reports per-scan runtime (a few tens of ms on a laptop CPU) and writes the poses to <code>results/</code> in TUM and KITTI formats when the run ends, ready for Chapter 7's evo scoring.</p>
 <p><strong>Break it on purpose, then explain what you saw:</strong> (1) Set <code>deskew: false</code> and re-run: during fast turns walls curve and double, which is section 3.3 made visible. (2) Set <code>voxel_size: 3.0</code>: runtime drops, drift grows, the accuracy/speed dial in one experiment. (3) Find a corridor-heavy sequence and watch along-corridor drift with perfect-looking walls: degeneracy (section 3.9) does not show up in the residuals. (4) If your own sensor's scans lack per-point timestamps, deskew silently cannot help you; check the field exists before blaming the algorithm.</p>
 <p>The same experiment with tight IMU coupling is FAST-LIO2's territory (C++, builds against its bundled ikd-Tree); its config asks for exactly the Chapter 2 items: IMU noise densities, <code>extrinsic_T</code>/<code>extrinsic_R</code> between lidar and IMU, and honest per-point timestamps. A run that starts mid-motion tilts the whole map because gravity and gyro bias are estimated in the first stationary seconds.</p>
@@ -296,7 +296,7 @@ adaptive_threshold:
 <div class="setup">
 <p><strong>Setup A: a Complete Pose-Graph SLAM in 60 Lines of Python (Open3D)</strong></p>
 <p><strong>Goal:</strong> build the whole Chapter 3 skeleton yourself: scan matching for odometry, a loop-closure constraint, pose-graph optimization, and the before/after snap, on real data, in pure Python. <strong>Prereqs:</strong> <code>pip install open3d numpy</code> (Open3D ships demo point-cloud fragments, so no dataset download is needed).</p>
-<pre>import open3d as o3d
+<pre><code class="language-python">import open3d as o3d
 import numpy as np
 
 # three overlapping indoor fragments from Open3D's bundled demo data
@@ -342,7 +342,7 @@ o3d.pipelines.registration.global_optimization(
 merged = o3d.geometry.PointCloud()
 for node, cloud in zip(graph.nodes, clouds):
     merged += o3d.geometry.PointCloud(cloud).transform(node.pose)
-o3d.visualization.draw_geometries([merged])</pre>
+o3d.visualization.draw_geometries([merged])</code></pre>
 <p><strong>What you should see:</strong> a merged room where the three fragments agree: single-thickness walls, one table instead of three ghostly ones. Comment out the loop-closure edge block and re-run to see the drifted version; the difference between the two windows is the entire point of pose-graph SLAM.</p>
 <p><strong>Things to try:</strong> (1) Perturb the odometry chain (multiply one T by a small rotation) and watch global optimization pull it back using the loop edge. (2) Set <code>uncertain=False</code> on the loop edge and inflate its transform with a deliberate error: a trusted-but-wrong loop closure shears the whole map, which is why Chapter 1's robust kernels exist. (3) Swap in your own scans (.pcd/.ply of any room) and re-run; voxel size and correspondence distance are the two knobs to retune. (4) Halve <code>voxel_down_sample(0.025)</code>: accuracy up, runtime up, the same dial as every production system.</p>
 </div>

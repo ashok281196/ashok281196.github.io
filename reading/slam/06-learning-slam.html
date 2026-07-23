@@ -121,13 +121,13 @@
 <div class="setup">
 <p><strong>Worked Setup A: an hloc Localization Pipeline on Your Own Photos.</strong> Goal: build a SuperPoint + LightGlue + COLMAP map of one room from 30 phone photos, then localize 3 fresh query photos against it. This is the depth-1 stack end to end, on your own data, in an afternoon.</p>
 <p>Prereqs: Ubuntu 24.04, Python 3.11, ~10 GB disk. A CUDA GPU with 4 GB+ helps (CPU works, roughly 10x slower). Take ~30 photos of a textured room with generous overlap between consecutive shots, plus 3 extra photos from viewpoints you did not map, all with the same camera and fixed zoom.</p>
-<pre>git clone --recursive https://github.com/cvg/Hierarchical-Localization
+<pre><code class="language-bash">git clone --recursive https://github.com/cvg/Hierarchical-Localization
 cd Hierarchical-Localization
 python -m pip install -e .        # pulls torch, pycolmap, lightglue
 mkdir -p datasets/room/mapping datasets/room/query
-# copy 30 mapping photos and 3 query photos into those folders</pre>
+# copy 30 mapping photos and 3 query photos into those folders</code></pre>
 <p>Mapping, as a Python script (this is the real hloc API, see the repo's <code>demo.ipynb</code> for the same flow):</p>
-<pre>from pathlib import Path
+<pre><code class="language-python">from pathlib import Path
 from hloc import extract_features, match_features, reconstruction, \
                  pairs_from_exhaustive, localize_sfm
 
@@ -142,7 +142,7 @@ refs = [p.name for p in images.iterdir()]
 extract_features.main(fconf, images, feature_path=feats)
 pairs_from_exhaustive.main(sfm_pairs, image_list=refs)   # 30 imgs = 435 pairs
 match_features.main(mconf, sfm_pairs, features=feats, matches=matches)
-model = reconstruction.main(outputs/"sfm", images, sfm_pairs, feats, matches)</pre>
+model = reconstruction.main(outputs/"sfm", images, sfm_pairs, feats, matches)</code></pre>
 <p>Expected: extraction runs at a few images per second on GPU; reconstruction registers 28 to 30 of 30 images with mean reprojection error near 1 px and mean track length 4 to 8. For localization, extract features for the queries into the same file, generate query-to-map pairs with <code>pairs_from_exhaustive.main(loc_pairs, image_list=query_names, ref_list=refs)</code>, match, then call <code>localize_sfm.main(...)</code> with a queries text file holding each query's camera model and intrinsics (format in the repo docs; pull focal length from EXIF). Expected: all 3 queries localize with 150 to 800 inliers each; below ~50 inliers, treat the pose as suspect.</p>
 <p>Classic failure symptoms: (1) textureless walls give under 300 keypoints per image and registration falls apart, so reshoot with more of the room's furniture and edges in frame; (2) auto-exposure swings between shots tank match counts on otherwise fine pairs, so lock exposure or shoot in even light; (3) repetitive texture (tiles, bookshelves, radiators) produces confident wrong matches that survive matching and die only at RANSAC, visible as high match counts but low inlier ratios, and occasionally as a ghost-merged reconstruction. If the model splits into two disconnected components, that is usually symptom 1 or 2 on the photos bridging them.</p>
 </div>
@@ -168,15 +168,15 @@ model = reconstruction.main(outputs/"sfm", images, sfm_pairs, feats, matches)</p
 <div class="setup">
 <p><strong>Worked Setup B: MASt3R Two-Image Inference, Metric Pointmaps in One Forward Pass.</strong> Goal: run MASt3R on two overlapping photos, read the pointmap and confidence outputs, and export a point cloud, so depth 3 stops being an abstraction.</p>
 <p>Prereqs: Ubuntu 24.04, NVIDIA GPU with 8 GB+ VRAM, CUDA 12.x driver, conda. The ViT-Large checkpoint is ~2.6 GB.</p>
-<pre>git clone --recursive https://github.com/naver/mast3r
+<pre><code class="language-bash">git clone --recursive https://github.com/naver/mast3r
 cd mast3r
 conda create -n mast3r python=3.11 -y &amp;&amp; conda activate mast3r
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 pip install -r requirements.txt
 mkdir -p checkpoints
-wget https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth -P checkpoints/</pre>
+wget https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth -P checkpoints/</code></pre>
 <p>Quickest look: <code>python demo.py --model_name MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric</code> starts a Gradio page on <code>localhost:7860</code>; drop in two photos, get an interactive 3D view and a downloadable GLB. For the programmatic version:</p>
-<pre>from mast3r.model import AsymmetricMASt3R
+<pre><code class="language-python">from mast3r.model import AsymmetricMASt3R
 from dust3r.inference import inference
 from dust3r.utils.image import load_images
 
@@ -187,7 +187,7 @@ out  = inference([tuple(imgs)], model, "cuda", batch_size=1)
 
 pts_a  = out["pred1"]["pts3d"]                 # H x W x 3, camera-A frame
 pts_b  = out["pred2"]["pts3d_in_other_view"]   # B's pixels, also in A's frame
-conf_a = out["pred1"]["conf"]                  # per-pixel confidence, &gt;= 1</pre>
+conf_a = out["pred1"]["conf"]                  # per-pixel confidence, &gt;= 1</code></pre>
 <p>Interpretation: both pointmaps live in camera A's frame, so the relative pose is implicit in <code>pts_b</code> (recover it with a Procrustes fit, or use the repo's global aligner). The metric checkpoint outputs roughly real-world meters; expect scale within 10 to 20 percent on ordinary indoor scenes, worse on unusual optics. To export: mask pixels with <code>conf &lt; 1.5</code> (starting point, tune by eye), stack the rest into an N×3 array, write a PLY with open3d or trimesh, view in MeshLab.</p>
 <p>Honest numbers: on an RTX 4090 a 512-px pair takes about 0.2 s with ~6 GB peak VRAM; a laptop 3060 runs it in roughly a second; CPU-only takes minutes per pair, fine for one experiment, useless beyond. Now the instructive part: feed it two photos with <em>no overlap</em> (two different rooms). It still answers. You get two plausible pointmaps welded into one frame at some hallucinated relative pose, and while confidence dips, it does not reliably crash to zero. A classical pipeline would return "0 inliers, no estimate": an honest failure. The feed-forward model has no abstain path; the prior always fills in an answer. That single experiment is the whole argument of Section 6.5, runnable in ten minutes.</p>
 </div>

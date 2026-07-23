@@ -24,14 +24,14 @@
 <p>Chapter 0 left you with a belief that must be predicted forward and corrected by measurements. This chapter builds the machinery that actually does it. First, the vocabulary, because the whole field runs on four objects.</p>
 <p>The <strong>state</strong> x<sub>t</sub> is the vector of everything you want to estimate at time t. For a wheeled robot it might be (x, y, θ). For a visual-inertial rig it balloons to position, orientation, velocity, and the IMU's accelerometer and gyro biases: fifteen or so numbers. In full SLAM the state also contains the map, so it can hold thousands of landmark positions. Choosing what goes into the state is a design decision with consequences; every extra dimension costs you later.</p>
 <p>The <strong>motion model</strong> f predicts the next state from the previous one plus a control or odometry input u<sub>t</sub>. The <strong>measurement model</strong> h predicts what a sensor should read if the state were exactly x<sub>t</sub>. Both are wrong by a little, and we model that wrongness as additive Gaussian noise. Here is the notation used for the rest of the chapter:</p>
-<pre>x_t                     state at time t
+<pre><code class="language-text">x_t                     state at time t
 u_t                     control / odometry input from t-1 to t
 z_t                     measurement at time t
 
 x_t = f(x_{t-1}, u_t) + w_t     motion model,       w_t ~ N(0, Q)
 z_t = h(x_t)          + v_t     measurement model,  v_t ~ N(0, R)
 
-bel(x_t) = p(x_t | z_{1:t}, u_{1:t})     the belief we maintain</pre>
+bel(x_t) = p(x_t | z_{1:t}, u_{1:t})     the belief we maintain</code></pre>
 <p>Read the last line slowly. We never estimate a single point. We maintain a probability distribution over states, conditioned on everything we have driven and everything we have seen. Every algorithm in this chapter is a different answer to one question: what shape do you allow bel(x<sub>t</sub>) to be?</p>
 <dl class="jargon">
   <dt>State</dt><dd>The vector of quantities being estimated: pose at minimum, often velocity, sensor biases, and landmarks too.</dd>
@@ -44,12 +44,12 @@ bel(x_t) = p(x_t | z_{1:t}, u_{1:t})     the belief we maintain</pre>
 <p>A Gaussian N(μ, Σ) is a bump described by two objects: the mean μ (where the bump sits) and the covariance Σ (how far it spreads, and in which directions). For an n-dimensional state that is n numbers plus a symmetric n×n matrix. Compare that to storing a full arbitrary distribution over a 6-DOF pose, which is hopeless, and you see the first attraction: Gaussians are cheap.</p>
 <p>The second attraction is the one that built the field. Push a Gaussian through a linear function and it stays Gaussian. Multiply two Gaussian densities together and the result is proportional to another Gaussian. Since prediction is (approximately) a linear map and Bayesian correction is a multiplication of densities, a Gaussian belief stays Gaussian through the entire predict-correct cycle. You never leave the family, so two small objects, μ and Σ, are all you ever store.</p>
 <p>The fusion formula in 1D is worth memorizing because it explains every Kalman update you will ever stare at:</p>
-<pre>fuse N(μ₁, σ₁²) with N(μ₂, σ₂²):
+<pre><code class="language-text">fuse N(μ₁, σ₁²) with N(μ₂, σ₂²):
 
   σ²  = (1/σ₁² + 1/σ₂²)⁻¹                  precisions ADD
   μ   = σ² · (μ₁/σ₁² + μ₂/σ₂²)             precision-weighted mean
 
-example:  N(3.0, 4.0) × N(5.0, 1.0)  →  N(4.6, 0.8)</pre>
+example:  N(3.0, 4.0) × N(5.0, 1.0)  →  N(4.6, 0.8)</code></pre>
 <p>Two things to notice in the example. The fused mean 4.6 sits much closer to 5.0, the confident source. And the fused variance 0.8 is smaller than either input. Fusing information never makes you less certain, and the natural currency is precision (inverse covariance), which simply adds.</p>
 <div class="keypoint">The product of two Gaussians is a Gaussian whose precision is the sum of the input precisions. Every sensor fusion result in this book, from a Kalman update to a converged factor graph, is this one fact applied repeatedly.</div>
 <p>In more than one dimension, a covariance draws an <strong>ellipse</strong> (an ellipsoid in 3D+): the contour of equal probability around the mean. Its axes point along the eigenvectors of Σ and their lengths are the square roots of the eigenvalues. A long thin ellipse says "I know my lateral position well but not my forward position", which is precisely what odometry down a featureless corridor produces. Fusion intersects ellipses:</p>
@@ -76,8 +76,8 @@ example:  N(3.0, 4.0) × N(5.0, 1.0)  →  N(4.6, 0.8)</pre>
 <h2><span class="sec-no">1.3</span>The Bayes Filter Heartbeat</h2>
 <p>Chapter 0 gave you the heartbeat in words: predict widens, correct narrows. Here is where the two beats come from, at prose level, no measure theory required.</p>
 <p>Start from what we want, p(x<sub>t</sub> | z<sub>1:t</sub>, u<sub>1:t</sub>), and apply Bayes' rule to peel off the newest measurement: the posterior is proportional to p(z<sub>t</sub> | x<sub>t</sub>) times the belief just before that measurement arrived. That prior belief, in turn, comes from pushing yesterday's posterior through the motion model: sum over every place you could have been at t−1, weighted by how likely the motion u<sub>t</sub> was to carry you from there to x<sub>t</sub>. Two assumptions make this legal. The <strong>Markov assumption</strong>: the state summarizes all history, so the past matters only through x<sub>t−1</sub>. And conditional independence of measurements given the state. Written compactly:</p>
-<pre>predict:  bel⁻(x_t) = ∫ p(x_t | x_{t-1}, u_t) · bel(x_{t-1}) dx_{t-1}
-correct:  bel(x_t)  = η · p(z_t | x_t) · bel⁻(x_t)</pre>
+<pre><code class="language-text">predict:  bel⁻(x_t) = ∫ p(x_t | x_{t-1}, u_t) · bel(x_{t-1}) dx_{t-1}
+correct:  bel(x_t)  = η · p(z_t | x_t) · bel⁻(x_t)</code></pre>
 <p>The predict step is a convolution: you take the old belief and smear it by the motion noise. Smearing spreads probability mass, so the belief widens. The correct step is a pointwise multiplication by the measurement likelihood, then renormalization (η). Multiplying by a function that is large where the measurement agrees and small elsewhere concentrates the mass, so the belief narrows. That is the entire derivation, and it is worth being able to say in an interview without notation.</p>
 <p>The catch is that the integral is over all possible states. Over a continuous 6-DOF pose you cannot evaluate it exactly, so every practical filter is a compromise about how to represent bel. Constrain it to a Gaussian and you get the Kalman family (1.4). Represent it by samples and you get the particle filter (1.5). Refuse to throw away the past at all and you get least squares and factor graphs (1.6, 1.7).</p>
 
@@ -94,10 +94,10 @@ correct:  bel(x_t)  = η · p(z_t | x_t) · bel⁻(x_t)</pre>
 </table>
 <p>Watch the gain K fall from 0.71 to 0.55. At t=1 the filter was ignorant (P = 1.25 against R = 0.5), so it leaned on the sensor. One step later it has history, so it leans less. Keep iterating and P settles where growth by Q exactly balances shrinkage by correction. For this problem you can solve that balance in closed form (p² + pQ − QR = 0) and get p = 0.25, hence a steady-state gain of exactly 0.50. The filter converges to "split the difference", and it would have told you so before seeing a single measurement, because P and K never depend on the data. Only x̂ does.</p>
 <p>The general matrix form is the same story with bookkeeping:</p>
-<pre>predict:  x̂⁻ = F x̂ + B u              P⁻ = F P Fᵀ + Q
+<pre><code class="language-text">predict:  x̂⁻ = F x̂ + B u              P⁻ = F P Fᵀ + Q
 correct:  K  = P⁻ Hᵀ (H P⁻ Hᵀ + R)⁻¹                    Kalman gain
           x̂  = x̂⁻ + K (z − H x̂⁻)                        innovation, weighted
-          P  = (I − K H) P⁻</pre>
+          P  = (I − K H) P⁻</code></pre>
 <div class="analogy">The Kalman gain is a trust dial with prediction at 0 and sensor at 1, and the filter sets it automatically from the two covariances. Driving through a tunnel your GPS variance R explodes, the dial rolls toward 0, and you coast on the motion model. Out of the tunnel R drops, the dial swings back, and the fix pulls you in hard. Nobody tunes the dial per step; tuning Q and R <em>is</em> tuning the dial.</div>
 <h3>The EKF: Linearize and Hope</h3>
 <p>Real robots rotate, and rotation makes f and h nonlinear (that θ inside sines and cosines). The <strong>extended Kalman filter</strong> keeps the Kalman machinery but replaces F and H with <strong>Jacobians</strong>: the matrices of partial derivatives ∂f/∂x and ∂h/∂x, evaluated at the current estimate. Geometrically, you replace the curved model with its tangent plane at the point where you believe you are, and run the linear filter on that plane.</p>
@@ -109,11 +109,11 @@ correct:  K  = P⁻ Hᵀ (H P⁻ Hᵀ + R)⁻¹                    Kalman gain
 <div class="setup">
 <p><strong>Setup A: a 1D Kalman filter from scratch, this evening.</strong> Goal: filter a noisy GPS-like position of a cart with a constant-velocity model, watch the gain converge, and see the RMS error drop by two thirds.</p>
 <p>Prereqs: any Linux/macOS with Python 3.10+, no ROS. On Ubuntu 24.04:</p>
-<pre>sudo apt install python3-venv
+<pre><code class="language-bash">sudo apt install python3-venv
 python3 -m venv ~/kf-env && source ~/kf-env/bin/activate
-pip install numpy matplotlib        # numpy 2.x is fine</pre>
+pip install numpy matplotlib        # numpy 2.x is fine</code></pre>
 <p>Save as <code>kf1d.py</code> and run <code>python kf1d.py</code>:</p>
-<pre>#!/usr/bin/env python3
+<pre><code class="language-python">#!/usr/bin/env python3
 # 1D constant-velocity Kalman filter, position-only measurements.
 import numpy as np
 import matplotlib.pyplot as plt
@@ -158,7 +158,7 @@ print(f"filtered RMS error: {np.sqrt(np.mean((est[:,0]-truth[:,0])**2)):.3f} m")
 plt.plot(z, ".", ms=3, alpha=.4, label="raw measurements")
 plt.plot(truth[:, 0], "k", lw=1, label="truth")
 plt.plot(est[:, 0], "r", lw=1.5, label="KF estimate")
-plt.xlabel("step"); plt.ylabel("position [m]"); plt.legend(); plt.show()</pre>
+plt.xlabel("step"); plt.ylabel("position [m]"); plt.legend(); plt.show()</code></pre>
 <p>Expected: steady-state gain near [0.11, 0.06], raw RMS about 0.50 m, filtered RMS about 0.17 m. The velocity estimate recovers from its wrong initial guess within the first couple of seconds even though velocity is never measured directly; it is observable through the position sequence.</p>
 <p>Sanity checks: (1) the gain stops changing by roughly step 50, and it would do so even with different measurements, since K depends only on F, H, Q, R. (2) Multiply R by 100 and the filter nearly ignores the sensor, lagging badly when the cart's velocity wanders. (3) Multiply Q by 100 and the estimate tracks the raw noise almost point for point. (4) Set <code>accel_sigma</code> in the simulation to 1.0 but leave Q alone: the model is now too optimistic and the filter lags, the on-paper version of every real tuning session.</p>
 </div>
@@ -175,12 +175,12 @@ plt.xlabel("step"); plt.ylabel("position [m]"); plt.legend(); plt.show()</pre>
 <h2><span class="sec-no">1.6</span>From Filters to Least Squares</h2>
 <p>A filter marginalizes out the past at every tick. A loop closure, though, is information about the past: it says pose 200 equals pose 12. A filter can only push that correction into its current state; the trajectory already logged stays bent. The alternative is to keep past poses as unknowns and solve for all of them at once. This is <strong>smoothing</strong>, and its natural language is least squares.</p>
 <p>Here is the maximum-likelihood view. Each measurement i (an odometry edge, a loop closure, a landmark sighting) gives a <strong>residual</strong> r<sub>i</sub>(x) = z<sub>i</sub> − h<sub>i</sub>(x): the disagreement between what was measured and what the candidate solution x predicts. If measurement noise is Gaussian, the likelihood of measurement i is exp(−½ r<sub>i</sub>ᵀ Σ<sub>i</sub>⁻¹ r<sub>i</sub>), and maximizing the product of likelihoods over all measurements is exactly minimizing the sum of squared, covariance-weighted residuals. Chapter 0's spring picture is this equation wearing overalls: each residual is a stretched spring, Σ<sub>i</sub>⁻¹ is its stiffness, and the solution is the pose set of minimum stored energy.</p>
-<pre>x* = argmin_x  Σᵢ  rᵢ(x)ᵀ Σᵢ⁻¹ rᵢ(x)
+<pre><code class="language-text">x* = argmin_x  Σᵢ  rᵢ(x)ᵀ Σᵢ⁻¹ rᵢ(x)
 
 linearize each rᵢ around a guess, stack Jacobians J, solve
 
 (Jᵀ Σ⁻¹ J) δx = −Jᵀ Σ⁻¹ r          the normal equations
-x ← x ⊞ δx, repeat until δx is tiny</pre>
+x ← x ⊞ δx, repeat until δx is tiny</code></pre>
 <p>The matrix H = JᵀΣ⁻¹J is the <strong>SLAM Hessian</strong> (strictly, the Gauss-Newton approximation of it), and its saving grace is <strong>sparsity</strong>. Each residual touches at most a couple of variables: an odometry edge involves two consecutive poses, a landmark observation involves one pose and one landmark. So J has a handful of nonzero blocks per row, and H is nearly all zeros. A trajectory of 10,000 poses gives a Hessian with 10⁸ entries, of which perhaps 10⁵ are nonzero, and sparse Cholesky factorization eats that for breakfast. Without sparsity, graph SLAM would still be a curiosity.</p>
 <p>Two iteration schemes solve this in practice. <strong>Gauss-Newton</strong> trusts the linearization completely and takes the full step δx; near the solution it converges fast, far from it the step can overshoot into a worse place. <strong>Levenberg-Marquardt</strong> adds a damping term λ to the diagonal, solving (H + λI)δx = −g. The intuition is line search versus trust region: Gauss-Newton picks a direction and commits, while LM asks "over what radius do I trust my quadratic model?", shrinking λ when steps help (behaving like Gauss-Newton) and growing it when steps hurt (behaving like cautious gradient descent). LM is the default in every SLAM back-end for a reason: pose graphs after a big loop closure are exactly the far-from-solution regime where Gauss-Newton lunges.</p>
 
@@ -230,11 +230,11 @@ x ← x ⊞ δx, repeat until δx is tiny</pre>
 <div class="setup">
 <p><strong>Setup B: your first pose-graph optimization with GTSAM.</strong> Goal: build the exact graph in Fig 1.2, a five-pose square with drifting odometry and one loop closure, and watch Levenberg-Marquardt snap it shut.</p>
 <p>Prereqs: Python 3.10 to 3.12 on x86_64 Linux (prebuilt wheels exist there; other platforms may compile from source). GTSAM 4.2:</p>
-<pre>python3 -m venv ~/gtsam-env && source ~/gtsam-env/bin/activate
+<pre><code class="language-bash">python3 -m venv ~/gtsam-env && source ~/gtsam-env/bin/activate
 pip install gtsam numpy
-python -c "import gtsam; print(gtsam.__version__)"   # expect 4.2.x</pre>
+python -c "import gtsam; print(gtsam.__version__)"   # expect 4.2.x</code></pre>
 <p>Save as <code>posegraph2d.py</code>:</p>
-<pre>#!/usr/bin/env python3
+<pre><code class="language-python">#!/usr/bin/env python3
 # 5-pose 2D pose graph: drifting odometry + one loop closure.
 import numpy as np
 import gtsam
@@ -271,7 +271,7 @@ for i in range(5):
     print(f"x{i}  before ({b.x():+.2f}, {b.y():+.2f}, {b.theta():+.2f})"
           f"   after ({a.x():+.2f}, {a.y():+.2f}, {a.theta():+.2f})")
 print("graph error before:", round(graph.error(initial), 2))
-print("graph error after :", round(graph.error(result), 2))</pre>
+print("graph error after :", round(graph.error(result), 2))</code></pre>
 <p>Expected: before optimization, integrated odometry leaves pose 4 about 0.6 m from the start with roughly 21° of heading error, and the graph error is large. After optimization the poses form a clean square, pose 4 sits within a few centimetres of pose 0, and the error drops by more than an order of magnitude. The leftover error is real: the odometry measurements and the loop closure genuinely disagree, and LM has spread that disagreement across all five edges instead of leaving it piled at the end. That is the "smear the error around the loop" from Chapter 0, in numbers.</p>
 <p>Now the experiment that teaches the actual lesson: multiply the loop-closure sigmas by 100 and rerun. The optimized trajectory barely moves from the drifted odometry chain, because a loop closure with a huge covariance is a spring made of overcooked spaghetti. Covariances are not metadata; they are the knobs that decide which measurement wins every argument in the graph.</p>
 <p>Sanity checks: (1) if <code>import gtsam</code> fails, check your Python version against available wheels before reaching for a compiler. (2) If the final error barely drops, check the loop factor's key order: (4, 0) with identity means "pose 0 seen from pose 4", and swapping keys with a non-identity measurement silently builds a different graph. (3) Delete the prior factor and the optimizer may still return numbers, but the solution can slide anywhere in the plane; an unpinned gauge is a bug that often hides. (4) <code>graph.error(result)</code> exactly 0 means your odometry and loop closure were consistent, so you have not actually tested the interesting case.</p>

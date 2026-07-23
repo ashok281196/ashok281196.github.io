@@ -115,7 +115,7 @@
 
 <div class="setup">
 <p><strong>Goal:</strong> run DPVO on a EuRoC sequence and watch era 4 shrug at motion blur. Prereqs: Linux with an NVIDIA GPU (4 GB VRAM is enough for the default config), CUDA-enabled PyTorch, conda, ~10 GB disk.</p>
-<pre>git clone https://github.com/princeton-vl/DPVO.git &amp;&amp; cd DPVO
+<pre><code class="language-bash">git clone https://github.com/princeton-vl/DPVO.git &amp;&amp; cd DPVO
 conda env create -f environment.yml
 conda activate dpvo
 pip install .
@@ -123,12 +123,12 @@ pip install .
 # model weights + a EuRoC sequence
 ./download_models_and_data.sh          # fetches dpvo.pth and sample data
 wget http://robotics.ethz.ch/~asl-datasets/ijrr_euroc_mav_dataset/machine_hall/MH_01_easy/MH_01_easy.zip
-unzip MH_01_easy.zip -d euroc/MH_01</pre>
-<pre># run visual odometry on the left camera stream
+unzip MH_01_easy.zip -d euroc/MH_01</code></pre>
+<pre><code class="language-bash"># run visual odometry on the left camera stream
 python demo.py \
   --imagedir euroc/MH_01/mav0/cam0/data \
   --calib calib/euroc.txt \
-  --stride 2 --viz</pre>
+  --stride 2 --viz</code></pre>
 <p>Expected: a viewer with camera frustum and sparse patch cloud, pose updates at real-time rate on a mid-range GPU, and a final trajectory you can save with <code>--save_trajectory</code> (score it against ground truth with the Chapter 7 evo recipe; a healthy run lands in the few-cm ATE range on MH_01).</p>
 <p>Sanity checks: (1) VRAM overflow → lower <code>PATCHES_PER_FRAME</code> or <code>BUFFER_SIZE</code> in <code>config/default.yaml</code>, the knobs that trade memory for robustness; (2) trajectory in wrong scale → normal, this is monocular VO, align with scale correction in evo; (3) stutter at start → the first seconds initialize the patch graph, judge nothing before frame 100; (4) wrong calib file → poses go to soup immediately, check image resolution matches the calib line.</p>
 </div>
@@ -173,23 +173,23 @@ python demo.py \
 
 <div class="setup">
 <p><strong>Goal:</strong> build ORB-SLAM3 and run stereo-inertial on EuRoC MH_01, the canonical first visual SLAM experiment. Prereqs: Ubuntu 22.04/24.04, 8 GB RAM, OpenCV ≥ 4.4, Eigen3, and Pangolin 0.6 built from source.</p>
-<pre># dependencies
+<pre><code class="language-bash"># dependencies
 sudo apt install build-essential cmake libeigen3-dev libopencv-dev \
                  libglew-dev libpython3-dev python3-numpy
 
 git clone --branch v0.6 https://github.com/stevenlovegrove/Pangolin.git
-cd Pangolin &amp;&amp; cmake -B build -DCMAKE_BUILD_TYPE=Release &amp;&amp; sudo cmake --build build --target install</pre>
-<pre>git clone https://github.com/UZ-SLAMLab/ORB_SLAM3.git &amp;&amp; cd ORB_SLAM3
+cd Pangolin &amp;&amp; cmake -B build -DCMAKE_BUILD_TYPE=Release &amp;&amp; sudo cmake --build build --target install</code></pre>
+<pre><code class="language-bash">git clone https://github.com/UZ-SLAMLab/ORB_SLAM3.git &amp;&amp; cd ORB_SLAM3
 ./build.sh        # if compile errors mention C++ standard, set C++14 in CMakeLists.txt
 
 # dataset
 wget http://robotics.ethz.ch/~asl-datasets/ijrr_euroc_mav_dataset/machine_hall/MH_01_easy/MH_01_easy.zip
-mkdir -p ~/euroc/MH01 &amp;&amp; unzip MH_01_easy.zip -d ~/euroc/MH01</pre>
-<pre>./Examples/Stereo-Inertial/stereo_inertial_euroc \
+mkdir -p ~/euroc/MH01 &amp;&amp; unzip MH_01_easy.zip -d ~/euroc/MH01</code></pre>
+<pre><code class="language-bash">./Examples/Stereo-Inertial/stereo_inertial_euroc \
   Vocabulary/ORBvoc.txt \
   Examples/Stereo-Inertial/EuRoC.yaml \
   ~/euroc/MH01 \
-  Examples/Stereo-Inertial/EuRoC_TimeStamps/MH01.txt</pre>
+  Examples/Stereo-Inertial/EuRoC_TimeStamps/MH01.txt</code></pre>
 <p>Expected: the Pangolin viewer shows green tracked features and a growing keyframe graph; console prints the IMU initialization stages during the first seconds of motion; trajectory files (<code>f_*.txt</code>, <code>kf_*.txt</code>, TUM format) land in the working directory when the sequence ends. Score them with evo per Chapter 7; healthy stereo-inertial MH_01 is a few centimeters ATE.</p>
 <p>Classic failures: (1) segfault at startup → OpenCV version mismatch between build and runtime, rebuild both DBoW2/g2o thirdparty and the main tree; (2) build dies at 100% CPU → <code>./build.sh</code> uses all cores and runs out of RAM, edit it to <code>make -j2</code>; (3) "not enough acceleration" and no IMU init → the first 10 seconds of MH_01 are gentle, let it run, initialization completes once the drone excites the IMU; (4) viewer black over SSH → run local or set <code>--headless</code> style flags by disabling the viewer in the example's settings.</p>
 </div>

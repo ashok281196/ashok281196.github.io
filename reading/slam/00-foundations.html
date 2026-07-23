@@ -87,10 +87,10 @@
 <div class="setup">
 <h3>Setup A: Simulate Drift and One Loop Closure in 30 Lines of NumPy</h3>
 <p><strong>Goal:</strong> watch odometry drift away from a square ground-truth path, then fix the trajectory with a single endpoint loop closure. <strong>Prereqs:</strong> any OS with Python 3.10+, no ROS needed.</p>
-<pre>python3 -m venv slamlab &amp;&amp; source slamlab/bin/activate
-pip install numpy matplotlib</pre>
+<pre><code class="language-bash">python3 -m venv slamlab &amp;&amp; source slamlab/bin/activate
+pip install numpy matplotlib</code></pre>
 <p>Save as <code>drift_demo.py</code> and run with <code>python drift_demo.py</code>:</p>
-<pre>import numpy as np
+<pre><code class="language-python">import numpy as np
 import matplotlib.pyplot as plt
 
 rng = np.random.default_rng(7)
@@ -123,7 +123,7 @@ ax.plot(*odom.T,      'r--', lw=1.5, label='odometry (drifted)')
 ax.plot(*corrected.T, 'g-',  lw=1.5, label='after loop closure')
 ax.scatter(0, 0, s=80, c='teal', zorder=5, label='start = end')
 ax.set_aspect('equal'); ax.legend(); ax.set_title('drift, then one loop closure')
-plt.savefig('loop_closure.png', dpi=150); plt.show()</pre>
+plt.savefig('loop_closure.png', dpi=150); plt.show()</code></pre>
 <p><strong>What you should see:</strong> the printed endpoint error lands around 0.5 to 1.5&nbsp;m (about 1 to 4% of the 40&nbsp;m path), the red dashed path curls away from the black square, and the green corrected path hugs it, with the largest residual bow mid-path where the correction is weakest.</p>
 <p><strong>Sanity checks:</strong> (1) Set <code>sigma_yaw = 0</code> and rerun: drift almost vanishes, even with the step noise untouched. Heading error dominates, exactly the lever-arm effect from 0.2. (2) Raise it to 2° per step and the square becomes a banana. (3) Honesty note: subtracting a linearly growing share of the error is a cheat that only translates points. A real pose graph also rotates the path segments, which is why the green corners still bow slightly. Chapter 1 does it properly.</p>
 </div>
@@ -168,7 +168,7 @@ plt.savefig('loop_closure.png', dpi=150); plt.show()</pre>
 
 <h2><span class="sec-no">0.7</span>Idea 6: Coordinate Frames, the Robot's Family Tree</h2>
 <p>A robot juggles several coordinate systems at once, and confusing them causes the most embarrassing bugs in robotics. The convention the whole industry converged on (written down as <a href="https://www.ros.org/reps/rep-0105.html">REP 105</a>, but honored far beyond its birthplace): frames form a tree, every frame has exactly one parent, and a typical mobile robot's tree looks like this:</p>
-<pre>map                               &lt;- map->odom maintained by SLAM / localization
+<pre><code class="language-text">map                               &lt;- map->odom maintained by SLAM / localization
 └── odom                          &lt;- odom->base maintained by the odometry source
     └── base_footprint            (robot projected onto the floor plane)
         └── base_link             (robot body; x forward, y left, z up)
@@ -176,7 +176,7 @@ plt.savefig('loop_closure.png', dpi=150); plt.show()</pre>
             ├── imu_link              (static: measured extrinsic)
             └── camera_link           (static: measured extrinsic)
                 ├── camera_color_optical_frame   (z forward, x right, y down)
-                └── camera_depth_optical_frame</pre>
+                └── camera_depth_optical_frame</code></pre>
 <ul>
   <li><strong>base_link</strong>: the robot's own body. "Forward" for the robot. Body-frame axes by convention: x forward, y left, z up.</li>
   <li><strong>odom</strong>: where odometry <em>thinks</em> the robot has moved since power-on. Smooth and continuous, but drifts.</li>
@@ -190,7 +190,7 @@ plt.savefig('loop_closure.png', dpi=150); plt.show()</pre>
 <div class="setup">
 <h3>Setup B: The Frame Contract, Live, in 60 Lines of Python</h3>
 <p><strong>Goal:</strong> watch map→odom jump while odom→base stays smooth, in raw numbers you generate yourself. <strong>Prereqs:</strong> Python 3.10+ with numpy. No robot, no simulator, no framework.</p>
-<pre>import numpy as np
+<pre><code class="language-python">import numpy as np
 rng = np.random.default_rng(7)
 
 def T(x, y, th):                       # SE(2) as a 3x3 homogeneous matrix
@@ -217,7 +217,7 @@ for k, (Tt, To) in enumerate(zip(truth, odom)):
     ox, oy, ot = params(To)                  # odom->base: smooth, drifting
     mx, my, mt = params(T_map_odom @ To)     # map->base: the composed truth-estimate
     print(f'{k:3d}  map->odom [{x:+.3f} {y:+.3f} {th:+.3f}]   '
-          f'odom->base [{ox:+.3f} {oy:+.3f}]   map->base [{mx:+.3f} {my:+.3f}]')</pre>
+          f'odom->base [{ox:+.3f} {oy:+.3f}]   map->base [{mx:+.3f} {my:+.3f}]')</code></pre>
 <p><strong>What you should see:</strong> for forty steps map→odom prints a constant <code>[+0.000 +0.000 +0.000]</code> while odom→base drifts quietly away from the true square. On the last line the loop closure fires: map→odom jumps to something like <code>[+0.31 -0.18 +0.04]</code> in a single step, and the composed map→base lands back on the origin. Odom→base never jumped; the correction absorbed the whole error. That pair of columns is the frame contract, live.</p>
 <p><strong>Things to try:</strong> (1) Raise the noise sigmas 5× and watch the final jump grow; the contract does not care how big the correction is, control stays smooth. (2) Fire the correction every 10 steps instead of once; map→odom now jumps at every partial loop, the way a real system behaves in a small room. (3) Feed a controller the map→base column and imagine the wheel command at the jump; that thought experiment is warfield bug 4 above.</p>
 </div>
@@ -319,7 +319,7 @@ for k, (Tt, To) in enumerate(zip(truth, odom)):
   <li><strong><a href="05-rtabmap.html">Ch. 5, RTAB-Map + RealSense D435i.</a></strong> The budget indoor rig, end to end, with the bruises documented.</li>
   <li><strong><a href="06-learning-slam.html">Ch. 6, Learning-Based SLAM.</a></strong> Learned modules, end-to-end systems, learned maps, and an honest ledger of the trade-offs.</li>
   <li><strong><a href="07-evaluation.html">Ch. 7, Evaluation, Datasets &amp; Benchmarks.</a></strong> ATE and RPE, evo, KITTI, EuRoC, TUM, and how to run an eval you would stake a deployment on.</li>
-  <li><strong><a href="08-planning-nav.html">Ch. 8, Planning, Navigation &amp; Localization.</a></strong> The frame contract in anger: AMCL, costmaps, Nav2, and planners from A* to MPPI.</li>
+  <li><strong><a href="08-planning-nav.html">Ch. 8, Planning, Navigation &amp; Localization.</a></strong> The frame contract in anger: Monte Carlo localization, costmaps, and planners from A* to MPPI, built from scratch in Python.</li>
 </ul>
 <p>Reading order: 0, 1, 2 in sequence, then 3 or 4 depending on whether your robot carries a laser or a camera, then wherever your project points. Chapter 7 pays off whenever you touch it.</p>
 

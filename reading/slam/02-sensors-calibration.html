@@ -28,7 +28,7 @@
 
 <h2><span class="sec-no">2.2</span>Wheel Odometry</h2>
 <p>Encoders count shaft ticks. Everything else is bookkeeping. For a differential-drive robot with wheel radius <em>r</em>, encoder resolution <em>N</em> ticks per revolution, and wheel separation <em>b</em>, the pipeline from ticks to pose is short enough to memorize:</p>
-<pre>Per wheel, ticks to distance:
+<pre><code class="language-text">Per wheel, ticks to distance:
   Δs_r = 2πr · Δticks_r / N        Δs_l = 2πr · Δticks_l / N
 
 Body motion over one step Δt:
@@ -38,7 +38,7 @@ Body motion over one step Δt:
 Pose integration (midpoint rule, fine at 50 Hz):
   x ← x + Δs · cos(θ + Δθ/2)
   y ← y + Δs · sin(θ + Δθ/2)
-  θ ← θ + Δθ</pre>
+  θ ← θ + Δθ</code></pre>
 <p>The midpoint rule is a first-order approximation of the true circular arc. At typical control rates the difference is microscopic, and the arc formula has a divide-by-zero at Δθ = 0 that you would have to special-case anyway.</p>
 <figure>
 <div class="svgwrap">
@@ -89,11 +89,11 @@ Pose integration (midpoint rule, fine at 50 Hz):
 </ul>
 <h3>Why Double Integration Explodes</h3>
 <p>Position from an accelerometer means integrating twice, so constant errors grow quadratically and gyro-induced errors grow cubically. The cubic term comes from a nasty coupling: a gyro bias tilts your gravity estimate, and a tilted gravity estimate leaks a slice of that 9.81&nbsp;m/s² into the horizontal axes as phantom acceleration. Concrete numbers for a cheap, warmed-up MEMS part:</p>
-<pre>accel bias ≈ 0.02 m/s² (2 mg):
+<pre><code class="language-text">accel bias ≈ 0.02 m/s² (2 mg):
   position error = ½·b·t²   →  1 cm at 1 s,  1 m at 10 s,  36 m at 60 s
 
 gyro bias ≈ 0.02 °/s, leaking gravity into the horizontal:
-  position error ≈ (g·b_g/6)·t³  →  0.6 m at 10 s,  123 m at 60 s</pre>
+  position error ≈ (g·b_g/6)·t³  →  0.6 m at 10 s,  123 m at 60 s</code></pre>
 <p>So a consumer IMU on its own is a useful position sensor for well under a second, a decent attitude sensor for minutes (gravity keeps pitch and roll observable), and a superb rotation-rate sensor at every instant. Fusion architectures are built around exactly that profile: let the IMU carry you between camera frames or lidar sweeps, and let those exteroceptive sensors reset the IMU's runaway integrals.</p>
 <div class="analogy">Integrating an accelerometer for position is like tracking your bank balance from interest rate announcements alone. Each announcement is roughly right, but you are two integrations away from the number you care about, and a tiny consistent misreading compounds into fantasy within a page of arithmetic. A statement (camera, lidar, GPS) has to arrive occasionally to reset the books.</div>
 <table>
@@ -134,7 +134,7 @@ gyro bias ≈ 0.02 °/s, leaking gravity into the horizontal:
 <div class="setup">
 <p><strong>Goal: measure your actual IMU's noise density and bias instability with pure Python (<code>allantools</code>), and put real numbers into a VIO config.</strong></p>
 <p>Prereqs: any IMU you can log to CSV at 100&nbsp;Hz or more (every vendor SDK does this; for a RealSense, <code>pip install pyrealsense2</code> and log the gyro/accel streams), Python 3.10+, and a machine that can sit untouched for an afternoon.</p>
-<pre>pip install allantools numpy matplotlib
+<pre><code class="language-bash">pip install allantools numpy matplotlib
 
 # log_imu.py, RealSense flavor: writes t,gx,gy,gz,ax,ay,az rows
 import pyrealsense2 as rs, csv
@@ -148,9 +148,9 @@ with open('imu_static.csv','w',newline='') as f:
         for fr in frames:
             m = fr.as_motion_frame()
             d = m.get_motion_data()
-            w.writerow([m.get_timestamp()/1000.0, fr.profile.stream_type(), d.x, d.y, d.z])</pre>
+            w.writerow([m.get_timestamp()/1000.0, fr.profile.stream_type(), d.x, d.y, d.z])</code></pre>
 <p>Recording protocol: bolt the IMU to something heavy, on foam, on a desk nobody touches. Constant temperature (no sunny windowsill, no HVAC vent). Record at least <strong>3 hours</strong> static; longer is better because the bias-instability floor lives at large averaging times.</p>
-<pre># allan.py: Allan deviation per axis, straight off the CSV
+<pre><code class="language-python"># allan.py: Allan deviation per axis, straight off the CSV
 import numpy as np, allantools, matplotlib.pyplot as plt
 data = np.loadtxt('gyro_x.csv')          # one axis, rad/s, at rate fs
 fs = 200.0
@@ -161,25 +161,25 @@ plt.savefig('allan_gyro_x.png')
 
 N = ad[np.argmin(np.abs(taus - 1.0))]    # noise density  [rad/s/sqrt(Hz)]
 B = ad.min() / 0.664                     # bias instability [rad/s]
-print(f'noise density ~ {N:.3e}, bias instability ~ {B:.3e}')</pre>
+print(f'noise density ~ {N:.3e}, bias instability ~ {B:.3e}')</code></pre>
 <p>Run it for all six axes (three gyro, three accel). The four numbers every VIO config demands, whatever it names them:</p>
-<pre>accelerometer_noise_density: 2.0e-03   # [m/s^2/sqrt(Hz)]   from accel tau=1s
+<pre><code class="language-yaml">accelerometer_noise_density: 2.0e-03   # [m/s^2/sqrt(Hz)]   from accel tau=1s
 accelerometer_random_walk:   3.0e-04   # [m/s^3/sqrt(Hz)]   from accel +1/2 slope
 gyroscope_noise_density:     1.7e-04   # [rad/s/sqrt(Hz)]   from gyro tau=1s
-gyroscope_random_walk:       2.0e-05   # [rad/s^2/sqrt(Hz)] from gyro +1/2 slope</pre>
+gyroscope_random_walk:       2.0e-05   # [rad/s^2/sqrt(Hz)] from gyro +1/2 slope</code></pre>
 <p>Standard practice is to inflate the measured values 3 to 10× before use, because a moving robot adds vibration and temperature swings the static test never saw.</p>
 <p>Sanity checks: (1) the short-τ region should be a clean −½ slope; kinks there mean vibration reached the sensor. (2) If the curve never flattens, your bag was too short to see bias instability; record longer. (3) All three axes of each sensor should give similar values; one wild axis means a mechanical resonance or a dying part. (4) You should land within a factor of 2 to 5 of the datasheet; a factor of 50 means the test setup, not the IMU.</p>
 </div>
 
 <h2><span class="sec-no">2.4</span>Cameras</h2>
 <p>The pinhole model is the whole of projective geometry you need for most of this book. A 3D point in the camera frame maps to a pixel through the intrinsics matrix <strong>K</strong>:</p>
-<pre>P = (X, Y, Z) in the camera frame lands at pixel (u, v):
+<pre><code class="language-text">P = (X, Y, Z) in the camera frame lands at pixel (u, v):
 
   u = fx · X/Z + cx            ⎡ fx   0  cx ⎤
   v = fy · Y/Z + cy        K = ⎢  0  fy  cy ⎥
                                ⎣  0   0   1 ⎦
 
-fx, fy: focal length in pixels     cx, cy: principal point</pre>
+fx, fy: focal length in pixels     cx, cy: principal point</code></pre>
 <p>Real lenses bend this. <strong>Radial distortion</strong> (coefficients k1, k2, k3) makes straight lines bow outward or inward toward the image edges; <strong>tangential distortion</strong> (p1, p2) comes from the lens sitting slightly tilted relative to the sensor. Together these form the Brown-Conrady or "plumb bob" model, the default in OpenCV's calibration API. Wide-angle and fisheye lenses beyond about 120° need a different parameterization entirely; the <strong>equidistant</strong> (Kannala-Brandt) model, <code>pinhole-equi</code>, maps the incidence angle θ to radius r = f·θ and stays well-behaved out to the edges where radtan falls apart.</p>
 <h3>Rolling vs Global Shutter</h3>
 <p>A <strong>global shutter</strong> exposes every pixel simultaneously: one photo, one instant. A <strong>rolling shutter</strong> reads the sensor row by row over 10 to 30&nbsp;ms, so the bottom of the image is a photograph of a slightly later world than the top. Yaw at 1&nbsp;rad/s with a 30&nbsp;ms readout and the last row has rotated 1.7° relative to the first; at a 600&nbsp;px focal length that is roughly 18 pixels of shear on a vertical edge. A feature-based SLAM that assumes a single pose per image is now fitting geometry to a smeared impossibility.</p>
@@ -207,11 +207,11 @@ fx, fy: focal length in pixels     cx, cy: principal point</pre>
 <p>Handhelds and slow indoor robots get away with rolling shutter (and Chapter 5's D435i has a rolling RGB sensor for exactly the cost reasons you would guess). Drones and anything that turns fast should pay the extra $30 for global shutter, or run a rolling-shutter-aware estimator that models per-row time, which costs implementation pain instead. The reading list has the reference.</p>
 <h3>Depth: Mono, Stereo, RGB-D</h3>
 <p>A single camera cannot measure metric scale; a hallway and a dollhouse of the same proportions produce identical images. Mono SLAM either accepts an arbitrary scale factor or borrows metricity from an IMU. Two cameras with a known <strong>baseline</strong> B triangulate depth from <strong>disparity</strong> d, and the error math is worth having in your pocket:</p>
-<pre>Z = f · B / d                 (d in pixels, B in meters)
+<pre><code class="language-text">Z = f · B / d                 (d in pixels, B in meters)
 σ_Z ≈ Z² · σ_d / (f · B)      (depth error grows with range squared)
 
 D435i-class rig: B = 0.05 m, f = 640 px, σ_d ≈ 0.25 px
-  Z = 2 m → σ_Z ≈ 3 cm      Z = 5 m → σ_Z ≈ 20 cm     Z = 10 m → σ_Z ≈ 0.8 m</pre>
+  Z = 2 m → σ_Z ≈ 3 cm      Z = 5 m → σ_Z ≈ 20 cm     Z = 10 m → σ_Z ≈ 0.8 m</code></pre>
 <p>That Z² is why a 5&nbsp;cm baseline device is an indoor sensor, full stop, and why autonomous cars mount stereo pairs a meter apart. Widening the baseline buys far-field accuracy but shrinks the near-field overlap between the two views and makes the rig floppier (a baseline that flexes 0.05° has just eaten your calibration).</p>
 <p>RGB-D cameras add a dedicated depth mechanism, and the three technologies fail differently:</p>
 <table>
@@ -255,7 +255,7 @@ D435i-class rig: B = 0.05 m, f = 640 px, σ_d ≈ 0.25 px
 <div class="setup">
 <p><strong>Goal: calibrate camera intrinsics and the camera-IMU time offset with nothing but Python and OpenCV, and know whether to believe the output.</strong></p>
 <p>Prereqs: Python 3.10+ with <code>opencv-python</code>, <code>numpy</code>, <code>scipy</code>; a printed checkerboard (9×6 inner corners works) taped dead flat to something rigid, with a square edge measured by calipers because printers rescale silently; a way to grab frames and IMU samples with device timestamps (OpenCV <code>VideoCapture</code> plus your IMU SDK's CSV logger from the 2.3 setup).</p>
-<pre>pip install opencv-python numpy scipy
+<pre><code class="language-bash">pip install opencv-python numpy scipy
 
 # intrinsics.py: 30-50 views of the board, whole field of view,
 # near and far, tilted views included
@@ -272,9 +272,9 @@ for path in glob.glob('views/*.png'):
         (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 1e-3))
     obj.append(objp); img.append(corners)
 rms, K, dist, rvecs, tvecs = cv2.calibrateCamera(obj, img, gray.shape[::-1], None, None)
-print('reprojection RMS [px]:', rms); print('K =', K); print('dist =', dist.ravel())</pre>
+print('reprojection RMS [px]:', rms); print('K =', K); print('dist =', dist.ravel())</code></pre>
 <p>Time offset next, by cross-correlation. The camera and the IMU both witness every rotation; the lag that best aligns their two views of it <em>is</em> the time offset. Wave the rig side to side over the board for 60 seconds while logging both streams:</p>
-<pre># timeoffset.py: gyro magnitude vs image-derived rotation rate
+<pre><code class="language-python"># timeoffset.py: gyro magnitude vs image-derived rotation rate
 import numpy as np
 from scipy.signal import correlate
 # cam_rate[t]: per-frame rotation angle from solvePnP on the board,
@@ -282,15 +282,15 @@ from scipy.signal import correlate
 # gyr_rate[t]: |gyro| resampled onto the same uniform time grid
 c = correlate(cam_rate - cam_rate.mean(), gyr_rate - gyr_rate.mean(), 'full')
 lag = c.argmax() - (len(gyr_rate) - 1)
-print(f'camera lags IMU by {lag * dt * 1000:.1f} ms')</pre>
+print(f'camera lags IMU by {lag * dt * 1000:.1f} ms')</code></pre>
 <p>Extrinsics last. On most rigs the rotation part of <code>T_cam_imu</code> is a clean 90°-multiple you can read off the mechanical drawing, and the translation is a ruler measurement, both then refined online by the estimator. When one device gives you poses (a tracking camera, a robot arm), solve it properly with <code>cv2.calibrateHandEye</code> on 20+ paired motions. The fully joint spline-based calibration of everything at once is what dedicated offline calibrators automate; the checks below tell you whether you need one.</p>
 <p>Sanity checks: (1) Intrinsics RMS under 0.5&nbsp;px, and rerunning with a fresh set of views moves fx, fy by less than half a percent. (2) The time offset should be a few milliseconds at most on a USB rig and near zero on a hardware-triggered one; tens of milliseconds means your driver is stamping frames on arrival, and you should fix that at the source rather than trust one calibrated constant. (3) The cross-correlation peak should be sharp and lonely; a broad or multi-peaked curve means not enough rotation excitation, re-record with brisker motion. (4) Physical plausibility: translations match a ruler to a centimeter, axes match how the parts are mounted. (5) Run everything twice; agreement is your real error bar.</p>
 </div>
 
 <h2><span class="sec-no">2.8</span>Time Is a Sensor Too</h2>
 <p>Fusion means combining measurements taken at the same instant, so a clock error is a measurement error in disguise. The arithmetic is short and worth committing to memory:</p>
-<pre>pixel error ≈ fx · ω · Δt_sync
-            = 600 px · 1 rad/s · 0.005 s  ≈  3 px</pre>
+<pre><code class="language-text">pixel error ≈ fx · ω · Δt_sync
+            = 600 px · 1 rad/s · 0.005 s  ≈  3 px</code></pre>
 <p>Five milliseconds of camera-IMU misalignment during a 1&nbsp;rad/s turn shifts every feature by about 3 pixels, on a system trying to converge to 0.2&nbsp;px reprojection error. The estimator cannot tell this from a bad extrinsic, so it corrupts whatever state absorbs it. This is the single most common reason a VIO stack that works on EuRoC (hardware-synced, Chapter 7) falls over on your own USB rig.</p>
 <div class="analogy">Badly synced video and audio is instantly obvious: 20 ms of lip-sync error makes a film unwatchable. Your SLAM stack watches lips and hears audio from clocks that were never introduced to each other, and unlike you it has no idea anything is wrong; it just quietly believes the mismatch.</div>
 <p>The first discipline is <em>where</em> the timestamp is taken. A frame should carry the time its exposure happened (mid-exposure, by convention), stamped by the driver from the device's own reported capture time. What you often get instead is the time the image finally arrived through USB and got a header slapped on, which floats by 5 to 30&nbsp;ms with bus load and CPU mood. Jitter this size makes a mockery of the 3-pixel arithmetic above.</p>
