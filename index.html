@@ -5,287 +5,30 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Ashok Kumar Chaudhary</title>
 <meta name="description" content="Ashok Kumar Chaudhary — Lead Software Engineer building real-time systems for autonomous robots. Personal site and page index.">
-<style>
-/* ============================================================
-   DESIGN: "Workbench index"
-   Cool paper-white bench, navy ink, one saffron signal.
-   Signature: the page index is a directory listing — each page
-   a manifest row with its real file path in monospace.
-   System sans display + ui-monospace utility. Zero external assets.
-   Companion palette to /India-2026-27-season.html (its saffron,
-   inverted to daylight).
-   ============================================================ */
-:root{
-  --bg:#f6f7f9;
-  --card:#ffffff;
-  --ink:#141d30;
-  --muted:#66708b;
-  --line:#e2e5ec;
-  --line-strong:#c9cedb;
-  --saffron:#e97b18;
-  --saffron-deep:#b45c07;
-  --saffron-soft:rgba(233,123,24,.09);
-  --navy:#1c3a6e;
-
-  --disp:-apple-system,'Segoe UI',system-ui,'Helvetica Neue',Arial,sans-serif;
-  --mono:ui-monospace,'Cascadia Mono','Segoe UI Mono',Menlo,Consolas,monospace;
-
-  --r:14px;
-}
-*{margin:0;padding:0;box-sizing:border-box}
-html{-webkit-text-size-adjust:100%}
-body{
-  font-family:var(--disp);
-  background:var(--bg);
-  color:var(--ink);
-  min-height:100vh;
-  -webkit-font-smoothing:antialiased;
-  line-height:1.6;
-}
-a{color:inherit;text-decoration:none}
-:focus-visible{outline:2px solid var(--saffron);outline-offset:3px;border-radius:4px}
-::selection{background:var(--saffron);color:#fff}
-.mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
-
-.wrap{max-width:860px;margin:0 auto;padding:0 20px}
-
-/* ================= TOPBAR ================= */
-.topbar{
-  display:flex;align-items:center;justify-content:space-between;gap:12px;
-  padding:18px 0;border-bottom:1px solid var(--line);
-  font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;color:var(--muted);
-}
-.topbar .host{color:var(--ink);font-weight:700}
-.loc{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
-.loc .dot{
-  width:7px;height:7px;border-radius:50%;background:var(--saffron);
-  box-shadow:0 0 0 3px var(--saffron-soft);
-}
-
-/* ================= HERO ================= */
-.hero{padding:64px 0 20px}
-.eyebrow{
-  font-family:var(--mono);font-size:11px;letter-spacing:.24em;text-transform:uppercase;
-  color:var(--saffron-deep);display:flex;align-items:center;gap:10px;
-}
-.eyebrow::after{content:'';flex:1;max-width:64px;height:1px;background:var(--saffron);opacity:.55}
-h1{
-  margin-top:14px;
-  font-size:clamp(40px,9vw,76px);
-  font-weight:900;line-height:.95;letter-spacing:-.03em;text-transform:uppercase;
-}
-h1 .caret{
-  display:inline-block;width:.45em;height:.82em;margin-left:.06em;
-  background:var(--saffron);vertical-align:-.06em;
-  animation:blink 1.1s steps(1) infinite;
-}
-@keyframes blink{50%{opacity:0}}
-@media(prefers-reduced-motion:reduce){h1 .caret{animation:none}}
-.role{
-  margin-top:20px;font-size:clamp(15px,3.6vw,18px);font-weight:700;letter-spacing:-.01em;
-}
-.role em{font-style:normal;color:var(--saffron-deep)}
-.bio{
-  margin-top:10px;color:var(--muted);font-size:15px;max-width:58ch;
-}
-.bio b{color:var(--ink);font-weight:600}
-
-/* link pills */
-.links{margin-top:26px;display:flex;flex-wrap:wrap;gap:10px}
-.links a{
-  display:inline-flex;align-items:center;gap:8px;
-  min-height:44px;padding:0 18px;border-radius:999px;
-  border:1px solid var(--line-strong);background:var(--card);
-  font-family:var(--mono);font-size:12.5px;font-weight:600;
-  transition:border-color .2s,transform .15s ease,box-shadow .2s;
-}
-.links a:hover{border-color:var(--saffron);transform:translateY(-1px);box-shadow:0 6px 18px rgba(20,29,48,.08)}
-.links a.primary{background:var(--ink);color:#fff;border-color:var(--ink)}
-.links a.primary:hover{border-color:var(--saffron);background:var(--navy)}
-.links .glyph{color:var(--saffron);font-weight:700}
-.links a.primary .glyph{color:var(--saffron)}
-
-/* ================= SKILLS ================= */
-.skills{
-  margin-top:40px;
-  border:1px solid var(--line-strong);border-radius:var(--r);overflow:hidden;
-  background:var(--card);
-}
-.skill-row{
-  display:grid;grid-template-columns:170px 1fr;gap:12px;align-items:baseline;
-  padding:13px 18px;border-bottom:1px solid var(--line);
-}
-.skill-row:last-child{border-bottom:0}
-.skill-row dt{
-  font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
-  color:var(--muted);
-}
-.skill-row dd{
-  display:flex;flex-wrap:wrap;gap:6px;
-}
-.skill-row dd span{
-  font-family:var(--mono);font-size:11.5px;font-weight:600;
-  padding:3px 10px;border-radius:5px;
-  border:1px solid var(--line);background:var(--bg);
-  white-space:nowrap;
-}
-@media(max-width:640px){
-  .skill-row{grid-template-columns:1fr;gap:8px;padding:12px 16px}
-}
-
-/* ================= INDEX ================= */
-.index{padding:56px 0 24px}
-.index-head{
-  display:flex;align-items:baseline;gap:14px;
-  padding-bottom:12px;border-bottom:2px solid var(--ink);
-}
-.index-head h2{
-  font-size:clamp(20px,5vw,28px);font-weight:900;letter-spacing:-.02em;text-transform:uppercase;
-}
-.index-head .path{font-family:var(--mono);font-size:12px;color:var(--muted)}
-.entries{display:flex;flex-direction:column;gap:14px;margin-top:20px}
-
-.entry{
-  display:block;position:relative;
-  background:var(--card);border:1px solid var(--line-strong);border-radius:var(--r);
-  padding:20px 22px;
-  transition:border-color .2s,transform .15s ease,box-shadow .2s;
-}
-.entry:hover{border-color:var(--saffron);transform:translateY(-2px);box-shadow:0 14px 30px rgba(20,29,48,.10)}
-.entry .file{
-  font-family:var(--mono);font-size:11px;color:var(--muted);
-  display:flex;align-items:center;gap:8px;
-}
-.entry .file::before{content:'~/';color:var(--saffron-deep);font-weight:700}
-.entry .title{
-  margin-top:8px;font-size:clamp(18px,4.5vw,24px);font-weight:800;letter-spacing:-.02em;
-  display:flex;align-items:center;justify-content:space-between;gap:12px;
-}
-.entry .title .arrow{
-  flex-shrink:0;color:var(--saffron-deep);font-size:.85em;
-  transition:transform .18s ease;
-}
-.entry:hover .title .arrow{transform:translate(3px,-3px)}
-.entry .desc{margin-top:6px;font-size:13.5px;color:var(--muted);max-width:60ch}
-.entry .meta{
-  margin-top:14px;display:flex;flex-wrap:wrap;gap:6px 8px;
-  font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
-}
-.entry .meta span{
-  padding:4px 10px;border-radius:5px;border:1px solid var(--line);color:var(--muted);
-  white-space:nowrap;
-}
-.entry .meta .hot{background:var(--saffron-soft);border-color:transparent;color:var(--saffron-deep);font-weight:700}
-
-.slot{
-  border:1.5px dashed var(--line-strong);border-radius:var(--r);
-  padding:18px 22px;text-align:center;
-  font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;color:var(--muted);
-}
-
-/* ================= FOOTER ================= */
-footer{
-  margin-top:40px;border-top:1px solid var(--line);
-  padding:24px 0 48px;
-  font-family:var(--mono);font-size:11px;line-height:1.9;color:var(--muted);
-  display:flex;flex-wrap:wrap;gap:8px 24px;justify-content:space-between;
-}
-footer a{color:var(--saffron-deep);font-weight:600}
-footer a:hover{text-decoration:underline}
-
-@media(max-width:480px){
-  .hero{padding-top:44px}
-  .links a{flex:1 1 45%;justify-content:center}
-}
-</style>
+<link rel="stylesheet" href="assets/css/theme.css">
+<link rel="stylesheet" href="assets/css/index.css">
 </head>
 <body>
 
 <div class="wrap">
-  <div class="topbar">
-    <span class="host">ashok281196.github.io</span>
-    <span class="loc"><span class="dot"></span>Bengaluru, India · UTC+05:30</span>
-  </div>
-
-  <header class="hero">
-    <div class="eyebrow">Software · Robotics · Real-time Systems</div>
-    <h1>Ashok Kumar<br>Chaudhary<span class="caret" aria-hidden="true"></span></h1>
-    <p class="role">Lead Software Engineer, <em>General Autonomy</em></p>
-    <p class="bio">
-      I build real-time software for autonomous ground and aerial robots, focusing on
-      distributed systems, low-latency networking and full-stack tooling.
-      Previously at RISA Labs, Testbook and Siemens.
-      <b>B.Tech&ndash;M.Tech, IIT Kanpur.</b>
+  <div class="topbar" id="topbar"></div>
+  <header class="hero" id="hero"></header>
+  <main class="index" id="pages"></main>
+  <footer id="footer"></footer>
+  <noscript>
+    <p style="padding:24px 0;font-family:monospace">
+      This page renders from <code>/data</code> with JavaScript.
+      Direct links: <a href="India-2026-27-season.html">India Men&rsquo;s Season 2026&ndash;27</a> ·
+      <a href="reading/slam/index.html">SLAM: Zero to Hero</a> ·
+      <a href="https://github.com/ashok281196">GitHub</a> ·
+      <a href="https://linkedin.com/in/ashok281196">LinkedIn</a>
     </p>
-    <nav class="links" aria-label="Profiles and contact">
-      <a class="primary" href="Ashok_Resume_Software.pdf"><span class="glyph">&darr;</span>Resume</a>
-      <a href="https://github.com/ashok281196" rel="me"><span class="glyph">&#47;&#47;</span>GitHub</a>
-      <a href="https://linkedin.com/in/ashok281196" rel="me"><span class="glyph">in</span>LinkedIn</a>
-      <a href="mailto:ashok281196@gmail.com"><span class="glyph">@</span>Email</a>
-    </nav>
-
-    <dl class="skills">
-      <div class="skill-row">
-        <dt>Languages</dt>
-        <dd><span>C++</span><span>Python</span><span>TypeScript</span><span>JavaScript</span><span>SQL</span></dd>
-      </div>
-      <div class="skill-row">
-        <dt>Distributed Systems</dt>
-        <dd><span>ZeroMQ</span><span>gRPC</span><span>WebSockets</span><span>WebTransport</span></dd>
-      </div>
-      <div class="skill-row">
-        <dt>Web &amp; Full-Stack</dt>
-        <dd><span>Next.js</span><span>Node.js</span><span>FastAPI</span><span>Three.js</span><span>Electron</span><span>MapLibre</span><span>LiveKit</span></dd>
-      </div>
-      <div class="skill-row">
-        <dt>Databases</dt>
-        <dd><span>Postgres</span><span>Redis</span><span>Firestore</span></dd>
-      </div>
-      <div class="skill-row">
-        <dt>Cloud &amp; Tools</dt>
-        <dd><span>GCP</span><span>AWS</span><span>Docker</span><span>GStreamer</span><span>WebRTC</span><span>CI/CD</span></dd>
-      </div>
-    </dl>
-  </header>
-
-  <main class="index">
-    <div class="index-head">
-      <h2>Index</h2>
-      <span class="path">ls ~/pages · 1 entry</span>
-    </div>
-
-    <div class="entries">
-      <a class="entry" href="India-2026-27-season.html">
-        <span class="file">India-2026-27-season.html</span>
-        <span class="title">India Men&rsquo;s Season 2026&ndash;27 <span class="arrow">&nearr;</span></span>
-        <span class="desc">Team India&rsquo;s full fixture book — eight tours, five countries, forty-seven matches, every ground named. Ticket-stub schedule with format filters.</span>
-        <span class="meta">
-          <span class="hot">LIVE</span>
-          <span>cricket</span>
-          <span>8 tours · 47 matches</span>
-          <span>updated Jul 2026</span>
-        </span>
-      </a>
-
-      <a class="entry" href="reading/slam/index.html">
-        <span class="file">SLAM</span>
-        <span class="meta">
-          <span class="hot">LIVE</span>
-          <span>robotics</span>
-          <span>updated Jul 2026</span>
-        </span>
-      </a>
-
-
-      <div class="slot">more pages soon — this index grows one file at a time</div>
-    </div>
-  </main>
-
-  <footer>
-    <span>&copy; 2026 Ashok Kumar Chaudhary</span>
-    <span>Plain HTML, zero frameworks · <a href="https://github.com/ashok-ga/ashok-ga.github.io">source</a></span>
-  </footer>
+  </noscript>
 </div>
 
+<script src="data/site.js"></script>
+<script src="data/profile.js"></script>
+<script src="assets/js/components.js"></script>
+<script src="assets/js/index.js"></script>
 </body>
 </html>

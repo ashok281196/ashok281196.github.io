@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 4 · Visual SLAM: the State of the Art · SLAM: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">04</div>
+  <div class="chapter-kicker">Chapter Four · Cameras, Six Eras</div>
+  <h1>Visual SLAM: the State of the Art</h1>
+  <p class="chapter-sub">Ten years ago the answer was "ORB-SLAM." Today the answer is a taxonomy. Learn the six eras and you can place any paper, product, or interview question on the map in one sentence.</p>
+</header>
+
+<h2><span class="sec-no">4.1</span>Why Cameras Are the Hard Mode</h2>
+<p>A lidar hands you 3D geometry directly. A camera hands you a grid of brightness values, and geometry must be inferred by watching how pixels move between frames. Worse, a single camera fundamentally cannot tell a small room nearby from a big room far away. Everything is known only up to scale, the famous <strong>monocular scale ambiguity</strong>.</p>
+<p>In exchange, cameras are ten times cheaper than lidar, tiny, power-sipping, and they see color and meaning. A camera can read an exit sign; a lidar sees a flat rectangle. The history of visual SLAM is the history of squeezing geometry out of pixels with progressively more machine learning.</p>
+<p>Two more hardships that lidar people never think about, both covered in depth in Chapter 2: cameras care about <em>light</em> (auto-exposure swings break brightness assumptions, darkness ends the mission), and most cheap cameras have <em>rolling shutter</em>, so every row of the image was taken at a slightly different time. At walking speed this is a nuisance. On a fast-yawing drone it bends straight lines into curves and quietly poisons the geometry.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 210" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="26" font-size="13" fill="#b3401e" letter-spacing="2">REPROJECTION ERROR (ERA 1)</text>
+  <rect x="30" y="50" width="290" height="120" fill="none" stroke="#23201a" stroke-width="2"/>
+  <circle cx="120" cy="110" r="5" fill="#0e5f5b"/>
+  <circle cx="150" cy="100" r="5" fill="none" stroke="#b3401e" stroke-width="2.5"/>
+  <line x1="120" y1="110" x2="150" y2="100" stroke="#b3401e" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <text x="60" y="150" font-size="12" fill="#0e5f5b">detected</text>
+  <text x="160" y="90" font-size="12" fill="#b3401e">re-projected</text>
+  <text x="400" y="26" font-size="13" fill="#0e5f5b" letter-spacing="2">PHOTOMETRIC ERROR (ERA 2)</text>
+  <rect x="410" y="50" width="140" height="120" fill="none" stroke="#23201a" stroke-width="2"/>
+  <rect x="590" y="50" width="140" height="120" fill="none" stroke="#23201a" stroke-width="2"/>
+  <rect x="440" y="80" width="26" height="26" fill="#a97b1f" opacity=".55"/>
+  <rect x="628" y="92" width="26" height="26" fill="#a97b1f" opacity=".85"/>
+  <path d="M470 93 C 540 60, 560 60, 626 103" fill="none" stroke="#0e5f5b" stroke-width="2" marker-end="none"/>
+  <text x="412" y="192" font-size="12" fill="#4d463a">frame A, warped by pose+depth</text>
+  <text x="612" y="192" font-size="12" fill="#4d463a">frame B, compared</text>
+</svg>
+</div>
+<figcaption>Fig 4.1: Era 1 measures error in pixels between detected and re-projected points. Era 2 skips detection and compares raw brightness after warping.</figcaption>
+</figure>
+
+<h2><span class="sec-no">4.2</span>The Six Eras, Your Master Taxonomy</h2>
+<table>
+  <tr><th>Era</th><th>Idea</th><th>Flag-Bearer</th></tr>
+  <tr><td><strong>1. Feature-based geometric</strong></td><td>Detect sparse corner features, match them, minimize <em>reprojection error</em>, bundle-adjust</td><td>ORB-SLAM lineage</td></tr>
+  <tr><td><strong>2. Direct</strong></td><td>Skip features; minimize <em>photometric error</em> on raw pixel intensities</td><td>DSO, LSD-SLAM</td></tr>
+  <tr><td><strong>3. Hybrid learned front-end</strong></td><td>Classical geometric back-end, but learned features and matchers where appearance is brittle</td><td>SuperPoint + LightGlue</td></tr>
+  <tr><td><strong>4. End-to-end learned</strong></td><td>A network predicts correspondences; a <em>differentiable</em> bundle-adjustment layer enforces geometry</td><td>DROID-SLAM</td></tr>
+  <tr><td><strong>5. Map-centric neural rendering</strong></td><td>The map <em>is</em> a differentiable renderer (NeRF or 3D Gaussians) optimized to reproduce the input frames</td><td>SplaTAM, MonoGS</td></tr>
+  <tr><td><strong>6. Feed-forward geometry foundation models</strong></td><td>A transformer regresses 3D pointmaps straight from images, no matching and no triangulation; SLAM is rebuilt on top</td><td>DUSt3R → MASt3R-SLAM, VGGT</td></tr>
+</table>
+<div class="keypoint">The eras stack rather than replace each other. In 2026, production robots run eras 1 to 3, research demos run 4 to 6, and the boundary moves down the list by roughly one era every three years.</div>
+
+<h2><span class="sec-no">4.3</span>Eras 1 and 2, the Baselines Production Robots Still Run</h2>
+<h3>Where It Started</h3>
+<p><strong>MonoSLAM</strong> (Davison, 2003) put a single camera inside an EKF: a dozen landmarks, 30 Hz, on a laptop of that era. It proved real-time visual SLAM possible and immediately hit the filter's ceiling: cost grows with the square of landmark count, so the map stays tiny (Chapter 1 explains why).</p>
+<p><strong>PTAM</strong> (Klein &amp; Murray, ISMAR 2007) contributed the architectural idea everything since has copied: split <em>tracking</em> (every frame, real-time, against the current map) from <em>mapping</em> (bundle adjustment over keyframes, in a background thread, as slow as it needs to be). Once mapping no longer had to finish per frame, maps could grow to thousands of points. Every modern system, learned ones included, still has this two-thread heartbeat.</p>
+<h3>The ORB-SLAM Lineage, the Interview Baseline</h3>
+<p><strong><a href="https://arxiv.org/abs/2007.11898">ORB-SLAM3 (Campos et al., 2021)</a></strong> is the reference feature-based system, and its anatomy is worth knowing part by part:</p>
+<ul>
+  <li><strong>ORB features:</strong> FAST corners with a binary descriptor. Not the best features ever designed, but computable at frame rate on a CPU, and matchable with hamming distance.</li>
+  <li><strong>Covisibility graph:</strong> keyframes are nodes, edges connect keyframes that see the same points. Tracking and local bundle adjustment only touch the neighborhood of the current keyframe, which is what keeps a city-block map real-time.</li>
+  <li><strong>DBoW2 place recognition:</strong> a bag-of-visual-words vocabulary turns each image into a sparse histogram; loop candidates come from histogram lookups, then survive geometric verification. Fast, memory-light, and blind to viewpoint change beyond about 30 degrees.</li>
+  <li><strong>Atlas multi-map:</strong> when tracking is lost, instead of dying the system spawns a fresh map and merges it with the old one when a place is re-recognized. Kidnap-resistant by construction.</li>
+  <li><strong>IMU fusion:</strong> tightly coupled visual-inertial mode using preintegration (Chapter 1), with a careful initialization dance: the IMU needs seconds of excited motion before scale and gravity are observable.</li>
+</ul>
+<p>Weaknesses, stated plainly: hand-crafted ORB features die in motion blur and low texture, and the output map is a sparse point cloud, great for localizing and useless for navigating directly (pair it with Chapter 3's occupancy mapping or Chapter 5's RTAB-Map for that).</p>
+<h3>Direct Methods, the Contrarian School</h3>
+<p><strong>LSD-SLAM</strong> (Engel et al., 2014) and <strong><a href="https://arxiv.org/abs/1607.02565">DSO (Engel et al., 2016)</a></strong> ask: why extract features at all? Align images by minimizing the brightness difference of pixels directly. More of the image gets used, semi-dense maps fall out for free, and low-texture regions with <em>gradients</em> (a shaded wall) still contribute.</p>
+<p>The price is a hard assumption: that a surface keeps its brightness between frames. Auto-exposure changes, vignetting, rolling shutter, and gain swings all violate it, which is why DSO demands <em>photometric calibration</em> (exposure times, response curve, vignette map) to perform at its best. Feature-based systems shrug at all of that. This trade is the classic "feature vs direct" interview question, and the honest answer is that era 3 made it mostly moot: learned features got robust enough that the direct school's advantages narrowed.</p>
+<dl class="jargon">
+  <dt>Reprojection error</dt><dd>"I triangulated this 3D point; when I project it back into the image, how far is it from where I actually detected it?" Era 1 minimizes this.</dd>
+  <dt>Photometric error</dt><dd>"If I warp frame A onto frame B using my pose and depth estimate, how different are the pixel brightnesses?" Era 2 minimizes this.</dd>
+  <dt>Keyframe</dt><dd>A frame promoted to long-term citizenship: it anchors map points and joins bundle adjustment. Everything between keyframes is tracked and forgotten.</dd>
+  <dt>Bundle adjustment (BA)</dt><dd>Joint least-squares refinement of camera poses and 3D points so points re-project where they were seen. The accuracy engine of eras 1 and 3, the embedded layer of era 4. Chapter 1 covers the solver.</dd>
+</dl>
+
+<h2><span class="sec-no">4.4</span>Visual-Inertial Odometry Deserves Its Own Section</h2>
+<p>If the question is "drone state estimation" or "AR headset tracking," the answer is not full SLAM. It is <strong>VIO</strong>: camera plus IMU, tightly fused, producing smooth 6-DOF odometry with no loop closure and little or no persistent map. Nearly every phone, headset, and drone autopilot runs VIO, which makes it the most deployed state estimator on Earth.</p>
+<p>Why the IMU changes everything: the accelerometer measures <em>metric</em> acceleration, so scale becomes observable for a single camera. The gyro carries tracking through the 100 ms the camera is blurred. And the IMU pins roll and pitch to gravity, so only yaw and position drift. The price is the initialization dance (scale and biases need excited motion to become observable) and the calibration and sync burden of Chapter 2.</p>
+<ul>
+  <li><strong>MSCKF</strong> (Mourikis &amp; Roumeliotis, 2007): the filter lineage. A sliding window of camera poses inside an EKF, features marginalized without ever entering the state. Cheap and elegant; the ancestor of most phone VIO.</li>
+  <li><strong><a href="https://github.com/HKUST-Aerial-Robotics/VINS-Fusion">VINS-Mono / VINS-Fusion</a></strong> (Qin et al., 2018): the optimization lineage. Sliding-window bundle adjustment with IMU preintegration factors, loop closure optional. The default academic baseline.</li>
+  <li><strong><a href="https://github.com/rpng/open_vins">OpenVINS</a></strong> (Geneva et al., 2020): a clean, well-documented MSCKF that doubles as a teaching codebase. Its config file is where the Chapter 2 Allan-variance numbers go.</li>
+  <li><strong>OKVIS2</strong> (Leutenegger, 2022): keyframe-based tightly coupled VIO with loop closure, the modern version of the 2015 original.</li>
+</ul>
+<div class="keypoint">VIO is what you run when the map is a means; SLAM is what you run when the map is an end. Interviewers use "how would you estimate the drone's state" to test whether you reach for the smaller, correct tool.</div>
+
+<h2><span class="sec-no">4.5</span>Era 3, Learned Front-Ends: the Pragmatic Production Answer</h2>
+<p>The observation behind era 3: classical geometric back-ends are near-optimal, and what actually breaks in the field is <em>appearance</em>. Detecting and matching features under blur, weak texture, glare, and day/night change is where missions die. So replace exactly those parts with networks and keep the geometric guarantees:</p>
+<ul>
+  <li><strong><a href="https://arxiv.org/abs/1712.07629">SuperPoint (DeTone et al., 2018)</a></strong>: learned keypoint detector and descriptor. The training story is worth retelling: it teaches itself on synthetic corners, then bootstraps to real images by "homographic adaptation," no human labels anywhere. Alternatives with different trade-offs: DISK (differentiable, denser) and ALIKED (lighter, deformable).</li>
+  <li><strong>SuperGlue</strong> (Sarlin et al., CVPR 2020): matching as a learned assignment problem. A graph neural network with attention looks at <em>both</em> images' keypoints together before deciding matches, which buys huge robustness at real compute cost.</li>
+  <li><strong><a href="https://arxiv.org/abs/2306.13643">LightGlue (Lindenberger et al., 2023)</a></strong>: the deployable successor. It adapts compute to difficulty, exiting early on easy pairs, and runs several times faster than SuperGlue at equal accuracy. <a href="https://arxiv.org/abs/2104.00680">LoFTR</a> and RoMa go further with dense, detector-free matching for the hardest pairs.</li>
+  <li><strong>Place recognition</strong> upgraded from bag-of-words to learned global descriptors: <a href="https://arxiv.org/abs/1511.07247">NetVLAD (2016)</a>, then MixVPR, SALAD, and <a href="https://arxiv.org/abs/2502.17237">MegaLoc (2025)</a>. These survive viewpoint and season changes that break DBoW2 (Chapter 6 goes deeper).</li>
+  <li><strong><a href="https://github.com/cvg/Hierarchical-Localization">hloc</a></strong>: the standard toolbox gluing all of the above into visual relocalization pipelines; the Chapter 6 worked setup builds one.</li>
+</ul>
+<p>When does swapping learned parts into a classical stack actually pay? Three honest triggers: your robot works across lighting changes (warehouse day/night shifts), your environment is texture-poor (corridors, white walls), or relocalization against an old map keeps failing at more than about 30 degrees of viewpoint change. If ORB features track fine in your environment, era 3 buys you latency for nothing.</p>
+<div class="keypoint">Era 3 is the "what would you actually ship in 2026" answer: learned front-end where appearance is brittle, classical optimization back-end where geometry is already optimal. Cheap to adopt, keeps interpretability. Chapter 6 dissects this philosophy.</div>
+
+<h2><span class="sec-no">4.6</span>Era 4, the DROID Lineage</h2>
+<p><strong><a href="https://arxiv.org/abs/2108.10869">DROID-SLAM (Teed &amp; Deng, NeurIPS 2021)</a></strong> is one idea executed with unusual thoroughness. A recurrent network (a conv-GRU, borrowed from the RAFT optical-flow architecture) looks at pairs of frames and repeatedly <em>revises</em> a dense correspondence field, along with a confidence weight per pixel. After each revision, a <strong>differentiable bundle adjustment (DBA) layer</strong> updates all camera poses and per-pixel depths to be consistent with those correspondences. The DBA layer is an actual Gauss-Newton solver embedded inside the network, with gradients flowing through the solve during training. Predict, solve, repeat.</p>
+<p>The division of labor is the insight: the network handles what networks are good at (recognizing which pixels correspond, judging which correspondences to trust), and the solver handles what solvers are good at (exact geometry). Trained almost entirely on the synthetic TartanAir dataset, it transfers to real footage embarrassingly well.</p>
+<p>The result is eerily robust. It essentially never loses tracking where ORB-SLAM3 dies. The costs: it wants a serious GPU (11 GB class for full SLAM with loop closure), and run monocular it still drifts in scale like any camera-only system.</p>
+<p><strong><a href="https://arxiv.org/abs/2208.04726">DPVO (Teed, Lipson &amp; Deng, NeurIPS 2023)</a></strong> made the idea affordable: track sparse random <em>patches</em> instead of dense flow, and real-time visual odometry fits on one modest GPU. <strong><a href="https://arxiv.org/abs/2408.01654">DPV-SLAM (2024)</a></strong> added loop closure and global optimization back on top.</p>
+<p>The positioning sentence to remember: <em>"DROID showed that end-to-end learning plus a differentiable geometric solver beats classical robustness; DPVO made it affordable."</em></p>
+
+<div class="setup">
+<p><strong>Goal:</strong> run DPVO on a EuRoC sequence and watch era 4 shrug at motion blur. Prereqs: Linux with an NVIDIA GPU (4 GB VRAM is enough for the default config), CUDA-enabled PyTorch, conda, ~10 GB disk.</p>
+<pre>git clone https://github.com/princeton-vl/DPVO.git &amp;&amp; cd DPVO
+conda env create -f environment.yml
+conda activate dpvo
+pip install .
+
+# model weights + a EuRoC sequence
+./download_models_and_data.sh          # fetches dpvo.pth and sample data
+wget http://robotics.ethz.ch/~asl-datasets/ijrr_euroc_mav_dataset/machine_hall/MH_01_easy/MH_01_easy.zip
+unzip MH_01_easy.zip -d euroc/MH_01</pre>
+<pre># run visual odometry on the left camera stream
+python demo.py \
+  --imagedir euroc/MH_01/mav0/cam0/data \
+  --calib calib/euroc.txt \
+  --stride 2 --viz</pre>
+<p>Expected: a viewer with camera frustum and sparse patch cloud, pose updates at real-time rate on a mid-range GPU, and a final trajectory you can save with <code>--save_trajectory</code> (score it against ground truth with the Chapter 7 evo recipe; a healthy run lands in the few-cm ATE range on MH_01).</p>
+<p>Sanity checks: (1) VRAM overflow → lower <code>PATCHES_PER_FRAME</code> or <code>BUFFER_SIZE</code> in <code>config/default.yaml</code>, the knobs that trade memory for robustness; (2) trajectory in wrong scale → normal, this is monocular VO, align with scale correction in evo; (3) stutter at start → the first seconds initialize the patch graph, judge nothing before frame 100; (4) wrong calib file → poses go to soup immediately, check image resolution matches the calib line.</p>
+</div>
+
+<h2><span class="sec-no">4.7</span>Era 5, Neural-Rendering SLAM: the Map Is a Renderer</h2>
+<p>Radical inversion: make the <em>map</em> a differentiable rendering function. To track the camera, render what the map predicts you would see from a guessed pose, and optimize the pose (and the map) until the render matches the real image. Tracking and mapping become the same operation, gradient descent on image difference.</p>
+<ul>
+  <li><strong>The NeRF wave:</strong> iMAP (Sucar et al., 2021) put a single MLP map inside a live SLAM loop; <a href="https://arxiv.org/abs/2112.12130">NICE-SLAM (2022)</a> swapped in hierarchical feature grids so bigger rooms fit; Co-SLAM, ESLAM, and Point-SLAM (2023) refined the representation. The shared bottleneck: NeRF rendering is slow, and SLAM needs to render constantly.</li>
+  <li><strong>The Gaussian splatting wave (2024):</strong> represent the scene as millions of soft 3D Gaussian blobs that <em>rasterize</em> fast, and suddenly real-time photorealistic RGB-D SLAM exists: <a href="https://arxiv.org/abs/2312.02126">SplaTAM (2024)</a>, <a href="https://arxiv.org/abs/2312.06741">MonoGS, "Gaussian Splatting SLAM" (CVPR 2024)</a>, Photo-SLAM, RTG-SLAM, and GS-ICP-SLAM (which couples ICP with the splats).</li>
+</ul>
+<p><strong>Why care:</strong> the output is a dense, photorealistic map you can re-render from any viewpoint. For inspection, telepresence, digital twins, and simulation assets, that is the product.</p>
+<p><strong>The honest critique to voice out loud</strong> (interviewers respect it): benchmarks are mostly room-scale RGB-D; drift handling, loop closure, and metric scale outdoors still lag geometric systems; and compute is heavy. As of early 2026 this is the <em>reconstruction</em> answer, not the <em>navigation-stack</em> answer. A robot that needs a costmap tonight should read Chapter 3.</p>
+
+<h2><span class="sec-no">4.8</span>Era 6, Feed-Forward Geometry: the Frontier</h2>
+<p>Every previous era <em>solves</em> for geometry per scene. Era 6 asks: what if a transformer, trained on millions of scenes, just <em>predicts</em> the geometry in one forward pass?</p>
+<ul>
+  <li><strong><a href="https://arxiv.org/abs/2312.14132">DUSt3R (Wang et al., CVPR 2024)</a></strong>: feed two images into a transformer, uncalibrated, it does not even need the camera intrinsics. Out come dense <strong>pointmaps</strong>: a 3D point for every pixel, already expressed in a shared coordinate frame. No feature matching, no triangulation; the network has internalized geometry as a prior. <strong>MASt3R</strong> (ECCV 2024) adds metric scale and a matching head.</li>
+  <li><strong><a href="https://arxiv.org/abs/2412.12392">MASt3R-SLAM (Murai et al., 2025)</a></strong>: real-time SLAM built on those priors. Uncalibrated monocular video, in the wild, with a global point-cloud map.</li>
+  <li><strong><a href="https://arxiv.org/abs/2503.11651">VGGT (Wang et al., CVPR 2025)</a></strong>: one feed-forward transformer emits cameras, depths, and pointmaps for <em>many</em> views in seconds; VGGT-SLAM scales it with submap alignment. Streaming and causal variants: Spann3R, CUT3R, StreamVGGT. MegaSaM (2024-25) gets robust structure and motion from casual phone video.</li>
+  <li>Supporting cast: monocular <em>metric depth</em> foundation models (<a href="https://arxiv.org/abs/2406.09414">Depth Anything v2 (2024)</a>, Metric3D v2, UniDepth) dropped into classical pipelines as priors that dissolve the scale ambiguity.</li>
+</ul>
+<p>Where the claims need scrutiny: "no bundle adjustment" usually means per-pair geometry is feed-forward, while multi-view consistency still comes from an alignment optimization over pointmaps. And metric scale, when advertised, is learned from training data, so it is as good as the training distribution's resemblance to your scene. Chapter 6 returns to both caveats.</p>
+<div class="keypoint">The era-6 positioning line: <em>"Geometry is becoming a learned prior that you query, not something you re-derive per scene. SLAM's remaining job becomes alignment plus memory management on top of foundation-model outputs."</em> Say this and you sound like you read papers last month.</div>
+
+<h2><span class="sec-no">4.9</span>Choosing a Visual System in 2026</h2>
+<table>
+  <tr><th>Constraint</th><th>Reach For</th><th>Because</th></tr>
+  <tr><td>CPU only, embedded</td><td>ORB-SLAM3, or VIO (OpenVINS)</td><td>Era 1 remains the only camera SLAM that lives comfortably without a GPU</td></tr>
+  <tr><td>Drone / headset state estimation</td><td>VIO: VINS-Fusion, OpenVINS, OKVIS2</td><td>Metric scale from the IMU, smooth output, no map overhead</td></tr>
+  <tr><td>Relocalization across lighting / seasons</td><td>Era 3: SuperPoint + LightGlue + learned place recognition via hloc</td><td>Appearance robustness is exactly what the learned front-end buys</td></tr>
+  <tr><td>Never lose tracking, GPU available</td><td>DROID-SLAM / DPV-SLAM</td><td>Era 4's robustness is still unmatched in 2026</td></tr>
+  <tr><td>Photorealistic dense map wanted</td><td>Era 5 splatting SLAM (MonoGS, SplaTAM)</td><td>The map doubles as a render-anywhere product</td></tr>
+  <tr><td>Uncalibrated video, fast 3D from anything</td><td>Era 6: MASt3R-SLAM, VGGT</td><td>Geometry priors absorb what calibration used to provide</td></tr>
+  <tr><td>Texture-rich, static, well-lit, budget zero</td><td>Plain ORB-SLAM3</td><td>When features track, nothing newer earns its watts</td></tr>
+</table>
+<div class="warfield">
+<p>Licence check before you fall in love: ORB-SLAM3 is GPLv3, which is contagious for shipped products. VINS-Fusion is GPLv3 too. OpenVINS (GPLv3) and most research code from the learned eras carry non-commercial or copyleft licences; MASt3R weights are CC BY-NC-SA. "We'll deal with licensing later" has killed more SLAM integrations than drift has.</p>
+</div>
+
+<h2><span class="sec-no">4.10</span>Benchmarks, in One Paragraph</h2>
+<p>The vocabulary you need here is two acronyms deep: <strong>ATE</strong> for global consistency, <strong>RPE</strong> for drift rate, both measured after trajectory alignment, on datasets like EuRoC, TUM RGB-D, KITTI, and TartanAir. That is deliberately shallow because <a href="07-evaluation.html">Chapter 7</a> now owns evaluation end to end: the metrics' math, the evo toolchain, every dataset worth knowing, and how to benchmark your own robot without lying to yourself.</p>
+
+<div class="setup">
+<p><strong>Goal:</strong> build ORB-SLAM3 and run stereo-inertial on EuRoC MH_01, the canonical first visual SLAM experiment. Prereqs: Ubuntu 22.04/24.04, 8 GB RAM, OpenCV ≥ 4.4, Eigen3, and Pangolin 0.6 built from source.</p>
+<pre># dependencies
+sudo apt install build-essential cmake libeigen3-dev libopencv-dev \
+                 libglew-dev libpython3-dev python3-numpy
+
+git clone --branch v0.6 https://github.com/stevenlovegrove/Pangolin.git
+cd Pangolin &amp;&amp; cmake -B build -DCMAKE_BUILD_TYPE=Release &amp;&amp; sudo cmake --build build --target install</pre>
+<pre>git clone https://github.com/UZ-SLAMLab/ORB_SLAM3.git &amp;&amp; cd ORB_SLAM3
+./build.sh        # if compile errors mention C++ standard, set C++14 in CMakeLists.txt
+
+# dataset
+wget http://robotics.ethz.ch/~asl-datasets/ijrr_euroc_mav_dataset/machine_hall/MH_01_easy/MH_01_easy.zip
+mkdir -p ~/euroc/MH01 &amp;&amp; unzip MH_01_easy.zip -d ~/euroc/MH01</pre>
+<pre>./Examples/Stereo-Inertial/stereo_inertial_euroc \
+  Vocabulary/ORBvoc.txt \
+  Examples/Stereo-Inertial/EuRoC.yaml \
+  ~/euroc/MH01 \
+  Examples/Stereo-Inertial/EuRoC_TimeStamps/MH01.txt</pre>
+<p>Expected: the Pangolin viewer shows green tracked features and a growing keyframe graph; console prints the IMU initialization stages during the first seconds of motion; trajectory files (<code>f_*.txt</code>, <code>kf_*.txt</code>, TUM format) land in the working directory when the sequence ends. Score them with evo per Chapter 7; healthy stereo-inertial MH_01 is a few centimeters ATE.</p>
+<p>Classic failures: (1) segfault at startup → OpenCV version mismatch between build and runtime, rebuild both DBoW2/g2o thirdparty and the main tree; (2) build dies at 100% CPU → <code>./build.sh</code> uses all cores and runs out of RAM, edit it to <code>make -j2</code>; (3) "not enough acceleration" and no IMU init → the first 10 seconds of MH_01 are gentle, let it run, initialization completes once the drone excites the IMU; (4) viewer black over SSH → run local or set <code>--headless</code> style flags by disabling the viewer in the example's settings.</p>
+</div>
+
+<h2><span class="sec-no">4.11</span>Reading List, in Priority Order</h2>
+<a class="paper" href="https://arxiv.org/abs/2007.11898"><span class="p-title">ORB-SLAM3: An Accurate Open-Source Library for Visual, Visual-Inertial and Multi-Map SLAM</span><span class="p-meta">Campos, Elvira, Rodríguez, Montiel, Tardós · 2021 · arXiv:2007.11898</span><span class="p-why">Skim the architecture figure and the Atlas multi-map section; that is the interview material.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2108.10869"><span class="p-title">DROID-SLAM: Deep Visual SLAM for Monocular, Stereo, and RGB-D Cameras</span><span class="p-meta">Teed &amp; Deng · NeurIPS 2021 · arXiv:2108.10869</span><span class="p-why">Read the update operator and the differentiable-BA layer carefully; the single most influential learned-SLAM idea.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2208.04726"><span class="p-title">DPVO: Deep Patch Visual Odometry</span><span class="p-meta">Teed, Lipson, Deng · NeurIPS 2023 · arXiv:2208.04726 · DPV-SLAM: arXiv:2408.01654</span><span class="p-why">How the DROID idea became real-time on one GPU.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1607.02565"><span class="p-title">Direct Sparse Odometry</span><span class="p-meta">Engel, Koltun, Cremers · 2016 · arXiv:1607.02565</span><span class="p-why">The direct school's definitive statement, and the reason you know what photometric calibration is.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1708.03852"><span class="p-title">VINS-Mono: A Robust and Versatile Monocular Visual-Inertial State Estimator</span><span class="p-meta">Qin, Li, Shen · T-RO 2018 · arXiv:1708.03852</span><span class="p-why">The VIO paper to actually read: initialization, preintegration factors, sliding window, all in one place.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1712.07629"><span class="p-title">SuperPoint: Self-Supervised Interest Point Detection and Description</span><span class="p-meta">DeTone, Malisiewicz, Rabinovich · 2018 · arXiv:1712.07629</span><span class="p-why">The self-supervision recipe that started era 3.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2306.13643"><span class="p-title">LightGlue: Local Feature Matching at Light Speed</span><span class="p-meta">Lindenberger, Sarlin, Pollefeys · ICCV 2023 · arXiv:2306.13643</span><span class="p-why">Short and practical; the matcher you would actually deploy.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2312.06741"><span class="p-title">Gaussian Splatting SLAM (MonoGS)</span><span class="p-meta">Matsuki, Murai, Kelly, Davison · CVPR 2024 · arXiv:2312.06741 · sibling: SplaTAM arXiv:2312.02126</span><span class="p-why">Read one of the two deeply to own era 5; MonoGS is the more foundational read.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2312.14132"><span class="p-title">DUSt3R: Geometric 3D Vision Made Easy</span><span class="p-meta">Wang et al. · CVPR 2024 · arXiv:2312.14132 → MASt3R-SLAM arXiv:2412.12392 → VGGT arXiv:2503.11651</span><span class="p-why">Read the trilogy in this order; it is the cleanest storyline of where the field is going.</span></a>
+
+<h2><span class="sec-no">4.12</span>Interview Questions, Answer Out Loud First</h2>
+<details class="qa"><summary>ORB-SLAM3 vs DROID-SLAM: when would you use each?</summary><div class="a"><p>ORB-SLAM3 for CPU and embedded budgets, mature multi-sensor support (stereo, RGB-D, IMU), and best-in-class accuracy when features are trackable. DROID-SLAM needs a big GPU but is dramatically more robust; it essentially never loses tracking. Accuracy is comparable, so the real question is which <em>failure mode</em> you can least afford: features die in blur and texture-poor scenes, DROID rarely dies but drifts in scale when run monocular. Choose by compute budget and by the failure you cannot tolerate.</p></div></details>
+<details class="qa"><summary>Why did PTAM matter so much?</summary><div class="a"><p>It separated tracking from mapping into parallel threads. Tracking stayed per-frame and real-time while bundle adjustment ran in the background over keyframes, as slowly as it needed. That single architectural decision removed the filter-era ceiling on map size and is still the skeleton of every serious visual SLAM system, including the learned ones: DROID's frontend/backend split is PTAM's split wearing a network.</p></div></details>
+<details class="qa"><summary>Feature-based or direct: pick a side and defend it.</summary><div class="a"><p>Features are robust to photometric nuisance (exposure, vignetting, rolling shutter residue) because a corner is a corner after those distortions; they waste most of the image and die in blur and low texture. Direct methods use far more of the image and produce semi-dense maps, but stand on a brittle brightness-constancy assumption that demands photometric calibration. The 2026 answer: era 3 mooted much of the debate by making features robust where they used to be weak, so features-plus-learning is the practical default, with direct methods surviving in odometry niches with global-shutter, photometrically calibrated cameras.</p></div></details>
+<details class="qa"><summary>Monocular scale ambiguity: how is it solved across the eras?</summary><div class="a"><p>One camera cannot distinguish small-and-near from large-and-far, so scale is unobservable. Fixes: add an IMU, whose accelerometer measures metric acceleration and makes scale observable (the VIO answer); add a second camera, whose baseline is a known metric ruler; or, the modern option, use a learned metric-depth prior (Depth Anything v2, Metric3D) trained on data where true scale was known. Era 6 models bake the same prior into the geometry network itself.</p></div></details>
+<details class="qa"><summary>What does VIO initialization actually need, and what happens if it doesn't get it?</summary><div class="a"><p>Observability. Scale, gravity direction, velocity, and IMU biases only become observable under excited motion: acceleration that is not constant and rotation that is not zero. A drone hovering perfectly still, or a car driving at constant velocity in a straight line, gives the estimator no leverage; scale and biases wander, and the first aggressive turn exposes the bad initialization as a jump or a divergence. Fixes are procedural (a figure-eight wiggle before the mission) or architectural (stereo or depth to remove the scale burden).</p></div></details>
+<details class="qa"><summary>Is 3D Gaussian Splatting SLAM ready for a product in 2026?</summary><div class="a"><p>Split by product. For reconstruction-shaped products (inspection, telepresence, digital twins, sim assets) close to yes: real-time photorealistic dense mapping is genuinely delivered. For the navigation stack, no: benchmarks are room-scale RGB-D, outdoor drift, loop closure, and scale still trail geometric systems, and the compute competes with everything else on the robot. Giving the split answer, with the critique, is what senior sounds like.</p></div></details>
+<details class="qa"><summary>How do foundation models change SLAM?</summary><div class="a"><p>Tell the DUSt3R story: a transformer trained on millions of scenes regresses dense 3D pointmaps from uncalibrated images in one forward pass, no per-scene feature matching or triangulation. Geometry becomes a prior you query. The SLAM layer's remaining job shrinks to fusing, aligning, and memory-managing those outputs (MASt3R-SLAM, VGGT-SLAM), plus metric-depth priors dissolving monocular scale ambiguity inside classical pipelines. Then add the caveat: multi-view consistency still comes from an alignment optimization, and learned metric scale is only as good as the training distribution.</p></div></details>
+<details class="qa"><summary>Pick a visual SLAM approach for a teleoperated robot whose GPU also encodes video. Justify it.</summary><div class="a"><p>Budget reasoning first: the GPU is already busy, so DROID-class and splatting SLAM are out. Answer: a hybrid. Lightweight VIO (OpenVINS or VINS-Fusion) for smooth real-time state estimation, plus era-3 learned relocalization (SuperPoint + LightGlue via hloc) against a prebuilt map for drift correction, scheduled at a low rate. You keep robustness where it is cheap (the front-end) and spend nothing on neural rendering you do not need. Interviewers reward the resource-constraint framing more than the name-drops.</p></div></details>
+<details class="qa"><summary>Your visual SLAM works in the demo video and fails in the customer's warehouse. Give three hypotheses ordered by likelihood.</summary><div class="a"><p>One: appearance shift. The warehouse has repetitive racking, weak texture, and different lighting, so feature matching and place recognition silently degrade; check inlier counts and loop-closure acceptance rates first. Two: motion profile. The customer's robot yaws faster or vibrates more, bringing rolling shutter and motion blur into play; compare blur statistics and check the Chapter 2 sync and shutter story. Three: calibration drift. The camera was remounted or bumped in shipping, and extrinsics or intrinsics no longer match; re-run calibration and see if reprojection residuals dropped. The ordering matters: appearance explains most field failures, hardware explains the rest.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 2 · Sensors, Calibration &amp; Time · SLAM: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">02</div>
+  <div class="chapter-kicker">Chapter Two · Garbage In, Garbage Map</div>
+  <h1>Sensors, Calibration, and Time</h1>
+  <p class="chapter-sub">The estimators in Chapter 1 assume measurements with known noise models, known geometry, and honest timestamps; this chapter is about earning all three before you run a single line of SLAM.</p>
+</header>
+
+<h2><span class="sec-no">2.1</span>Why a Hardware Chapter</h2>
+<p>Read enough SLAM post-mortems and a pattern appears. "The map bends at the far end of the warehouse" turns out to be a lidar mounted 0.4° off from what the config claims. "VIO diverges whenever the robot turns fast" turns out to be a 15&nbsp;ms camera-IMU time offset. "The corridor is 3% too long" turns out to be new casters that changed the effective wheel radius. Almost never is the estimator itself the culprit. The math was fine. The inputs were lies.</p>
+<p>This is why senior engineers are boring about hardware. They ask what the shutter is, where the timestamp is taken, when the rig was last calibrated, and only then what algorithm is running. Interviews probe the same instinct. Anyone can name ORB-SLAM3; fewer people can say what a 5&nbsp;ms sync error does to it, with a number.</p>
+<div class="keypoint">Every SLAM failure post-mortem ends at a sensor, a calibration, or a clock. An afternoon spent on calibration and time sync buys more accuracy than a month of back-end tuning, because nothing downstream can repair a measurement that was wrong the moment it was born.</div>
+<p>Chapter 0 gave you the honest one-line summary of each sensor. Here we go one level down: the physics, the error models the estimators need, and the two rituals (calibration and clock sync) that turn a box of parts into a rig you can trust.</p>
+
+<h2><span class="sec-no">2.2</span>Wheel Odometry</h2>
+<p>Encoders count shaft ticks. Everything else is bookkeeping. For a differential-drive robot with wheel radius <em>r</em>, encoder resolution <em>N</em> ticks per revolution, and wheel separation <em>b</em>, the pipeline from ticks to pose is short enough to memorize:</p>
+<pre>Per wheel, ticks to distance:
+  Δs_r = 2πr · Δticks_r / N        Δs_l = 2πr · Δticks_l / N
+
+Body motion over one step Δt:
+  Δs = (Δs_r + Δs_l) / 2           v = Δs / Δt
+  Δθ = (Δs_r − Δs_l) / b           ω = Δθ / Δt
+
+Pose integration (midpoint rule, fine at 50 Hz):
+  x ← x + Δs · cos(θ + Δθ/2)
+  y ← y + Δs · sin(θ + Δθ/2)
+  θ ← θ + Δθ</pre>
+<p>The midpoint rule is a first-order approximation of the true circular arc. At typical control rates the difference is microscopic, and the arc formula has a divide-by-zero at Δθ = 0 that you would have to special-case anyway.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="30" y="34" font-size="13" fill="#b3401e" letter-spacing="2">DIFF-DRIVE GEOMETRY</text>
+  <circle cx="480" cy="150" r="52" fill="none" stroke="#23201a" stroke-width="2.5"/>
+  <rect x="452" y="88" width="56" height="13" fill="#23201a"/>
+  <rect x="452" y="199" width="56" height="13" fill="#23201a"/>
+  <line x1="480" y1="30" x2="480" y2="150" stroke="#a97b1f" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <circle cx="480" cy="30" r="6" fill="#a97b1f"/>
+  <text x="496" y="34" font-size="12" fill="#a97b1f">ICC (turn center)</text>
+  <text x="490" y="118" font-size="12" fill="#a97b1f">R</text>
+  <path d="M480 30 m -130 0 a130 130 0 0 1 130 -130" fill="none" stroke="none"/>
+  <path d="M368 96 A130 130 0 0 1 480 160" fill="none" stroke="none"/>
+  <path d="M545 96 A115 115 0 0 1 588 132" fill="none" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="5 4"/>
+  <line x1="510" y1="94" x2="566" y2="94" stroke="#0e5f5b" stroke-width="2.5"/>
+  <polygon points="566,94 556,89 556,99" fill="#0e5f5b"/>
+  <text x="518" y="80" font-size="12" fill="#0e5f5b">v_top (slow)</text>
+  <line x1="510" y1="205" x2="606" y2="205" stroke="#0e5f5b" stroke-width="2.5"/>
+  <polygon points="606,205 596,200 596,210" fill="#0e5f5b"/>
+  <text x="518" y="232" font-size="12" fill="#0e5f5b">v_bottom (fast)</text>
+  <line x1="430" y1="94" x2="430" y2="205" stroke="#b3401e" stroke-width="1.5"/>
+  <text x="398" y="155" font-size="12" fill="#b3401e">b</text>
+  <text x="60" y="90" font-size="12.5" fill="#23201a">unequal wheel speeds put the</text>
+  <text x="60" y="110" font-size="12.5" fill="#23201a">turn center on the axle line,</text>
+  <text x="60" y="130" font-size="12.5" fill="#23201a">beyond the slower wheel.</text>
+  <text x="60" y="168" font-size="12.5" fill="#0e5f5b">ω = (v_fast − v_slow) / b</text>
+  <text x="60" y="188" font-size="12.5" fill="#0e5f5b">R = v / ω</text>
+</svg>
+</div>
+<figcaption>Fig 2.1: A differential drive turns about a point on the wheel axle line; the wheel speed difference sets the yaw rate.</figcaption>
+</figure>
+<h3>Systematic vs Stochastic Error</h3>
+<p>Wheel odometry error comes in two flavors, and only one of them is fixable with a screwdriver. <strong>Systematic</strong> error is repeatable: the two wheels have slightly unequal diameters, or the effective wheelbase <em>b</em> is not what the CAD says (tires contact the ground over a patch, not a point). These make the robot curve when it should go straight, every time, in the same direction. <strong>Stochastic</strong> error is the rest: slip, bumps, floor texture. It never repeats and you can only model it as noise.</p>
+<p>The classic recipe for the systematic part is <strong>UMBmark</strong> (Borenstein &amp; Feng, 1996): drive a 4×4&nbsp;m square clockwise and counterclockwise several times, measure where the robot actually ends up, and decompose the final-position errors into a wheel-diameter correction and a wheelbase correction. It takes an hour and routinely cuts systematic drift by a factor of five or more. The stochastic part goes into the motion model covariance from Chapter 1; the standard practice is to make rotation noise generous, because heading error is the term that turns into unbounded position error.</p>
+<p>One warning about platform types. The equations above assume wheels that roll without slipping, which is only ever approximately true. <strong>Skid-steer</strong> and tracked vehicles turn <em>by</em> slipping, so the effective wheelbase is 1.2 to 1.8 times the physical one and varies with surface; calibrate it empirically and expect it to change on grass. <strong>Mecanum</strong> platforms slip by design in every direction, and their odometry is poor enough that you should treat it as a velocity hint for the fusion filter, not as a pose source.</p>
+<div class="warfield">Things that bite in the field: carpet compresses under the wheel and changes the effective radius, so a robot calibrated on concrete gains 1 to 2% scale error the moment it drives onto carpet. Door thresholds and cable covers kick the heading a fraction of a degree per crossing, and a delivery robot crosses fifty a day. A payload shift (someone puts a 10&nbsp;kg tote on one side) compresses tires asymmetrically and re-introduces the curvature you calibrated away. And check encoder sign conventions on day one; a wheel counting backwards produces odometry that is almost plausible, which is worse than obviously broken.</div>
+
+<h2><span class="sec-no">2.3</span>The IMU, Honestly</h2>
+<p>A MEMS gyroscope is a microscopic tuning fork. A proof mass vibrates along one axis; when the chip rotates, the Coriolis effect pushes the mass sideways in proportion to the rotation rate, and capacitive fingers read that deflection. A MEMS accelerometer is simpler still: a proof mass on silicon springs, displaced by <em>specific force</em>. Note the term. An accelerometer at rest does not read zero; it reads 9.81&nbsp;m/s² upward, the reaction to gravity. Every IMU integration pipeline begins by deciding what to do about that ever-present <em>g</em>, and most IMU bugs begin with getting it wrong.</p>
+<h3>The Error Model</h3>
+<p>Estimators do not need the IMU to be good. They need to know precisely <em>how</em> it is bad. The standard model has four parts, and you will meet these exact names in every VIO config file:</p>
+<ul>
+  <li><strong>Bias</strong>: a slowly wandering offset added to every reading. Different at every power-on (turn-on bias), then drifting during the run.</li>
+  <li><strong>Bias random walk</strong> (bias instability): how fast the bias wanders. This is the number that separates a $2 IMU from a $20,000 one.</li>
+  <li><strong>White noise</strong> (noise density): the fuzz on each individual sample. Integrating it gives angle random walk and velocity random walk.</li>
+  <li><strong>Scale factor and axis misalignment</strong>: the sensor reads 1.002× the true rate, or its axes are 0.1° from orthogonal. Calibratable, temperature-dependent.</li>
+</ul>
+<h3>Why Double Integration Explodes</h3>
+<p>Position from an accelerometer means integrating twice, so constant errors grow quadratically and gyro-induced errors grow cubically. The cubic term comes from a nasty coupling: a gyro bias tilts your gravity estimate, and a tilted gravity estimate leaks a slice of that 9.81&nbsp;m/s² into the horizontal axes as phantom acceleration. Concrete numbers for a cheap, warmed-up MEMS part:</p>
+<pre>accel bias ≈ 0.02 m/s² (2 mg):
+  position error = ½·b·t²   →  1 cm at 1 s,  1 m at 10 s,  36 m at 60 s
+
+gyro bias ≈ 0.02 °/s, leaking gravity into the horizontal:
+  position error ≈ (g·b_g/6)·t³  →  0.6 m at 10 s,  123 m at 60 s</pre>
+<p>So a consumer IMU on its own is a useful position sensor for well under a second, a decent attitude sensor for minutes (gravity keeps pitch and roll observable), and a superb rotation-rate sensor at every instant. Fusion architectures are built around exactly that profile: let the IMU carry you between camera frames or lidar sweeps, and let those exteroceptive sensors reset the IMU's runaway integrals.</p>
+<div class="analogy">Integrating an accelerometer for position is like tracking your bank balance from interest rate announcements alone. Each announcement is roughly right, but you are two integrations away from the number you care about, and a tiny consistent misreading compounds into fantasy within a page of arithmetic. A statement (camera, lidar, GPS) has to arrive occasionally to reset the books.</div>
+<table>
+  <tr><th>Grade</th><th>Example</th><th>Gyro bias instability</th><th>Angle random walk</th><th>Rough price</th></tr>
+  <tr><td>Consumer MEMS</td><td>ICM-42688, BMI088</td><td>2–10 °/h</td><td>0.2–0.5 °/√h</td><td>$1–10 (chip)</td></tr>
+  <tr><td>Industrial MEMS</td><td>ADIS16470/16505, Epson G366</td><td>0.5–8 °/h</td><td>0.1–0.3 °/√h</td><td>$300–2,500</td></tr>
+  <tr><td>Tactical</td><td>Honeywell HG4930, KVH FOG</td><td>0.02–1 °/h</td><td>0.01–0.05 °/√h</td><td>$4k–30k</td></tr>
+  <tr><td>Navigation</td><td>Ring-laser / fiber-optic INS</td><td>&lt; 0.01 °/h</td><td>~0.002 °/√h</td><td>$50k+</td></tr>
+</table>
+<p>The table explains a lot of system design at a glance. A consumer part drifts a few degrees per hour of bias wander, which VIO corrects effortlessly, so phones and drones ship $2 IMUs and spend the savings on cameras. A survey vehicle that must coast through a two-minute GPS outage with centimeter accuracy needs the tactical row, and pays for it.</p>
+<p>One more idea before the worked setup. Raw IMU samples arrive at 200 to 1000&nbsp;Hz, far too fast to give each one its own node in a factor graph. <strong>Preintegration</strong> (Forster et al.) compresses all the samples between two keyframes into a single relative motion constraint, done on the manifold so the result can be corrected later when the bias estimate improves, without re-integrating. Chapter 1 built the manifold machinery this rests on; Chapters 3 and 4 use it in every lidar-inertial and visual-inertial system they discuss.</p>
+<dl class="jargon">
+  <dt>Noise density</dt><dd>White noise per sample, quoted per √Hz so it is rate-independent. Units: (rad/s)/√Hz for gyros, (m/s²)/√Hz for accelerometers.</dd>
+  <dt>Angle random walk (ARW)</dt><dd>The angle error you accumulate by integrating gyro white noise, growing with √t. Quoted in °/√h.</dd>
+  <dt>Bias instability</dt><dd>The floor of the Allan deviation curve: the best stability the bias ever achieves before it wanders off again.</dd>
+  <dt>g-sensitivity</dt><dd>Gyro readings polluted by linear acceleration. Matters on vibrating platforms like multirotors; damp your IMU mount.</dd>
+</dl>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="30" y="30" font-size="13" fill="#b3401e" letter-spacing="2">ALLAN DEVIATION, WHAT THE SLOPES MEAN</text>
+  <line x1="80" y1="250" x2="710" y2="250" stroke="#23201a" stroke-width="2"/>
+  <line x1="80" y1="60" x2="80" y2="250" stroke="#23201a" stroke-width="2"/>
+  <text x="300" y="284" font-size="12" fill="#23201a">averaging time τ (log scale)</text>
+  <text x="30" y="160" font-size="12" fill="#23201a" transform="rotate(-90 30 160)">σ(τ) (log)</text>
+  <path d="M110 80 L340 185 Q400 208 460 205 Q520 202 560 185 L680 120" fill="none" stroke="#0e5f5b" stroke-width="3"/>
+  <line x1="170" y1="60" x2="170" y2="250" stroke="#a97b1f" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <circle cx="170" cy="107" r="6" fill="#a97b1f"/>
+  <text x="180" y="98" font-size="12" fill="#a97b1f">read N at τ = 1 s</text>
+  <text x="150" y="160" font-size="12" fill="#0e5f5b">slope −½ : white noise</text>
+  <text x="360" y="240" font-size="12" fill="#0e5f5b">flat: bias instability</text>
+  <text x="530" y="130" font-size="12" fill="#0e5f5b">slope +½ : rate random walk</text>
+</svg>
+</div>
+<figcaption>Fig 2.2: The Allan deviation curve of a static IMU log, with the three regions you read numbers from.</figcaption>
+</figure>
+
+<div class="setup">
+<p><strong>Goal: measure your actual IMU's noise density and bias instability with <code>allan_variance_ros</code>, and put real numbers into a VIO config.</strong></p>
+<p>Prereqs: any IMU publishing <code>sensor_msgs/Imu</code> at 100&nbsp;Hz or more, a machine that can sit untouched for an afternoon. The reference tool (<a href="https://github.com/ori-drs/allan_variance_ros">ori-drs/allan_variance_ros</a>) is a ROS&nbsp;1 package; if your stack is ROS&nbsp;2 Jazzy on Ubuntu 24.04, record there and convert the bag with <code>rosbags-convert</code> (<code>pip install rosbags</code>), or run the tool in a <code>ros:noetic</code> Docker container.</p>
+<pre>mkdir -p ~/catkin_ws/src &amp;&amp; cd ~/catkin_ws/src
+git clone https://github.com/ori-drs/allan_variance_ros.git
+cd ~/catkin_ws &amp;&amp; catkin build allan_variance_ros
+source devel/setup.bash</pre>
+<p>Recording protocol: bolt the IMU to something heavy, on foam, on a desk nobody touches. Constant temperature (no sunny windowsill, no HVAC vent). Record at least <strong>3 hours</strong> static; longer is better because the bias-instability floor lives at large averaging times.</p>
+<pre>rosbag record /imu0 -O imu_static.bag        # go do something else for 3+ h
+
+# reorder by timestamp, then compute:
+rosrun allan_variance_ros cookbag.py --input imu_static.bag \
+    --output imu_cooked.bag
+rosrun allan_variance_ros allan_variance ~/bags/imu_folder config.yaml
+rosrun allan_variance_ros analysis.py --data allan_variance.csv</pre>
+<p>Where <code>config.yaml</code> holds <code>imu_topic</code>, <code>imu_rate</code>, <code>measure_rate</code>, and <code>sequence_time</code> (check the README for the exact current keys). The analysis step fits the slopes of Fig 2.2 for all six axes and prints Kalibr-format numbers, which drop straight into an OpenVINS <code>kalibr_imu_chain.yaml</code>:</p>
+<pre>imu0:
+  accelerometer_noise_density: 2.0e-03   # [m/s^2/sqrt(Hz)]
+  accelerometer_random_walk:   3.0e-04   # [m/s^3/sqrt(Hz)]
+  gyroscope_noise_density:     1.7e-04   # [rad/s/sqrt(Hz)]
+  gyroscope_random_walk:       2.0e-05   # [rad/s^2/sqrt(Hz)]
+  rostopic: /imu0
+  update_rate: 200</pre>
+<p>(VINS-Fusion calls the same four numbers <code>acc_n</code>, <code>gyr_n</code>, <code>acc_w</code>, <code>gyr_w</code>.) Standard practice is to inflate the measured values 3 to 10× before use, because a moving robot adds vibration and temperature swings the static test never saw.</p>
+<p>Sanity checks: (1) the short-τ region should be a clean −½ slope; kinks there mean vibration reached the sensor. (2) If the curve never flattens, your bag was too short to see bias instability; record longer. (3) All three axes of each sensor should give similar values; one wild axis means a mechanical resonance or a dying part. (4) You should land within a factor of 2 to 5 of the datasheet; a factor of 50 means the test setup, not the IMU.</p>
+</div>
+
+<h2><span class="sec-no">2.4</span>Cameras</h2>
+<p>The pinhole model is the whole of projective geometry you need for most of this book. A 3D point in the camera frame maps to a pixel through the intrinsics matrix <strong>K</strong>:</p>
+<pre>P = (X, Y, Z) in the camera frame lands at pixel (u, v):
+
+  u = fx · X/Z + cx            ⎡ fx   0  cx ⎤
+  v = fy · Y/Z + cy        K = ⎢  0  fy  cy ⎥
+                               ⎣  0   0   1 ⎦
+
+fx, fy: focal length in pixels     cx, cy: principal point</pre>
+<p>Real lenses bend this. <strong>Radial distortion</strong> (coefficients k1, k2, k3) makes straight lines bow outward or inward toward the image edges; <strong>tangential distortion</strong> (p1, p2) comes from the lens sitting slightly tilted relative to the sensor. Together these form the Brown-Conrady or "plumb bob" model, <code>pinhole-radtan</code> in Kalibr's vocabulary. Wide-angle and fisheye lenses beyond about 120° need a different parameterization entirely; the <strong>equidistant</strong> (Kannala-Brandt) model, <code>pinhole-equi</code>, maps the incidence angle θ to radius r = f·θ and stays well-behaved out to the edges where radtan falls apart.</p>
+<h3>Rolling vs Global Shutter</h3>
+<p>A <strong>global shutter</strong> exposes every pixel simultaneously: one photo, one instant. A <strong>rolling shutter</strong> reads the sensor row by row over 10 to 30&nbsp;ms, so the bottom of the image is a photograph of a slightly later world than the top. Yaw at 1&nbsp;rad/s with a 30&nbsp;ms readout and the last row has rotated 1.7° relative to the first; at a 600&nbsp;px focal length that is roughly 18 pixels of shear on a vertical edge. A feature-based SLAM that assumes a single pose per image is now fitting geometry to a smeared impossibility.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="90" y="40" font-size="13" fill="#0e5f5b" letter-spacing="2">GLOBAL SHUTTER</text>
+  <rect x="60" y="60" width="260" height="180" fill="none" stroke="#23201a" stroke-width="2.5"/>
+  <line x1="120" y1="72" x2="120" y2="228" stroke="#23201a" stroke-width="2.5"/>
+  <line x1="185" y1="72" x2="185" y2="228" stroke="#23201a" stroke-width="2.5"/>
+  <line x1="250" y1="72" x2="250" y2="228" stroke="#23201a" stroke-width="2.5"/>
+  <text x="95" y="262" font-size="12" fill="#23201a">doorframe stays vertical</text>
+  <text x="440" y="40" font-size="13" fill="#b3401e" letter-spacing="2">ROLLING + FAST YAW</text>
+  <rect x="430" y="60" width="260" height="180" fill="none" stroke="#23201a" stroke-width="2.5"/>
+  <line x1="500" y1="72" x2="482" y2="228" stroke="#b3401e" stroke-width="2.5"/>
+  <line x1="565" y1="72" x2="547" y2="228" stroke="#b3401e" stroke-width="2.5"/>
+  <line x1="630" y1="72" x2="612" y2="228" stroke="#b3401e" stroke-width="2.5"/>
+  <text x="700" y="76" font-size="11" fill="#a97b1f">t₀</text>
+  <text x="700" y="232" font-size="11" fill="#a97b1f">t₀+30ms</text>
+  <text x="452" y="262" font-size="12" fill="#b3401e">rows see later, rotated world</text>
+</svg>
+</div>
+<figcaption>Fig 2.3: Rolling shutter reads rows sequentially, so fast yaw shears vertical structure by many pixels.</figcaption>
+</figure>
+<p>Handhelds and slow indoor robots get away with rolling shutter (and Chapter 5's D435i has a rolling RGB sensor for exactly the cost reasons you would guess). Drones and anything that turns fast should pay the extra $30 for global shutter, or run a rolling-shutter-aware estimator that models per-row time, which costs implementation pain instead. The reading list has the reference.</p>
+<h3>Depth: Mono, Stereo, RGB-D</h3>
+<p>A single camera cannot measure metric scale; a hallway and a dollhouse of the same proportions produce identical images. Mono SLAM either accepts an arbitrary scale factor or borrows metricity from an IMU. Two cameras with a known <strong>baseline</strong> B triangulate depth from <strong>disparity</strong> d, and the error math is worth having in your pocket:</p>
+<pre>Z = f · B / d                 (d in pixels, B in meters)
+σ_Z ≈ Z² · σ_d / (f · B)      (depth error grows with range squared)
+
+D435i-class rig: B = 0.05 m, f = 640 px, σ_d ≈ 0.25 px
+  Z = 2 m → σ_Z ≈ 3 cm      Z = 5 m → σ_Z ≈ 20 cm     Z = 10 m → σ_Z ≈ 0.8 m</pre>
+<p>That Z² is why a 5&nbsp;cm baseline device is an indoor sensor, full stop, and why autonomous cars mount stereo pairs a meter apart. Widening the baseline buys far-field accuracy but shrinks the near-field overlap between the two views and makes the rig floppier (a baseline that flexes 0.05° has just eaten your calibration).</p>
+<p>RGB-D cameras add a dedicated depth mechanism, and the three technologies fail differently:</p>
+<table>
+  <tr><th>Technology</th><th>How it works</th><th>Example device</th><th>Strengths</th><th>Weaknesses</th></tr>
+  <tr><td>Structured light</td><td>Projects a known IR dot pattern, reads its deformation</td><td>Kinect v1, Orbbec Astra</td><td>Dense, cheap, good at 1–4 m</td><td>Sunlight erases the pattern; interferes with other units</td></tr>
+  <tr><td>Active IR stereo</td><td>Stereo matching, IR texture projector assists blank surfaces</td><td>RealSense D435i</td><td>Works dim or bright, degrades gracefully</td><td>Noisy edges, holes on dark or shiny surfaces</td></tr>
+  <tr><td>Time of flight</td><td>Measures phase shift of modulated IR light per pixel</td><td>Azure Kinect, Orbbec Femto Bolt</td><td>Accurate, dense, long-ish range</td><td>Multipath ghosts in corners, flying pixels at depth edges</td></tr>
+</table>
+<h3>Exposure Is Part of the Sensor Model</h3>
+<p>Auto-exposure and auto-gain change image brightness from frame to frame, and indoor lighting flickers at 50 or 60&nbsp;Hz on top of that. Feature methods (ORB and friends, Chapter 4) shrug this off because descriptors are built for some illumination invariance. <strong>Direct methods</strong> like DSO, which minimize raw intensity differences, are hurt badly: a global brightness step between frames looks exactly like the whole world moved. The fixes are to lock exposure and gain when the environment allows, or to calibrate the camera photometrically (response curve and vignette, as in the TUM monoVO dataset) so the estimator can model brightness changes instead of being fooled by them.</p>
+
+<h2><span class="sec-no">2.5</span>LiDAR</h2>
+<p>Nearly every lidar you will touch is pulsed <strong>time-of-flight</strong>: fire a nanosecond laser pulse, time the echo, multiply by c/2. The newer alternative, <strong>FMCW</strong> (frequency-modulated continuous wave, e.g. Aeva), chirps a continuous beam and reads range from the frequency shift, which brings two gifts: per-point radial velocity for free, and immunity to sunlight and to other lidars. As of 2026 FMCW is still mostly an automotive-money technology; robotics budgets buy pulsed ToF.</p>
+<p>Mechanically, the market splits three ways. <strong>Spinning multi-beam</strong> units (Velodyne's original design, now Ouster, Hesai, Robosense) stack 16 to 128 laser channels on a motor: 360° coverage, fixed vertical rings, the geometry every classic algorithm assumes. <strong>MEMS and solid-state</strong> units steer with a micro-mirror or optical phased array into a forward cone, trading field of view for ruggedness and cost. And <strong>Livox</strong> units steer with rotating Risley prisms, painting a non-repetitive rosette: the scan pattern never retraces itself, so coverage density accumulates the longer you stare. That last property broke the ring-based feature extractors of the LOAM era and is part of why direct methods like FAST-LIO2 (Chapter 3) took over.</p>
+<table>
+  <tr><th>Unit</th><th>Class</th><th>Range</th><th>FoV</th><th>Typical σ</th><th>Rough 2026 price</th></tr>
+  <tr><td>RPLIDAR A1M8</td><td>2D spinning, triangulation</td><td>12 m</td><td>360° × one plane</td><td>~1% of range</td><td>$100</td></tr>
+  <tr><td>RPLIDAR S3</td><td>2D spinning, ToF</td><td>40 m</td><td>360° × one plane</td><td>±3 cm</td><td>$400</td></tr>
+  <tr><td>Livox Mid-360</td><td>Rosette (prism)</td><td>40 m @ 10% refl</td><td>360° × 59°</td><td>±2 cm</td><td>$750</td></tr>
+  <tr><td>Hesai XT32</td><td>Spinning, 32 ch</td><td>120 m</td><td>360° × 31°</td><td>±1 cm</td><td>$4k</td></tr>
+  <tr><td>Ouster OS1-32</td><td>Spinning, 32 ch</td><td>~170 m @ 10% refl</td><td>360° × 45°</td><td>±1.5–3 cm</td><td>$6k</td></tr>
+</table>
+<p>Two features on the datasheet matter more than they look. <strong>Multi-return</strong>: when the beam clips a dust particle or a leaf edge, part of the energy reflects early and part continues; a multi-return lidar reports both, letting you keep the far (real) surface and flag the near one. <strong>Reflectivity</strong> (calibrated intensity): a per-point measure of surface reflectance that survives range changes, usable as a grayscale image for place recognition and for lidar-camera calibration later in this chapter.</p>
+<div class="warfield">What the environment does to a lidar: dust and rain produce clouds of spurious near returns (your own wheels can kick up a bloom that scan matching happily locks onto). Glass mostly transmits the beam, so the sensor maps the room <em>behind</em> the storefront and reports free space where a wall is; at shallow angles glass mirrors, painting ghost geometry inside solid walls. Matte black surfaces absorb enough that returns simply vanish. Retroreflective tape and safety vests saturate the receiver and bloom into neighboring points. Every one of these is a reason Chapter 3 filters clouds before matching them.</div>
+
+<h2><span class="sec-no">2.6</span>GNSS, RTK, and the Supporting Cast</h2>
+<p>Plain GPS is a 2 to 5 meter sensor, and the error budget explains why: satellite clock and ephemeris error contribute roughly 1 to 2&nbsp;m, ionospheric delay 2 to 5&nbsp;m (the worst offender, varies with solar mood), troposphere about 0.5&nbsp;m, receiver noise 0.3&nbsp;m, and multipath anywhere from zero to many meters depending on how much metal and glass surrounds you. Most of these errors are <em>spatially correlated</em>: two receivers 10&nbsp;km apart see nearly the same ionosphere.</p>
+<p>That correlation is the trick behind <strong>RTK</strong> (real-time kinematic). A stationary base at a surveyed point measures the shared errors and broadcasts corrections (RTCM messages, often over internet via NTRIP); the rover then works with carrier-phase measurements, resolving the integer wavelength ambiguity to reach 1&nbsp;cm + 1&nbsp;ppm accuracy in "fixed" mode. Watch the fix status like a hawk: "float" mode means the ambiguity search has not converged and accuracy silently sags to decimeters. <strong>PPK</strong> is the same math run offline after the fact, which is how Chapter 7 gets outdoor ground truth without a realtime link. The catch for robots: urban canyons reflect signals, and a multipath-corrupted fix can be wrong by meters while reporting high confidence. Fuse GNSS as one more factor with a robust loss (Chapter 1), never as gospel.</p>
+<p>The supporting cast, one line each. <strong>Radar</strong>: sees through fog, rain, and dust that blind lidar, at the price of sparse, noisy, multipath-prone returns. <strong>UWB anchors</strong>: 10 to 30&nbsp;cm indoor positioning from time-of-flight to fixed beacons, great when you own the building, useless when you don't. <strong>Event cameras</strong>: report per-pixel brightness changes with microsecond latency and no motion blur, spectacular for fast motion and HDR scenes, still exotic on the software side. <strong>Magnetometer</strong>: absolute heading outdoors, hallucination generator inside any steel building. <strong>Barometer</strong>: relative altitude to about a meter, drifts with the weather, standard on drones for the vertical axis.</p>
+
+<h2><span class="sec-no">2.7</span>Extrinsic Calibration</h2>
+<p>An extrinsic is a rigid transform between two frames on the robot: <code>T_body_sensor</code> maps a point expressed in the sensor frame into the body frame, p<sub>body</sub> = T<sub>body_sensor</sub> · p<sub>sensor</sub>, as a 4×4 SE(3) matrix (Chapter 1). Half of all extrinsics bugs are convention bugs, so adopt the naming discipline where the frame order is in the variable name and stick to it; if a matrix is called <code>T_cam_imu</code>, it takes IMU-frame points to camera-frame points, and its inverse is <code>T_imu_cam</code>, no exceptions, no "I think this one goes the other way." (Kalibr's output files annotate exactly this, and people still get it backwards.)</p>
+<p>Intrinsics come first, always: you cannot place a camera relative to an IMU while the camera's own focal length is wrong. The standard tool is a planar target. Checkerboards are printable anywhere but must be fully visible in every image and carry a 180° ambiguity; an <strong>AprilGrid</strong> (a lattice of AprilTags) is better on every axis, because each tag has a unique ID, partial views still contribute corners, and orientation is never ambiguous. OpenCV's calibration module handles the checkerboard workflow; Kalibr prefers the AprilGrid and so should you.</p>
+<p><strong>Camera-IMU</strong> extrinsics are the hard, load-bearing case for VIO, and <a href="https://github.com/ethz-asl/kalibr">Kalibr</a> (Furgale, Rehder, Siegwart) is the standard tool. It fits a continuous-time B-spline to the rig trajectory and jointly estimates the spline, the gravity direction, <code>T_cam_imu</code>, and the camera-IMU <strong>time offset</strong>, which is why the same paper appears again in section 2.8. It needs motion that excites all axes; a calibration bag recorded by someone gently panning left and right is unobservable and the tool will happily output garbage with small-looking residuals.</p>
+<p><strong>LiDAR-camera</strong> calibration has mostly gone targetless: modern methods align depth edges and reflectivity gradients in the point cloud against intensity edges in the image, refined with mutual information or direct photometric cost. A practical, maintained implementation is <a href="https://github.com/koide3/direct_visual_lidar_calibration">koide3/direct_visual_lidar_calibration</a>, which gets you within a degree from a single scene plus a rough initial guess.</p>
+<p>When one of the two devices gives you poses rather than raw overlapping data (a tracking camera, a robot arm flange, a motion capture rig), the tool is <strong>hand-eye calibration</strong>: collect paired relative motions A (device 1) and B (device 2), then solve AX&nbsp;=&nbsp;XB for the fixed transform X between them. Tsai-Lenz (1989) is the classical closed-form solution; every robotics library ships one. The requirement that trips people is rotation diversity: motions about at least two independent axes, or the translation component of X is unobservable.</p>
+<h3>How Good Is Good</h3>
+<p>Numbers to hold your work against. Camera intrinsics: reprojection RMS below 0.5&nbsp;px, below 0.3&nbsp;px with a good target and lighting; above 1&nbsp;px means bad corners, a flexing target, or the wrong distortion model. Kalibr camera-IMU: mean reprojection error under 1&nbsp;px, gyro and accel residuals consistent with your section 2.3 noise numbers, time offset stable across two independent runs to well under a millisecond. And the sanity number that makes rotation errors visceral: 0.5° of extrinsic rotation error displaces a point at 10&nbsp;m range by 8.7&nbsp;cm. Your map at range is only as good as your angles.</p>
+<div class="keypoint">A calibration is not a file, it is a claim with an expiration date. Bolts settle, plastic creeps, temperature swings move lenses. Good teams version calibration files like code, log the date and rig serial number, and re-verify after any crash, shipping, or seasonal temperature change.</div>
+
+<div class="setup">
+<p><strong>Goal: calibrate camera-IMU extrinsics and time offset with Kalibr, and know whether to believe the output.</strong></p>
+<p>Prereqs: Ubuntu 24.04 host with Docker; a rig with a camera (20&nbsp;Hz is plenty for calibration) and an IMU (200&nbsp;Hz), both publishing in ROS with driver-side timestamps; your IMU noise numbers from the Setup in 2.3. Kalibr runs happily in its ROS&nbsp;1 container; record in ROS&nbsp;2 and convert with <code>rosbags-convert</code>.</p>
+<pre>git clone https://github.com/ethz-asl/kalibr.git
+cd kalibr &amp;&amp; docker build -t kalibr -f Dockerfile_ros1_20_04 .
+docker run -it --rm -v ~/calib:/data kalibr</pre>
+<p>Print an AprilGrid and describe it. Generate the PDF, print on A3 or larger, tape it dead flat to something rigid, then measure a printed tag edge with calipers (printers rescale silently) and put the <em>measured</em> size in the YAML:</p>
+<pre>rosrun kalibr kalibr_create_target_pdf --type apriltag \
+    --nx 6 --ny 6 --tsize 0.055 --tspace 0.3
+
+# /data/target.yaml
+target_type: 'aprilgrid'
+tagCols: 6
+tagRows: 6
+tagSize: 0.055        # measured, meters
+tagSpacing: 0.3       # gap / tagSize ratio</pre>
+<p>Camera intrinsics first (grid fixed, move the camera slowly through the whole field of view, near and far, tilted views included), then the joint camera-IMU bag. For that one: fix exposure short to kill motion blur, light the grid well, keep it mostly in frame, and record 60 to 90 seconds of deliberate excitation: rotate about each of the three axes in turn, translate along each, then mix. Brisk, not violent.</p>
+<pre>rosrun kalibr kalibr_calibrate_cameras --bag /data/cam_static.bag \
+    --topics /cam0/image_raw --models pinhole-radtan \
+    --target /data/target.yaml
+
+rosrun kalibr kalibr_calibrate_imu_camera --bag /data/imu_cam.bag \
+    --cam /data/camchain-cam_static.yaml --imu /data/imu.yaml \
+    --target /data/target.yaml</pre>
+<p>The report (a results text file plus a PDF of plots) gives you: reprojection error statistics, <code>T_cam_imu</code> as a 4×4 matrix, and <code>timeshift_cam_imu</code> annotated in the file as <code>t_imu = t_cam + shift</code>. Read all three before celebrating.</p>
+<p>Sanity checks: (1) The time offset should be a few milliseconds at most on a USB rig and near zero on a hardware-triggered one; tens of milliseconds means your driver is stamping frames on arrival, and you should fix that at the source rather than trust one calibrated constant. (2) Physical plausibility: the translation in <code>T_cam_imu</code> should match a ruler held to the rig to about a centimeter, the axes should match how the parts are actually mounted, and the estimated gravity direction in the report should point the way down actually was during recording. (3) The residual plots should look like unstructured noise around zero; slow sinusoids in the reprojection residuals mean an unmodeled time offset or rolling shutter. (4) Run the whole thing twice with fresh bags; extrinsics agreeing to a millimeter-and-a-tenth-of-a-degree is your real error bar.</p>
+</div>
+
+<h2><span class="sec-no">2.8</span>Time Is a Sensor Too</h2>
+<p>Fusion means combining measurements taken at the same instant, so a clock error is a measurement error in disguise. The arithmetic is short and worth committing to memory:</p>
+<pre>pixel error ≈ fx · ω · Δt_sync
+            = 600 px · 1 rad/s · 0.005 s  ≈  3 px</pre>
+<p>Five milliseconds of camera-IMU misalignment during a 1&nbsp;rad/s turn shifts every feature by about 3 pixels, on a system trying to converge to 0.2&nbsp;px reprojection error. The estimator cannot tell this from a bad extrinsic, so it corrupts whatever state absorbs it. This is the single most common reason a VIO stack that works on EuRoC (hardware-synced, Chapter 7) falls over on your own USB rig.</p>
+<div class="analogy">Badly synced video and audio is instantly obvious: 20 ms of lip-sync error makes a film unwatchable. Your SLAM stack watches lips and hears audio from clocks that were never introduced to each other, and unlike you it has no idea anything is wrong; it just quietly believes the mismatch.</div>
+<p>The first discipline is <em>where</em> the timestamp is taken. A frame should carry the time its exposure happened (mid-exposure, by convention), stamped by the driver from the device's own reported capture time. What you often get instead is the time the image finally arrived through USB and got a header slapped on, which floats by 5 to 30&nbsp;ms with bus load and CPU mood. Jitter this size makes a mockery of the 3-pixel arithmetic above.</p>
+<p>The gold standard is hardware. The IMU (or a dedicated board) generates a trigger pulse that <em>causes</em> each exposure, and the camera's strobe output confirms it, so the correspondence is physical rather than statistical. GNSS receivers provide <strong>PPS</strong>, a pulse at the top of every second, to which lidars and computers discipline their clocks. Between machines, <strong>PTP</strong> (IEEE 1588, or gPTP/802.1AS in its automotive profile) achieves sub-microsecond sync on hardware-timestamping NICs, versus the milliseconds of ordinary NTP. Milliseconds are fine for logging; they are not fine for fusion.</p>
+<p>In ROS 2, <code>message_filters</code> with the <code>ApproximateTime</code> policy pairs up messages whose stamps are close. Understand what it does and does not do: it <em>selects</em> plausible pairs, it does not <em>correct</em> stamps. Feeding it arrival-time-stamped garbage yields confidently matched garbage. Estimator-side time offset estimation (Kalibr offline, or VINS/OpenVINS online <code>estimate_td</code>) can absorb one constant offset, but nothing downstream can absorb jitter.</p>
+<dl class="jargon">
+  <dt>PPS</dt><dd>Pulse per second. An electrical edge at each second boundary, usually from a GNSS receiver, used to discipline other clocks.</dd>
+  <dt>PTP / gPTP</dt><dd>Precision Time Protocol over Ethernet. Sub-microsecond clock agreement with hardware timestamping; gPTP is the 802.1AS profile.</dd>
+  <dt>Strobe</dt><dd>Camera output pin that fires during exposure. Wire it to a timestamping input and you know exactly when each frame happened.</dd>
+  <dt>Mid-exposure stamp</dt><dd>The convention that a frame's time is the middle of its exposure window, not its start, end, or arrival.</dd>
+</dl>
+<div class="warfield">Field classics: USB cameras buffer 3 or 4 frames internally when the host stalls, then deliver them in a burst; arrival-time stamping turns that burst into physically impossible motion. Bags lie too: <code>rosbag record</code> under CPU load writes its own receive times, and a bag re-timestamped by a well-meaning script will replay beautifully while every inter-sensor relationship in it is fiction. Always fuse on <code>header.stamp</code>, replay with <code>--clock</code> and <code>use_sim_time</code>, and before trusting any new rig, plot camera-stamp deltas against IMU-stamp deltas for one minute; the pathology is usually visible to the naked eye.</div>
+
+<h2><span class="sec-no">2.9</span>Picking a Sensor Suite</h2>
+<p>Sensor selection is a budget exercise against your failure modes, not a shopping spree. Three worked bills of materials, with rough 2026 prices, each chosen to feed specific chapters of this book.</p>
+<h3>Budget Indoor Robot, About $700</h3>
+<table>
+  <tr><th>Item</th><th>Pick</th><th>Rough price</th><th>Why</th></tr>
+  <tr><td>RGB-D + IMU</td><td>RealSense D435i</td><td>$360</td><td>Depth, color, and an internal IMU on one USB cable; Chapter 5's exact sensor</td></tr>
+  <tr><td>2D lidar</td><td>RPLIDAR A1M8</td><td>$100</td><td>360° coverage for AMCL localization and costmaps in Chapter 8</td></tr>
+  <tr><td>Base + encoders</td><td>Kobuki-class used base</td><td>$150</td><td>Wheel odometry for RTAB-Map's odom input, bumpers included</td></tr>
+  <tr><td>Compute</td><td>Raspberry Pi 5, 8 GB</td><td>$80</td><td>Runs RTAB-Map indoors at modest rates</td></tr>
+</table>
+<p>This is deliberately Chapter 5's rig. Its weaknesses are known and survivable indoors: rolling-shutter RGB (keep turns gentle), 5&nbsp;cm stereo baseline (useless past ~5&nbsp;m, fine in rooms), USB timestamps (calibrate the offset with Kalibr and keep motion moderate).</p>
+<h3>Outdoor UGV, About $8k</h3>
+<table>
+  <tr><th>Item</th><th>Pick</th><th>Rough price</th><th>Why</th></tr>
+  <tr><td>3D lidar</td><td>Ouster OS1-32</td><td>$5,500</td><td>Range and 45° vertical FoV for FAST-LIO2 mapping in Chapter 3; PTP sync built in</td></tr>
+  <tr><td>IMU</td><td>ADIS16505 breakout</td><td>$450</td><td>Industrial-grade bias stability keeps LIO tight between sweeps</td></tr>
+  <tr><td>RTK GNSS</td><td>u-blox ZED-F9P rover + base</td><td>$600</td><td>Centimeter ground truth for Chapter 7 evaluation, drift-free global anchor</td></tr>
+  <tr><td>Camera</td><td>Global-shutter industrial cam</td><td>$350</td><td>Loop closure appearance and lidar-camera fusion experiments</td></tr>
+  <tr><td>Compute</td><td>Jetson Orin NX kit</td><td>$900</td><td>Runs LIO plus detection stacks with headroom</td></tr>
+  <tr><td>Sync + mounts</td><td>PTP switch, PPS wiring, machined mounts</td><td>$250</td><td>Section 2.8 in physical form; do not skip</td></tr>
+</table>
+<p>The single biggest line item is honest: outdoor range costs money. If the budget hurts, a Livox Mid-360 at $750 replaces the Ouster and saves five thousand dollars at the cost of range and a rosette pattern your software stack must support (FAST-LIO2 does).</p>
+<h3>Sub-250 g Drone, About $450 in Sensors</h3>
+<table>
+  <tr><th>Item</th><th>Pick</th><th>Rough price</th><th>Why</th></tr>
+  <tr><td>Camera</td><td>Arducam OV9281 global shutter mono</td><td>$60</td><td>6 grams; global shutter is non-negotiable at drone yaw rates</td></tr>
+  <tr><td>IMU</td><td>ICM-42688 on the flight controller</td><td>included</td><td>Consumer grade is fine, VIO corrects it every frame</td></tr>
+  <tr><td>Height + flow</td><td>ToF rangefinder + optical flow board</td><td>$35</td><td>Bounded altitude and a velocity prior for the tough moments</td></tr>
+  <tr><td>Compute</td><td>Raspberry Pi CM4 on carrier</td><td>$90</td><td>Runs a trimmed OpenVINS at reduced rate; heavy lifting streams to ground</td></tr>
+  <tr><td>Airframe</td><td>Motors, ESC, FC, frame</td><td>$250</td><td>The whole point of 249 g is skipping a regulatory class</td></tr>
+</table>
+<p>Here weight is the currency, not dollars. No lidar makes the cut at this mass, so this platform lives entirely on Chapter 4's visual-inertial methods, and every gram of sensor must justify itself against flight time.</p>
+<div class="keypoint">Pick sensors by failure mode, not by spec sheet: decide what must never happen (lost in the dark? lost at range? lost during a fast turn?), then buy the cheapest suite in which some sensor still works during each nightmare.</div>
+
+<h2><span class="sec-no">2.10</span>Reading List</h2>
+<a class="paper" href="https://github.com/ethz-asl/kalibr"><span class="p-title">Kalibr: Unified Temporal and Spatial Calibration for Multi-Sensor Systems</span><span class="p-meta">Furgale, Rehder, Siegwart · IROS 2013 · github.com/ethz-asl/kalibr</span><span class="p-why">The continuous-time calibration paper and the tool everyone actually runs; the wiki alone is a course in calibration hygiene.</span></a>
+<a class="paper" href="https://github.com/ethz-asl/kalibr/wiki"><span class="p-title">Extending Kalibr: IMU Intrinsics and Multi-IMU Calibration</span><span class="p-meta">Rehder, Nikolic, Schneider, Hinzmann, Siegwart · ICRA 2016</span><span class="p-why">Scale factors, axis misalignment, and multiple IMUs; the paper behind Kalibr's IMU models beyond plain bias-plus-noise.</span></a>
+<a class="paper" href="https://github.com/ori-drs/allan_variance_ros"><span class="p-title">allan_variance_ros</span><span class="p-meta">Oxford Robotics Institute · maintained tool · github.com/ori-drs/allan_variance_ros</span><span class="p-why">The path from a boring 3-hour static bag to the four noise numbers every VIO config demands.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1711.02508"><span class="p-title">Quaternion Kinematics for the Error-State Kalman Filter</span><span class="p-meta">Joan Solà · 2017 · arXiv:1711.02508</span><span class="p-why">The reference for IMU error-state modeling; read it once slowly and every VIO codebase becomes legible.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1512.02363"><span class="p-title">On-Manifold Preintegration for Real-Time Visual-Inertial Odometry</span><span class="p-meta">Forster, Carlone, Dellaert, Scaramuzza · TRO 2017 · arXiv:1512.02363</span><span class="p-why">How a thousand IMU samples become one factor; the bridge between this chapter's noise models and Chapter 1's graphs.</span></a>
+<a class="paper" href="https://docs.opencv.org/4.x/dc/dbb/tutorial_py_calibration.html"><span class="p-title">OpenCV Camera Calibration Documentation</span><span class="p-meta">OpenCV project · living docs</span><span class="p-why">The plumb-bob and fisheye models with runnable code; where every practitioner's first reprojection error came from.</span></a>
+<a class="paper" href="https://github.com/puzzlepaint/camera_calibration"><span class="p-title">Why Having 10,000 Parameters in Your Camera Model Is Better Than Twelve</span><span class="p-meta">Schöps, Larsson, Pollefeys, Sattler · CVPR 2020 · github.com/puzzlepaint/camera_calibration</span><span class="p-why">A bracing argument that parametric lens models leave accuracy on the table, plus a tool to prove it on your own lens.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1808.00558"><span class="p-title">Direct Sparse Odometry With Rolling Shutter</span><span class="p-meta">Schubert, Demmel, Usenko, Stückler, Cremers · ECCV 2018 · arXiv:1808.00558</span><span class="p-why">What it costs to model per-row exposure time properly, and how much accuracy you lose if you refuse to.</span></a>
+<a class="paper" href="https://www.ros.org/reps/rep-0105.html"><span class="p-title">REP 105: Coordinate Frames for Mobile Platforms</span><span class="p-meta">ROS Enhancement Proposal · Meeussen 2010</span><span class="p-why">Three pages that prevent a thousand frame bugs; the contract your extrinsics plug into, developed further in Chapter 8.</span></a>
+
+<h2><span class="sec-no">2.11</span>Interview Questions</h2>
+<details class="qa"><summary>Why does a cheap IMU drift to uselessness in seconds while wheel odometry lasts for minutes?</summary><div class="a"><p>Wheel odometry integrates a velocity-level measurement once, so a bias produces error growing linearly in time. An IMU reaches position by integrating acceleration twice, so an accelerometer bias grows quadratically, and worse, a gyro bias tilts the gravity estimate and leaks a slice of 9.81&nbsp;m/s² into the horizontal axes, giving cubic growth. Put numbers on it: a 2&nbsp;mg accel bias alone is a meter of error after ten seconds. That is why IMUs are used as short-horizon bridges between exteroceptive updates, never as standalone position sensors.</p></div></details>
+<details class="qa"><summary>Rolling versus global shutter: what is the actual tradeoff, and when is rolling acceptable?</summary><div class="a"><p>Global shutter exposes all pixels at one instant, so one pose explains the whole image; rolling shutter reads rows over 10 to 30&nbsp;ms, so fast motion shears the image, roughly f·ω·t_readout pixels of skew (about 18&nbsp;px at 1&nbsp;rad/s, 600&nbsp;px focal length, 30&nbsp;ms readout). Rolling sensors are cheaper and often have better pixels, which is why phones and the D435i's color camera use them. Rolling is acceptable when angular rates are low relative to readout time (slow indoor platforms) or when the estimator explicitly models per-row time, as rolling-shutter-aware VIO does. On a drone, buy global shutter.</p></div></details>
+<details class="qa"><summary>How would you verify an extrinsic calibration in the field, with no target available?</summary><div class="a"><p>Use the world as the target. For lidar-camera: project the point cloud into the image and check that depth discontinuities land on intensity edges (poles, door frames, building corners) at several ranges, since rotation errors grow with distance. For camera-IMU: run the VIO stack and watch the residuals and the online-estimated extrinsic correction; a healthy calibration shows unstructured residuals and a correction that stays near identity. For lidar-body: drive a loop and look for a double-walled map, the classic signature of a rotated sensor. A ruler check on translations catches gross errors in thirty seconds.</p></div></details>
+<details class="qa"><summary>What actually breaks if the camera and IMU disagree by 20 ms, and what does it look like?</summary><div class="a"><p>During rotation the estimator fuses image features against IMU states from the wrong instant; at 1&nbsp;rad/s and 600&nbsp;px focal length, 20&nbsp;ms is about 12 pixels of systematic error, indistinguishable in form from a bad extrinsic. Symptoms: the system looks fine in slow motion, then residuals spike and scale or bias estimates swim whenever the rig turns fast, and calibration "keeps going bad." A constant offset can be estimated away (Kalibr offline, estimate_td online), but timestamp jitter cannot, which is why stamping frames at exposure in the driver matters more than any single calibrated constant.</p></div></details>
+<details class="qa"><summary>Walk me through the stereo baseline tradeoff.</summary><div class="a"><p>Depth error is σ_Z ≈ Z²·σ_d/(f·B), so a wider baseline B divides far-field error proportionally: doubling the baseline halves depth noise at every range. The costs are a larger minimum overlap distance (near objects fall outside both views or exceed disparity search range), a physically larger and floppier rig where sub-tenth-degree flex silently invalidates the calibration, and harder stereo matching from more perspective difference between views. So a 5&nbsp;cm baseline device like the D435i is an indoor sensor by construction, and automotive stereo runs baselines of many tens of centimeters with rigid metal cross-members.</p></div></details>
+<details class="qa"><summary>When does RTK GNSS beat SLAM outright, and when can it not?</summary><div class="a"><p>Under open sky with a base station link, RTK gives 1&nbsp;cm absolute, drift-free position at 10&nbsp;Hz, which beats any SLAM system's global accuracy; for farm fields, mines, and survey work it is the right answer and SLAM is overhead. It cannot help indoors, in tunnels, or under canopy, degrades to float mode or multipath fiction in urban canyons while sometimes reporting high confidence, and it only gives position of an antenna, not orientation (unless dual-antenna) and not a map. Real outdoor autonomy fuses both: RTK bounds global drift, SLAM provides the local geometry, obstacle map, and continuity through outages.</p></div></details>
+<details class="qa"><summary>What is the difference between noise density and bias instability, and how do you measure each?</summary><div class="a"><p>Noise density is the white, uncorrelated fuzz on each sample, quoted per √Hz; it sets how fast integrated error grows as √t and it is what the estimator's measurement noise should reflect. Bias instability is a slow random wander of the sensor's zero point, the reason yesterday's bias estimate is stale today, and it sets the floor on long-duration accuracy. Both are read off an Allan deviation plot from a long static log: the −½ slope at short averaging times gives noise density (read at τ = 1&nbsp;s), and the flat minimum gives bias instability. Tools like allan_variance_ros automate the fit; you inflate the results several-fold before putting them in a VIO config.</p></div></details>
+<details class="qa"><summary>Why does auto-exposure bother direct visual methods so much more than feature-based ones?</summary><div class="a"><p>Direct methods minimize photometric error: they assume the same 3D point yields the same pixel intensity across frames, so a global exposure or gain step between frames violates the core measurement model everywhere at once, looking like the entire scene changed. Feature methods only need descriptors and corner positions to survive, and ORB-style descriptors are built with illumination invariance, so they lose a few matches instead of the model. The remedies are locking exposure when the scene allows, calibrating the camera's response curve and vignette so brightness changes can be modeled, or estimating affine brightness parameters per frame as DSO does.</p></div></details>
+<details class="qa"><summary>Your wheel-odometry robot curves left on straightaways, consistently. What do you do?</summary><div class="a"><p>Consistent means systematic, and systematic means calibratable. The two usual suspects are unequal effective wheel diameters (produces curvature proportional to speed) and a wrong effective wheelbase (shows up as heading error proportional to commanded turning). Run UMBmark: drive a measured square both clockwise and counterclockwise, and the pattern of endpoint errors separates the two effects and yields correction factors. Then remember the corrections are conditional on surface and load: recalibrate on the deployment floor, and expect carpet or a payload shift to move the numbers by a percent or two.</p></div></details>
+<details class="qa"><summary>Why timestamp a camera frame at mid-exposure rather than at start, end, or arrival?</summary><div class="a"><p>An exposure integrates light over a window, so the image is best explained by the camera's pose near the center of that window; stamping at the middle minimizes the worst-case model error to half the exposure time, symmetrically. Start or end stamps add a systematic half-exposure offset that a moving estimator will absorb into whatever state fits, usually the extrinsic or the time offset. Arrival time is worst of all: it adds transport delay plus jitter of 5 to 30&nbsp;ms on USB, and jitter can never be calibrated away. The principle generalizes: stamp every measurement at the physical instant the world was sampled, as close to the silicon as the driver allows.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

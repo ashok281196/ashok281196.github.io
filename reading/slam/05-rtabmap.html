@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 5 · RTAB-Map + RealSense D435i · SLAM: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">05</div>
+  <div class="chapter-kicker">Chapter Five · The Budget Indoor Rig</div>
+  <h1>RTAB-Map + RealSense D435i</h1>
+  <p class="chapter-sub">For roughly the price of a mid-range phone you can build a robot that maps a building today and finds itself in that map tomorrow morning. This chapter is that rig, end to end.</p>
+</header>
+
+<h2><span class="sec-no">5.1</span>Why This Exact Pairing Matters</h2>
+<p>Bolt a RealSense D435i onto anything with wheels, launch RTAB-Map, and out come a 2D occupancy grid that Nav2 can consume directly, a colored 3D point cloud, and an OctoMap. The bill, at 2026 prices: the D435i lists at $334 and sells street for about $250 now that the D455 and D456 have taken over Intel's front page. Add a Raspberry Pi 5 (8&nbsp;GB, about $80) or a Jetson Orin Nano Super (about $249) and the whole perception stack lands under $600. The software is free, apt-installable, and maintained by the same lab that wrote the papers.</p>
+<p>That is why it is the standard indoor-UGV prototype rig, and why interviewers love it. Questions about this pairing test two things at once: whether you understand SLAM concepts, and whether you have actually fought real hardware. Plenty of candidates can define loop closure. Far fewer can explain why the map ghosts when the robot rotates, or why their depth image died when they swapped USB cables.</p>
+<p>One piece of honesty up front. RTAB-Map does not win trajectory-accuracy benchmarks; ORB-SLAM3 beats it on ATE on most sequences (Chapter 7 covers how to measure that claim). RTAB-Map wins at something else: producing <em>usable maps</em>, staying up for hours, and surviving deployment. Those are different virtues, and for a product robot they are usually the ones that matter.</p>
+
+<h2><span class="sec-no">5.2</span>RTAB-Map from Zero</h2>
+<p><strong>RTAB-Map</strong> stands for Real-Time Appearance-Based Mapping, by <a href="https://introlab.github.io/rtabmap/">Mathieu Labbé and François Michaud</a> at the Université de Sherbrooke (ICRA 2011, IROS 2014, JFR 2019). Underneath, it is graph SLAM. <strong>Nodes</strong> hold RGB-D keyframes: a color image, a depth image, the visual words extracted from them, and the odometry pose where they were taken. <strong>Edges</strong> are constraints: odometry links between consecutive nodes, loop-closure links between recognized places, and proximity links between nodes that are near each other in space. Two ideas are its signature, and both are worth knowing cold.</p>
+
+<h3>Appearance-Based Loop Closure with a Bag of Words</h3>
+<p>"Appearance-based" means the robot recognizes places by how they look, not by matching geometry. The mechanism, step by step:</p>
+<ol>
+  <li>Extract local visual features from the current keyframe. The default detector is GFTT corners with BRIEF descriptors; ORB is a common alternative, and SIFT/SURF are available if you built with the nonfree modules.</li>
+  <li>Quantize each descriptor against a <strong>bag-of-visual-words</strong> vocabulary: a dictionary of typical feature appearances. The image becomes a histogram of which words it contains, the way you might describe a book by its word counts. Unlike ORB-SLAM's DBoW2, which ships a vocabulary pre-trained offline, RTAB-Map builds its vocabulary <em>incrementally</em> from the images it actually sees, adding new words when a descriptor matches nothing (nearest-neighbor search over a FLANN kd-tree).</li>
+  <li>Score the current histogram against stored locations with a tf-idf-style likelihood: words that appear everywhere carry little weight, rare words carry a lot.</li>
+</ol>
+
+<p>Historical context makes the name make sense. Around 2008-2012, appearance-based place recognition was the hot answer to loop closure at scale; FAB-MAP had shown you could recognize places over a 1000&nbsp;km trajectory from images alone. RTAB-Map's contribution was making that style of recognition run <em>online, forever</em>, on a robot's own CPU, and wrapping a complete mapping system around it rather than leaving place recognition as a party trick.</p>
+
+<h3>The Bayesian Filter over Loop Hypotheses</h3>
+<p>A single good histogram match is not a loop closure. RTAB-Map runs a discrete Bayesian filter whose state is "which past location, if any, am I looking at right now?" It maintains a probability for every location in Working Memory plus one extra hypothesis: <em>this is a new place</em>. Each image updates the posterior in two steps you will recognize from Chapter 1:</p>
+<pre>predict:  belief spreads to each hypothesis' neighbors in the graph
+          (if I was probably at node 42, I am now probably near node 42)
+update:   multiply by the BoW likelihood of the current image
+          against each location, then normalize</pre>
+<p>Evidence therefore has to accumulate over consecutive frames; one lucky match against a lookalike corridor gets diluted before it can do damage. When some location's posterior clears <code>Rtabmap/LoopThr</code> (default 0.11), the candidate goes to <strong>geometric verification</strong>: match individual features between the two keyframes, solve the relative camera pose with PnP + RANSAC, and accept only if at least <code>Vis/MinInliers</code> features agree (default 20). Only then is a loop-closure edge added and the graph re-optimized.</p>
+<dl class="jargon">
+  <dt>Visual word</dt><dd>A cluster of similar feature descriptors treated as one symbol. "Corner of a door frame, lit from the left" becomes word #4127.</dd>
+  <dt>tf-idf</dt><dd>Term frequency times inverse document frequency. A scoring trick from text retrieval: a word you see in every image tells you nothing about <em>where</em> you are.</dd>
+  <dt>PnP (Perspective-n-Point)</dt><dd>Given n known 3D points and their pixel locations in an image, solve for the camera pose. The workhorse of visual relocalization.</dd>
+  <dt>RANSAC</dt><dd>Fit a model to random small subsets of the data, keep the fit that the most points agree with. Standard armor against wrong feature matches.</dd>
+  <dt>Keyframe</dt><dd>A frame selected for long-term storage. Keeping all 30 fps forever is pointless; consecutive frames are nearly identical.</dd>
+</dl>
+
+<h3>STM, WM, LTM: the Memory That Keeps the CPU Bounded</h3>
+<p>A naive system compares each new frame against every past location, so cost grows with map size until real time dies. RTAB-Map's fix is shaped like human memory, and it is the reason the system exists:</p>
+<ul>
+  <li><strong>Short-Term Memory (STM).</strong> New nodes enter here first (<code>Mem/STMSize</code>, default 10 nodes). STM nodes are exempt from loop-closure detection, because you would trivially "recognize" the place you saw one second ago. STM is also where node weights are set: if consecutive images look alike, the robot is lingering, and the location's weight goes up.</li>
+  <li><strong>Working Memory (WM).</strong> Nodes graduate here from STM. WM is the set actively searched by the Bayesian filter. This is the memory that costs CPU.</li>
+  <li><strong>Long-Term Memory (LTM).</strong> When the map update exceeds the time budget <code>Rtabmap/TimeThr</code> (ms), or WM exceeds <code>Rtabmap/MemoryThr</code> (nodes), the oldest, lowest-weight locations are transferred out of WM into the SQLite database on disk. They are not deleted; they are just not searched.</li>
+  <li><strong>Retrieval.</strong> When a loop closure lands next to a region that was transferred out, its neighbors are pulled back from LTM into WM. Return to an old wing of the building, recognize one doorway, and the whole wing wakes up.</li>
+</ul>
+<pre>new frame
+   └─► STM (last ~10 nodes; no loop detection here)
+          └─► WM (actively searched by the Bayesian filter)
+                 ├─ update time &gt; Rtabmap/TimeThr?  transfer oldest,
+                 │  lowest-weight nodes ──► LTM (sqlite, on disk)
+                 └─ loop closure near an LTM region? retrieve its
+                    neighbors back ◄── LTM</pre>
+<p>The consequence: loop-closure cost is O(WM size), which is bounded by your own budget, not by the size of the environment. That is how RTAB-Map does multi-session, building-scale mapping in real time on a CPU, and it is <em>the</em> answer to "why does RTAB-Map scale?"</p>
+<div class="analogy">Working Memory is a barista's front-of-mind list of regulars: faces seen recently or often. Everyone else is in the back-room ledger (LTM). When a half-familiar face walks in and gets recognized, the barista also dusts off memories of that person's usual companions. Service time stays constant no matter how many customers the shop has ever had.</div>
+<div class="keypoint">RTAB-Map bounds loop-closure cost by searching only a fixed-size Working Memory and shelving everything else in a database, retrieving neighborhoods on demand. Say "the WM/LTM memory management keeps detection under a fixed time budget" and you have given the one-sentence version of both papers.</div>
+
+<h3>Graph SLAM Underneath</h3>
+<p>Every accepted constraint feeds a pose graph: node poses as variables, odometry and loop-closure edges as measurements, solved by sparse nonlinear least squares exactly as in Chapter 1. RTAB-Map does not ship its own optimizer; it links one of <strong>TORO, g2o, GTSAM, or Ceres</strong>, selected by <code>Optimizer/Strategy</code> (0 through 3). The stock ROS binaries default to GTSAM. Optimization runs when a loop or proximity link is accepted, and the corrected poses propagate into every map product: the 2D grid, the cloud, and the OctoMap are all re-rendered from keyframes at their new poses, which is why the map visibly "snaps" straight when a big loop closes.</p>
+
+<h2><span class="sec-no">5.3</span>The Full Architecture on a Robot</h2>
+<p>On ROS 2 the system is three or four nodes wired by topics, and most integration pain is wiring. The camera driver publishes color, aligned depth, and camera info. A synchronization node bundles them into a single <code>rgbd_image</code> message so the SLAM node never sees a color frame paired with the wrong depth frame. The rtabmap node consumes that plus an odometry stream.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 780 330" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <rect x="20" y="90" width="170" height="70" rx="8" fill="none" stroke="#23201a" stroke-width="2"/>
+  <text x="105" y="118" text-anchor="middle" font-size="13" fill="#23201a">realsense2_camera</text>
+  <text x="105" y="138" text-anchor="middle" font-size="11" fill="#23201a">D435i driver</text>
+  <text x="212" y="72" font-size="11" fill="#0e5f5b">color/image_raw</text>
+  <text x="212" y="122" font-size="11" fill="#0e5f5b">aligned_depth/image_raw</text>
+  <text x="212" y="172" font-size="11" fill="#0e5f5b">color/camera_info</text>
+  <path d="M190 105 C240 105 280 78 380 78" fill="none" stroke="#0e5f5b" stroke-width="1.8"/>
+  <path d="M190 125 L380 125" fill="none" stroke="#0e5f5b" stroke-width="1.8"/>
+  <path d="M190 145 C240 145 280 172 380 172" fill="none" stroke="#0e5f5b" stroke-width="1.8"/>
+  <rect x="382" y="88" width="130" height="70" rx="8" fill="none" stroke="#23201a" stroke-width="2"/>
+  <text x="447" y="118" text-anchor="middle" font-size="13" fill="#23201a">rgbd_sync</text>
+  <text x="447" y="138" text-anchor="middle" font-size="11" fill="#23201a">exact/approx</text>
+  <text x="522" y="112" font-size="11" fill="#0e5f5b">rgbd_image</text>
+  <path d="M512 123 L618 123" fill="none" stroke="#0e5f5b" stroke-width="1.8"/>
+  <rect x="620" y="78" width="140" height="90" rx="8" fill="none" stroke="#b3401e" stroke-width="2.5"/>
+  <text x="690" y="112" text-anchor="middle" font-size="13" fill="#b3401e">rtabmap</text>
+  <text x="690" y="132" text-anchor="middle" font-size="11" fill="#23201a">graph + BoW +</text>
+  <text x="690" y="148" text-anchor="middle" font-size="11" fill="#23201a">memory mgmt</text>
+  <rect x="20" y="220" width="200" height="66" rx="8" fill="none" stroke="#a97b1f" stroke-width="2"/>
+  <text x="120" y="245" text-anchor="middle" font-size="12" fill="#23201a">odometry source</text>
+  <text x="120" y="263" text-anchor="middle" font-size="11" fill="#23201a">wheel / rgbd_odometry</text>
+  <text x="120" y="278" text-anchor="middle" font-size="11" fill="#23201a">/ external VIO</text>
+  <path d="M220 250 C400 250 480 200 618 152" fill="none" stroke="#a97b1f" stroke-width="1.8"/>
+  <text x="330" y="240" font-size="11" fill="#a97b1f">/odom + tf odom→base_link</text>
+  <path d="M690 168 L690 220" fill="none" stroke="#b3401e" stroke-width="1.8"/>
+  <text x="560" y="248" font-size="11" fill="#b3401e">/map (grid) · cloud · /mapData</text>
+  <text x="560" y="266" font-size="11" fill="#b3401e">tf map→odom · rtabmap.db</text>
+  <path d="M375 78 L369 73 M375 78 L369 83" stroke="#0e5f5b" stroke-width="1.8" fill="none"/>
+  <path d="M380 125 L374 120 M380 125 L374 130" stroke="#0e5f5b" stroke-width="1.8" fill="none"/>
+  <path d="M380 172 L374 167 M380 172 L374 177" stroke="#0e5f5b" stroke-width="1.8" fill="none"/>
+  <path d="M618 123 L612 118 M618 123 L612 128" stroke="#0e5f5b" stroke-width="1.8" fill="none"/>
+  <path d="M618 152 L610 150 M618 152 L611 158" stroke="#a97b1f" stroke-width="1.8" fill="none"/>
+</svg>
+</div>
+<figcaption>Fig 5.1: the topic-level pipeline, camera driver to rgbd_sync to the rtabmap node, with an odometry source feeding in from below and map products coming out.</figcaption>
+</figure>
+
+<h3>Odometry, Three Honest Options</h3>
+<p>RTAB-Map is agnostic about where odometry comes from, and choosing is the first real engineering decision on this rig.</p>
+<ul>
+  <li><strong>Wheel odometry.</strong> Smooth, cheap, always publishes, immune to lighting. Drifts with wheel slip, dies on carpet transitions and thresholds, and knows nothing about z. On a slow indoor base with decent encoders it is often the most robust choice, with the camera reserved for loop closure and mapping.</li>
+  <li><strong>RTAB-Map's own RGB-D odometry</strong> (<code>rgbd_odometry</code> node). No extra hardware. The default registration is <strong>F2M</strong>, frame-to-local-map: track features against a small local map of recent keyframes rather than only the previous frame (F2F). F2M beats F2F for the same reason scan-to-map beats scan-to-scan in Chapter 3: the reference accumulates evidence instead of resetting every frame. Weaknesses: blank walls, darkness, fast rotation, and it eats a CPU core.</li>
+  <li><strong>External VIO.</strong> VINS-Fusion, ORB-SLAM3 in odometry mode, or a vendor VIO module. Best behavior under fast or jerky motion because the IMU carries you through visual dropouts (Chapter 4 explains why). Costs integration effort and calibration care (Chapter 2).</li>
+</ul>
+<p>Production robots frequently fuse wheel and visual odometry through a <code>robot_localization</code> EKF, so either source failing degrades accuracy instead of ending the run. RTAB-Map also adds <strong>proximity detection</strong> (<code>RGBD/ProximityBySpace</code>): it links nodes that odometry says are close in space even when appearance matching fails, which is what saves you when you re-traverse a corridor in the opposite direction and everything looks different.</p>
+
+<h3>What Comes Out</h3>
+<ul>
+  <li><code>/map</code>: a <code>nav_msgs/OccupancyGrid</code>, built from depth by the <code>Grid/</code> parameters. This is what Nav2 eats.</li>
+  <li><code>/mapData</code> and <code>/mapGraph</code>: the graph itself, nodes and edges, for visualization plugins and debugging.</li>
+  <li><code>/cloud_map</code>: the assembled 3D point cloud, re-rendered from keyframes after each optimization.</li>
+  <li>OctoMap topics if enabled, for 3D collision checking (Chapter 3 discusses when you want them).</li>
+  <li>The transform <code>map → odom</code>, which is arguably the real product.</li>
+</ul>
+
+<h3>Where tf Sits, and Who Publishes map→odom</h3>
+<p>The frame contract from Chapter 0 applies verbatim:</p>
+<pre>map ──► odom ──► base_link ──► camera_link
+ │        │           │
+ │        │           └─ static, from your URDF
+ │        └─ odometry source: fast, continuous, drifts
+ └─ rtabmap: slow correction, absorbs loop-closure jumps</pre>
+<p>The odometry source publishes <code>odom → base_link</code>, fast and continuous but drifting. The rtabmap node publishes <code>map → odom</code>: a slow correction that absorbs loop-closure jumps, so the pose your controller consumes never teleports mid-motion. <code>base_link → camera_link</code> is a static transform from your URDF, and getting it wrong produces the ghost-map symptom in section 5.7. Chapter 8 builds Nav2 on exactly this contract.</p>
+<div class="keypoint">One node owns each transform. Odometry owns odom→base_link and never jumps; rtabmap owns map→odom and absorbs every correction. If two things publish the same transform, or nothing publishes map→odom, navigation is broken before any parameter matters.</div>
+
+<h2><span class="sec-no">5.4</span>The D435i, Hardware Facts to Get Exactly Right</h2>
+<p>Interviewers check these details because they separate people who read the box from people who shipped the camera.</p>
+<ul>
+  <li><strong>Depth principle: active IR stereo.</strong> Two infrared imagers compute depth by stereo triangulation over a 50&nbsp;mm baseline, and an IR <em>dot projector</em> sprays pseudo-random texture onto blank surfaces so the stereo matcher has something to grip. Because the underlying method is plain stereo, it degrades gracefully to passive stereo outdoors. It is not time-of-flight and not coded structured light (that was the older SR300 family); say the wrong one and the interview changes tone.</li>
+  <li><strong>Shutters, the detail almost everyone gets wrong.</strong> The two depth/IR imagers are <strong>global shutter</strong>: the whole frame is captured at one instant, so fast motion does not warp geometry. The RGB sensor is <strong>rolling shutter</strong>: rows are read out sequentially, so fast yaw skews the color image. Consequence: feature tracking on RGB suffers exactly when the robot moves fast. The known trick is to run visual odometry on the left IR image instead, which is global shutter and shares the depth imager's viewpoint.</li>
+  <li><strong>When to disable the emitter.</strong> The projector is rigidly attached to the camera, so its dots slide across surfaces as the camera moves. They are excellent texture for stereo matching (dots at one instant are consistent between the two IR imagers) but poison for feature <em>tracking</em>, because a dot is not a fixed 3D world point. If you run odometry on IR, either turn the emitter off, or use the driver's emitter on/off alternation so depth frames get dots and odometry frames get clean IR.</li>
+  <li><strong>The "i" is a 6-DOF IMU</strong>, a Bosch BMI055. It is mediocre: fine for gravity direction and short-horizon motion prediction through a Madgwick or complementary filter, nowhere near good enough to be your only odometry. It ships <em>uncalibrated</em>; run <code>rs-imu-calibration</code> once per unit or your gravity vector is subtly wrong forever, and your camera-IMU extrinsics still need the Chapter 2 treatment if you feed it to a real VIO.</li>
+  <li><strong>Envelope.</strong> Depth is trustworthy from about 0.3&nbsp;m to 3&nbsp;m. Error grows <em>quadratically</em> with distance, a stereo-baseline fact: depth error scales as z² divided by focal length times baseline. In practice that means a few millimeters at 1&nbsp;m, roughly 2% at 2&nbsp;m, and 4 to 6% by 4&nbsp;m, at which point walls turn into fog. Depth FOV is about 87°×58°.</li>
+  <li><strong>Knobs.</strong> Emitter power, visual presets (High Accuracy, High Density), and post-processing filters (decimation, spatial, temporal). Filters make clouds prettier and add latency, and temporal filtering smears moving objects into geometry that ICP will then trust. Nothing is free.</li>
+</ul>
+
+<table>
+<tr><th>Camera</th><th>Depth</th><th>Baseline</th><th>Shutters</th><th>IMU</th><th>2026 Price</th><th>When to Pick It</th></tr>
+<tr><td>D435i</td><td>active IR stereo</td><td>50 mm</td><td>global depth, rolling RGB</td><td>BMI055, uncalibrated</td><td>≈$250-334</td><td>Cheapest credible rig; this chapter.</td></tr>
+<tr><td>D455</td><td>active IR stereo</td><td>95 mm</td><td>global on all imagers, RGB included</td><td>BMI055, factory calibrated</td><td>≈$420</td><td>Same stack, better depth at range; the default upgrade answer.</td></tr>
+<tr><td>OAK-D Pro</td><td>active IR stereo + dot projector</td><td>75 mm</td><td>global mono pair, rolling color</td><td>BMI270 class</td><td>≈$400</td><td>On-device neural inference next to depth; DepthAI ecosystem.</td></tr>
+<tr><td>ZED 2i</td><td>passive stereo, neural depth</td><td>120 mm</td><td>rolling</td><td>good, fused with baro + mag</td><td>≈$550</td><td>Longer range outdoors; requires an NVIDIA GPU on the robot.</td></tr>
+</table>
+
+<h2><span class="sec-no">5.5</span>Parameters Worth Knowing by Name</h2>
+<p>RTAB-Map exposes several hundred parameters; <code>rtabmap --params</code> prints them all with defaults and descriptions, and that command is the authoritative reference, not this table. But a working set of ten covers most tuning conversations. Values below are stock defaults; treat every suggested change as a starting point.</p>
+<table>
+<tr><th>Parameter</th><th>Default</th><th>What It Does</th><th>When to Move It</th></tr>
+<tr><td><code>Mem/STMSize</code></td><td>10</td><td>Nodes held in short-term memory, exempt from loop detection.</td><td>Raise (~30) on fast platforms so the robot cannot "loop close" against two seconds ago.</td></tr>
+<tr><td><code>Rtabmap/DetectionRate</code></td><td>1 Hz</td><td>How often a new node is created and loop detection runs.</td><td>Raise to 2 Hz for fast motion or small spaces; lower to save CPU and database size.</td></tr>
+<tr><td><code>Kp/MaxFeatures</code></td><td>500</td><td>Features quantized into words per image for the BoW dictionary.</td><td>Raise in feature-rich scenes for better recall; lower on weak SBCs.</td></tr>
+<tr><td><code>Vis/MinInliers</code></td><td>20</td><td>PnP RANSAC inliers required to accept a loop or proximity link.</td><td>Raise (30-40) if you ever see a false closure; lower only in feature-starved spaces, with eyes open.</td></tr>
+<tr><td><code>RGBD/ProximityBySpace</code></td><td>true</td><td>Links nodes near in space using odometry when appearance fails.</td><td>Disable only if odometry is so bad the proximity guesses are wrong.</td></tr>
+<tr><td><code>RGBD/OptimizeMaxError</code></td><td>3.0</td><td>Rejects a closure if optimization residuals exceed this ratio afterward.</td><td>Lower (~1.0) to be stricter in repetitive buildings; 0 disables the check, never do that.</td></tr>
+<tr><td><code>Grid/RangeMax</code></td><td>5.0 m</td><td>Max depth range used when building the occupancy grid.</td><td>Lower to 3 m on the D435i so quadratic depth noise does not paint phantom walls.</td></tr>
+<tr><td><code>Grid/MaxObstacleHeight</code></td><td>0 (off)</td><td>Ignores points above this height when marking obstacles.</td><td>Set to robot height plus margin (e.g. 1.5) so ceilings and door frames stop blocking paths.</td></tr>
+<tr><td><code>Reg/Strategy</code></td><td>0 (Vis)</td><td>Constraint computation: 0 visual, 1 ICP, 2 visual then ICP refine.</td><td>Use 2 when clouds are dense and clean; 1 mainly when RTAB-Map runs on lidar instead.</td></tr>
+<tr><td><code>Mem/IncrementalMemory</code></td><td>true</td><td>true = SLAM (map grows); false = localization against the stored map.</td><td>Flip to false at deployment; see section 5.8.</td></tr>
+</table>
+<p>In conversation, drop two or three of these, no more, or it sounds recited. The pairs that signal experience: <code>Rtabmap/TimeThr</code> with <code>Mem/STMSize</code> (the memory budget), and <code>Vis/MinInliers</code> with <code>RGBD/OptimizeMaxError</code> (the two gates a loop closure must pass).</p>
+
+<h2><span class="sec-no">5.6</span>The Database</h2>
+<p>Everything RTAB-Map knows lives in one file, by default <code>~/.ros/rtabmap.db</code>, and it is a plain <strong>SQLite</strong> database. Open it with the <code>sqlite3</code> CLI if you are curious; the schema has tables for nodes, links, visual words, and calibration. Each node stores its pose, its BoW signature, and compressed sensor data: JPEG for color, PNG for 16-bit depth. This single-file design is a quiet superpower: copying a map to another robot is <code>scp</code>, and a bug report can attach the entire session.</p>
+<p><strong>rtabmap-databaseViewer</strong> is the post-mortem tool and you should live in it. Open yesterday's database and you can scrub through every keyframe, see each loop closure with its inlier matches drawn between the two images, step through <em>rejected</em> closures and read why they failed (too few inliers, optimization error too high), inspect the graph before and after optimization, and regenerate 2D grids with different <code>Grid/</code> parameters without re-driving the robot.</p>
+<p><strong>Multi-session mapping</strong> falls out of the memory design. Start rtabmap against an existing database without deleting it and a new session begins, initially disconnected from the old graph. The moment the Bayesian filter recognizes a place from a previous session, an inter-session loop closure welds the sessions together and optimization aligns them. Set <code>Mem/InitWMWithAllNodes=true</code> to preload the whole old map into WM at startup so that first weld happens sooner. This is how you map a building floor by floor across a week.</p>
+<p><strong>Size and pruning.</strong> Budget roughly half a megabyte per node at 848×480. At the default 1&nbsp;Hz detection rate while moving, that is around 25 to 30&nbsp;MB per minute; a 20-minute apartment session lands near 300 to 500&nbsp;MB and a multi-hour facility run reaches several gigabytes. When that hurts: lower <code>Rtabmap/DetectionRate</code>, reduce image size, or set <code>Mem/BinDataKept=false</code> to stop storing raw images entirely (the map still works, but databaseViewer post-mortems and grid regeneration are gone, so leave it on during development). <code>rtabmap-reprocess</code> can rebuild a database with new parameters or assemble several databases into one.</p>
+
+<div class="setup">
+<p><strong>Setup A: a Full Mapping Session on ROS 2 Jazzy.</strong> Goal: map one floor with a D435i and inspect the result in databaseViewer, in an afternoon. Prereqs: Ubuntu 24.04, ROS 2 Jazzy, a D435i on a USB 3 port using the short cable it shipped with, about 2&nbsp;GB free disk.</p>
+<pre>sudo apt install ros-jazzy-rtabmap-ros ros-jazzy-realsense2-camera \
+                 ros-jazzy-imu-filter-madgwick</pre>
+<p>Terminal 1, the camera. Aligned depth is mandatory (RTAB-Map wants depth registered to the color frame); the IMU streams are optional here but free.</p>
+<pre>ros2 launch realsense2_camera rs_launch.py \
+    align_depth.enable:=true enable_sync:=true \
+    enable_gyro:=true enable_accel:=true unite_imu_method:=2</pre>
+<p>Terminal 2, a filter to turn raw IMU into orientation (rtabmap wants a quaternion):</p>
+<pre>ros2 run imu_filter_madgwick imu_filter_madgwick_node --ros-args \
+    -p use_mag:=false -p publish_tf:=false \
+    -r imu/data_raw:=/camera/camera/imu</pre>
+<p>Terminal 3, rtabmap. Parameters ride in <code>rtabmap_args</code> using the exact names from section 5.5; these values are starting points, not gospel. Topic names below match the Jazzy wrapper's default <code>/camera/camera</code> namespace; check yours with <code>ros2 topic list</code>.</p>
+<pre>ros2 launch rtabmap_launch rtabmap.launch.py \
+    rgb_topic:=/camera/camera/color/image_raw \
+    depth_topic:=/camera/camera/aligned_depth_to_color/image_raw \
+    camera_info_topic:=/camera/camera/color/camera_info \
+    frame_id:=camera_link approx_sync:=false \
+    wait_imu_to_init:=true imu_topic:=/imu/data \
+    rtabmap_args:="--delete_db_on_start \
+      --Mem/STMSize 30 --Rtabmap/DetectionRate 1 \
+      --Vis/MinInliers 25 --RGBD/OptimizeMaxError 3.0 \
+      --Grid/RangeMax 3.0 --Grid/MaxObstacleHeight 1.5"</pre>
+<p>Now map like someone who knows how the sausage is made: move at walking pace, yaw <em>slowly</em> (under about 30°/s, rolling-shutter RGB and motion blur both punish fast turns), keep 1 to 2&nbsp;m from surfaces, never stare at a blank wall, and deliberately close loops: end every excursion by returning through mapped territory to your start. Watch the rtabmap viewer; loop closures flash the matched frame pair.</p>
+<p>When done, Ctrl-C rtabmap; the map is already saved at <code>~/.ros/rtabmap.db</code> (the launch arg <code>database_path</code> moves it). Post-mortem:</p>
+<pre>rtabmap-databaseViewer ~/.ros/rtabmap.db</pre>
+<p>Open the constraints view and step through accepted and rejected loop closures; check the inlier counts against your <code>Vis/MinInliers</code>. Sanity checks: (1) <code>ros2 topic hz /camera/camera/color/image_raw</code> should show ~30&nbsp;Hz, and if it is 6&nbsp;Hz at low resolution, <code>rs-enumerate-devices | grep -i usb</code> will reveal a USB 2.1 downgrade, meaning cable or port. (2) "Did not receive data since 5 seconds" from rtabmap means topic names or QoS mismatch; re-check remaps before touching parameters. (3) Odometry flashing red in the viewer means visual odometry lost; slow down, add light, or fuse wheel odometry. (4) Double walls after a rotation mean extrinsics or time sync, not tuning; go back to Chapter 2.</p>
+</div>
+
+<h2><span class="sec-no">5.7</span>Field-Tested Gotchas</h2>
+<div class="warfield">
+  <p><strong>1. Featureless white walls kill visual odometry.</strong> No texture, no features, no motion estimate. Mitigations: run odometry on the IR image (the projector's dots are free texture for <em>stereo</em>, and with emitter alternation you still get clean frames for tracking), or fuse wheel odometry so a visual dropout is non-fatal.</p>
+  <p><strong>2. Glass and mirrors lie in different directions.</strong> IR mostly passes through glass, so the camera maps the room <em>behind</em> the glass wall and the grid shows free space where a door will smash. Mirrors reflect the projector and paint a phantom room behind the wall, complete with a phantom robot. Neither is fixable in software alone; mark glass in the map by hand or add a sensor that sees it (sonar, or lidar at the right wavelength, Chapter 3).</p>
+  <p><strong>3. Direct sunlight washes out the projector.</strong> Depth falls back to passive stereo: still works on textured surfaces, noisy on plain ones. South-facing rooms at 3 pm produce mysteriously patchy maps.</p>
+  <p><strong>4. Repetitive texture invites false loop closures.</strong> Warehouse racking, rows of identical doors, tiled corridors. The Bayesian filter plus geometric verification stops most of them, but "most" is not "all". If a wrong closure gets in, the map folds onto itself. Raise <code>Vis/MinInliers</code>, keep <code>RGBD/OptimizeMaxError</code> strict, and inspect closures in databaseViewer before trusting a map from a repetitive site.</p>
+  <p><strong>5. Dynamic scenes contaminate everything.</strong> People walking through frames leave smeared points in the cloud, occupy grid cells that are actually free, and donate features to odometry that make the world appear to move. Crowded-space mapping is its own discipline; at minimum, map off-hours and remove dynamic residue with databaseViewer grid regeneration.</p>
+  <p><strong>6. The kidnapped robot.</strong> Power the robot down, carry it two rooms over, power it up. Odometry restarts at its origin and the graph now believes a lie. In localization mode RTAB-Map recovers at the first recognized view; in mapping mode you get a disconnected session that only welds on when a loop closure fires. Until then, do not trust the pose, and neither should your planner.</p>
+  <p><strong>7. TF and time-sync bugs produce the classic ghost map.</strong> Wrong camera-to-robot extrinsics or unsynchronized clocks make the map double or smear when the robot rotates. Double walls after a turn: check transforms and timestamps before blaming the algorithm. Chapter 2 exists because of this failure mode.</p>
+  <p><strong>8. USB 3 bandwidth is a hardware problem wearing a software costume.</strong> A marginal cable or an unpowered hub silently downgrades the link to USB 2, and the driver responds by cutting resolution and frame rate. Symptoms look like tuning problems. They are not. Use the stock cable, short, straight into a root port, and verify with <code>rs-enumerate-devices</code>.</p>
+  <p><strong>9. Thermal throttling on SBCs.</strong> A Raspberry Pi 5 doing visual odometry plus BoW plus grid building runs hot; when it throttles, processing rate drops, sync windows are missed, and odometry quality collapses 20 minutes into a run that started beautifully. Heatsink, fan, and watch the clock speeds during a long session before declaring victory.</p>
+  <p><strong>10. Multiple D435i in one room mostly coexist.</strong> Stereo tolerates alien dot patterns far better than coded light would, since dots are just texture, not a code. For clean multi-camera captures, stagger placement or use hardware sync.</p>
+  <p><strong>11. The IMU ships uncalibrated.</strong> Skip <code>rs-imu-calibration</code> and gravity is slightly wrong on every run, forever, and you will chase the resulting tilt through every other parameter first.</p>
+</div>
+
+<h2><span class="sec-no">5.8</span>Localization-Only Mode, the Deployment Split</h2>
+<p>Set <code>Mem/IncrementalMemory=false</code> and RTAB-Map stops adding nodes. The same BoW machinery, the same Bayesian filter, the same geometric verification now serve one purpose: recognize where the robot is inside the stored graph and publish the <code>map → odom</code> correction. Nothing new is learned; CPU and memory flatten out; the database stops growing. This is the standard product lifecycle: <strong>map once, localize daily</strong>. Chapter 8 picks up the navigation half of that lifecycle.</p>
+<p>Behavior on wake is worth stating precisely, because it drives system design. At startup the robot does not know where it is; until the first loop-closure-style match against the stored map, the <code>map → odom</code> transform is not corrected and any pose you read is a guess. Good deployments start the robot at a distinctive, well-mapped dock so relocalization fires within the first few frames. After that, localization updates arrive whenever a view matches the map, and odometry carries the robot between updates.</p>
+<p>Then the world changes, because worlds do. A moved chair costs a few inliers and nothing else; the Bayesian filter over many words shrugs off partial change. Rearrange the furniture wholesale, change the lighting from daylight to sodium lamps, or repaint, and match scores sag until relocalization becomes sporadic exactly where the change happened. The honest options: remap on a schedule, or run occasional sessions in mapping mode (with <code>Mem/InitWMWithAllNodes=true</code>) so the map tracks the world, then return to localization mode. RTAB-Map's multi-session memory was built for exactly this maintenance loop.</p>
+<div class="keypoint">Mapping mode and localization mode are the same algorithm with the learning switch flipped. Deployment means flipping <code>Mem/IncrementalMemory</code> to false, starting from a recognizable place, and having a plan for the day the world no longer matches the database.</div>
+
+<div class="setup">
+<p><strong>Setup B: Relaunch Yesterday's Map in Localization Mode.</strong> Goal: boot the Setup A stack against the saved database, watch the robot relocalize in RViz, and hand Nav2 the exact tf and topic contract it expects. Prereqs: Setup A completed, its <code>~/.ros/rtabmap.db</code> intact.</p>
+<p>Camera and IMU filter launch exactly as in Setup A. Then rtabmap, two changes: <code>localization:=true</code> (which sets <code>Mem/IncrementalMemory=false</code> and <code>Mem/InitWMWithAllNodes=true</code> underneath) and <em>no</em> <code>--delete_db_on_start</code>:</p>
+<pre>ros2 launch rtabmap_launch rtabmap.launch.py \
+    localization:=true rviz:=true \
+    database_path:=~/.ros/rtabmap.db \
+    rgb_topic:=/camera/camera/color/image_raw \
+    depth_topic:=/camera/camera/aligned_depth_to_color/image_raw \
+    camera_info_topic:=/camera/camera/color/camera_info \
+    frame_id:=camera_link approx_sync:=false \
+    wait_imu_to_init:=true imu_topic:=/imu/data</pre>
+<p>Verify relocalization: in RViz set the fixed frame to <code>map</code>, add a Map display on <code>/map</code> and a TF display. On startup the grid appears immediately (it is rendered from the database). Drive or carry the camera a few meters through mapped territory; the moment a view matches, the pose snaps to the right spot on the grid and tracks from there. Confirm the transform is alive:</p>
+<pre>ros2 run tf2_ros tf2_echo map odom</pre>
+<p>The contract Nav2 needs, and gets from this stack: a <code>map</code> frame with <code>map → odom</code> published by rtabmap; <code>odom → base_link</code> from your odometry source; and <code>/map</code> as a <code>nav_msgs/OccupancyGrid</code> built by the <code>Grid/</code> parameters you chose during mapping. That triple (frame, tf, topic) is everything Chapter 8's costmaps and planners assume. Sanity checks: (1) if the pose never snaps, confirm you did not pass <code>--delete_db_on_start</code> out of habit; an empty database localizes against nothing. (2) If relocalization works near the dock but fails elsewhere, the world or the lighting changed; open databaseViewer and compare stored keyframes against what the camera sees now. (3) If <code>/map</code> is empty in RViz but the viewer shows a map, check QoS: the grid is latched (transient local), and a subscriber with volatile durability sees nothing.</p>
+</div>
+
+<h2><span class="sec-no">5.9</span>When to Outgrow This Rig</h2>
+<p>The rig has a ceiling, and recognizing it is cheaper than fighting it. Symptoms and their prescriptions:</p>
+<ul>
+  <li><strong>Long corridors, big warehouses, outdoor yards.</strong> The D435i's useful depth ends near 3&nbsp;m and sunlight eats the projector. You want lidar, and probably lidar-inertial odometry with it (Chapter 3). The safety conversation points the same way: a certified stop system wants a safety-rated lidar, which no RealSense will ever be.</li>
+  <li><strong>Fast or aggressive motion.</strong> Drones, handheld scanning, anything that yaws faster than the tracker survives. You want tightly coupled VIO with a properly calibrated IMU, which is Chapter 4's territory, feeding RTAB-Map as the external odometry or replacing the stack outright.</li>
+  <li><strong>Dense reconstruction or semantics as the product.</strong> If the deliverable is a mesh or a labeled scene rather than a navigation map, the learning-based systems of Chapter 6 and real GPU compute enter the picture.</li>
+</ul>
+<p>What you keep even after outgrowing the camera: almost everything around it. RTAB-Map runs happily on lidar input (<code>Reg/Strategy=1</code>), the map-once-localize-daily lifecycle carries over unchanged, the database workflow and databaseViewer habits carry over, and the tf contract is identical no matter what sensor feeds it. The rig is a starter home; the plumbing is permanent.</p>
+
+<h2><span class="sec-no">5.10</span>Reading List</h2>
+<a class="paper" href="https://introlab.3it.usherbrooke.ca/mediawiki-introlab/images/7/7a/Labbe18JFR_preprint.pdf"><span class="p-title">RTAB-Map as an Open-Source Lidar and Visual SLAM Library for Large-Scale and Long-Term Online Operation</span><span class="p-meta">Labbé &amp; Michaud · Journal of Field Robotics 2019</span><span class="p-why">The single best read on the whole system; it also ablates the odometry strategies against each other honestly.</span></a>
+<a class="paper" href="https://introlab.3it.usherbrooke.ca/mediawiki-introlab/images/e/e9/Labbe13ICRA.pdf"><span class="p-title">Appearance-Based Loop Closure Detection for Online Large-Scale and Long-Term Operation</span><span class="p-meta">Labbé &amp; Michaud · IEEE Transactions on Robotics 2013</span><span class="p-why">The STM/WM/LTM memory management mechanism in full detail, with the Bayesian filter math.</span></a>
+<a class="paper" href="https://introlab.github.io/rtabmap/"><span class="p-title">RTAB-Map Official Site and Tutorials</span><span class="p-meta">introlab.github.io/rtabmap</span><span class="p-why">Entry point to the ROS tutorials, the forum where Labbé personally answers tuning questions, and the demos.</span></a>
+<a class="paper" href="https://github.com/introlab/rtabmap/wiki"><span class="p-title">RTAB-Map Wiki and Full Parameter List</span><span class="p-meta">github.com/introlab/rtabmap · see also `rtabmap --params`</span><span class="p-why">Where the authoritative parameter documentation lives. Bookmark, do not memorize.</span></a>
+<a class="paper" href="https://www.intelrealsense.com/depth-camera-d435i/"><span class="p-title">Intel RealSense D435i Datasheet and Whitepapers</span><span class="p-meta">Including the IMU calibration and multi-camera configuration whitepapers</span><span class="p-why">The hardware facts in section 5.4 come from here; the multi-camera paper settles the projector-interference question with data.</span></a>
+<a class="paper" href="https://github.com/IntelRealSense/librealsense"><span class="p-title">librealsense</span><span class="p-meta">Intel · SDK, firmware tools, rs-enumerate-devices, rs-imu-calibration</span><span class="p-why">The layer under the ROS wrapper. When the camera misbehaves, debug here first, without ROS in the loop.</span></a>
+<a class="paper" href="https://github.com/IntelRealSense/realsense-ros"><span class="p-title">realsense-ros, the ROS 2 Wrapper</span><span class="p-meta">Intel · ros-jazzy-realsense2-camera</span><span class="p-why">Launch arguments, topic naming, and the issue tracker where every sync and QoS quirk has already been reported by someone else.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2007.11898"><span class="p-title">Compare-Read: ORB-SLAM3</span><span class="p-meta">Campos et al. · IEEE T-RO 2021 · arXiv:2007.11898</span><span class="p-why">Understand why ORB-SLAM3 wins on trajectory accuracy while RTAB-Map wins on usable maps and uptime; Chapter 4 tells the full story.</span></a>
+
+<h2><span class="sec-no">5.11</span>Interview Questions, Answer Out Loud First</h2>
+<details class="qa"><summary>Why does RTAB-Map stay real-time on multi-hour, building-scale runs?</summary><div class="a"><p>Memory management. Loop-closure detection searches only the bounded Working Memory; when the update exceeds the time budget (<code>Rtabmap/TimeThr</code>) or the node budget (<code>Rtabmap/MemoryThr</code>), the oldest low-weight locations transfer to Long-Term Memory in the SQLite database, and they come back only when a loop closure lands near them. Search cost is O(WM size), a constant you chose, instead of O(map size). Graph optimization also stays local in practice. That bounded budget is the design point of the entire system, and it is why the same binary that maps a lab also maps a hospital.</p></div></details>
+<details class="qa"><summary>BoW loop closure in a building with identical-looking rooms: what saves you from a false match?</summary><div class="a"><p>Three layers. First, the Bayesian filter requires evidence to accumulate over consecutive frames, so one lucky histogram match gets diluted. Second, geometric verification: PnP with RANSAC must find a consistent relative pose with at least <code>Vis/MinInliers</code> agreeing features, and identical-looking rooms rarely agree in precise 3D layout. Third, <code>RGBD/OptimizeMaxError</code> checks the graph after optimization; a closure that makes the residuals explode gets rejected and removed. If all three fail, robust back-end kernels or switchable constraints can still down-weight the bad edge, but the honest answer is that you also inspect closures in databaseViewer before shipping a map from a repetitive site.</p></div></details>
+<details class="qa"><summary>D435i vs a lidar for a warehouse robot?</summary><div class="a"><p>Refuse the either/or. The camera is cheap and gives dense depth plus semantics (labels, barcodes, people), but has 3 m of useful range, a 87° FOV, and lighting sensitivity. A 2D lidar gives 360°, tens of meters, lighting immunity, and, decisive in a warehouse, can be part of a safety-rated stop system, which a RealSense cannot. The production answer is both: lidar for robust localization and certified safety, camera for perception and cheap 3D obstacle sensing. If forced to one sensor in a warehouse, it is the lidar, and Chapter 3 is why.</p></div></details>
+<details class="qa"><summary>How do you get a 2D navigation map out of a 3D depth camera?</summary><div class="a"><p>Take depth points within a height band that can actually hit the robot, roughly floor to robot height (<code>Grid/MaxObstacleHeight</code>), project them onto the ground plane as occupied cells, then raytrace from the camera through empty space to mark free cells, capped at <code>Grid/RangeMax</code> so far-field depth noise does not paint phantom walls. The result is exactly the <code>nav_msgs/OccupancyGrid</code> that Chapter 8's costmaps and planners consume. Bonus point: RTAB-Map re-renders this grid from keyframe poses after every optimization, so the grid straightens when loops close.</p></div></details>
+<details class="qa"><summary>Visual odometry gets lost mid-run. What does the system do?</summary><div class="a"><p>Layered recovery. <code>Odom/ResetCountdown</code> lets odometry reset itself after N lost frames instead of staying dead. Relocalization through the BoW machinery re-attaches the trajectory to the known map at the next recognized place. And best practice is fusing wheel odometry through a robot_localization EKF so a visual dropout degrades accuracy instead of ending the run. The theme to say out loud: single-sensor odometry is a single point of failure, so design for graceful degradation.</p></div></details>
+<details class="qa"><summary>Wheel odometry or visual odometry under RTAB-Map, and why?</summary><div class="a"><p>Depends on the floor and the walls, and a senior answer says so. Wheel odometry is smooth, cheap, and lighting-immune, but drifts with slip and is blind to z; on a slow base with good encoders it is often the more robust backbone, with the camera doing loop closure. RGB-D odometry needs no extra hardware and observes true motion, but dies on blank walls, in the dark, and under fast yaw, and it costs a CPU core. The best answer is fusion: EKF the wheels with the camera so each covers the other's failure mode, and let RTAB-Map's proximity detection patch the cases where appearance fails but position is known. Then name the failure you have seen: carpet transitions for wheels, white corridors for vision.</p></div></details>
+<details class="qa"><summary>The map is fine, but the robot mislocalizes at the far corridor. How do you debug it?</summary><div class="a"><p>Treat it as a data problem before a tuning problem. Open the database in rtabmap-databaseViewer and look at the far corridor's keyframes: are they feature-poor, motion-blurred, or visually identical to another corridor? Check rejected loop closures there and read the rejection reason, low inliers versus optimization error. Compare stored keyframes with what the camera sees now; if the corridor changed or the lighting did, the map is stale, not the localizer broken. If the frames are simply ambiguous, the fixes are physical and parametric: map that corridor with more viewpoints, add visual landmarks, raise <code>Kp/MaxFeatures</code>, and keep <code>Vis/MinInliers</code> strict so the system says lost rather than guessing wrong. A robot that knows it is lost is recoverable; a confidently wrong one is not.</p></div></details>
+<details class="qa"><summary>Why would you disable the D435i's IR emitter, given that the dots help depth?</summary><div class="a"><p>Because the projector is rigid to the camera, its dots slide across surfaces as the camera moves, so a dot is not a fixed 3D world point. For stereo <em>matching</em> within one instant the dots are pure profit; for feature <em>tracking</em> across time they are poison, since odometry locks onto them and sees motion that is not the world's. So when running visual odometry on the global-shutter IR images, disable the emitter or use emitter on/off alternation, which gives depth frames the dots and tracking frames a clean image. Explaining that distinction, matching within a frame versus tracking across frames, is the whole point of the question.</p></div></details>
+<details class="qa"><summary>What actually changes when you set Mem/IncrementalMemory to false?</summary><div class="a"><p>The learning stops and everything else stays. No new nodes or words are added, the database stops growing, and CPU flattens because Working Memory is fixed at the stored map. The BoW pipeline, Bayesian filter, and geometric verification now do relocalization: each match updates the <code>map → odom</code> transform instead of extending the graph. Two operational consequences follow. On wake the pose is unknown until the first match, so start the robot somewhere distinctive. And the map no longer tracks the world, so you need a maintenance plan, periodic remapping or occasional mapping-mode sessions, for the day the furniture wins.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

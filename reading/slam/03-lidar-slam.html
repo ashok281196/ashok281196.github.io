@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 3 · LiDAR SLAM &amp; the Mapping Pipeline · SLAM: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">03</div>
+  <div class="chapter-kicker">Chapter 3 · Lasers</div>
+  <h1>LiDAR SLAM &amp; the Mapping Pipeline</h1>
+  <p class="chapter-sub">One skeleton diagram, held firmly in your head, explains every laser SLAM system built since 2014, from LOAM to FAST-LIO2, and every map format from OctoMap to the distance fields that replaced it.</p>
+</header>
+
+<h2><span class="sec-no">3.1</span>What a LiDAR Actually Gives You</h2>
+<p>Chapter 2 covered the sensor physics: time of flight, beam divergence, dual returns, the noise model. Here we only need what the pipeline consumes. Ten or twenty times a second, a spinning 3D lidar hands you a <strong>scan</strong>: a cloud of tens of thousands to hundreds of thousands of 3D points in the sensor's own frame, each with centimeter-grade range. A Velodyne VLP-16 produces about 300,000 points per second on 16 beams; an Ouster OS1-64 roughly 1.3 million on 64; a Livox Avia paints a flower-petal pattern that never repeats, which breaks any code assuming fixed scan lines.</p>
+<p>The point <em>fields</em> matter as much as the points. A useful driver gives you, per point: <code>x, y, z</code>, an <strong>intensity</strong> (return strength, useful for place recognition and for spotting retroreflective tape), a <strong>ring</strong> index (which vertical beam fired it), and a <strong>per-point timestamp</strong>. That last field is the one people lose in transport. Some drivers, bag conversions, and DDS configurations silently drop it, and without it you cannot deskew. Check your PointCloud2 fields before you blame the algorithm.</p>
+<p>What the lidar gives you is shape. What it cannot give you is color, meaning, or your own position. That last part is this chapter's job.</p>
+<dl class="jargon">
+  <dt>Scan / sweep</dt><dd>One full revolution of the sensor, typically 100 ms at 10 Hz. Everything inside it was captured at slightly different times.</dd>
+  <dt>Ring</dt><dd>The set of points fired by one vertical beam. Feature extractors like LOAM compute curvature along a ring, so shuffled or missing ring indices break them.</dd>
+  <dt>Intensity</dt><dd>Return signal strength. Lane markings, signs, and reflective tape pop out in intensity even when geometry is bland.</dd>
+  <dt>Deskew</dt><dd>Undoing the robot's motion during the sweep so the scan looks like a single-instant snapshot. Section 3.3.</dd>
+</dl>
+
+<h2><span class="sec-no">3.2</span>The Skeleton, One Diagram to Memorize</h2>
+<p>Every laser SLAM system is a variation on six boxes. When an interviewer asks "how does lidar SLAM work?", you walk this diagram left to right, one sentence per box. The rest of the chapter earns you the right to do that.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 780 200" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <defs>
+    <marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#23201a"/></marker>
+    <marker id="arrteal" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#0e5f5b"/></marker>
+    <marker id="arrgold" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#a97b1f"/></marker>
+  </defs>
+  <text x="8" y="20" font-size="11" fill="#23201a">raw scan, 10 Hz</text>
+  <line x1="60" y1="26" x2="60" y2="48" stroke="#23201a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="5" y="50" width="118" height="46" fill="none" stroke="#23201a" stroke-width="1.5" rx="4"/>
+  <text x="64" y="70" font-size="11" fill="#23201a" text-anchor="middle">DESKEW</text>
+  <text x="64" y="86" font-size="9" fill="#23201a" text-anchor="middle">motion comp.</text>
+  <line x1="123" y1="73" x2="133" y2="73" stroke="#23201a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="135" y="50" width="118" height="46" fill="none" stroke="#0e5f5b" stroke-width="2" rx="4"/>
+  <text x="194" y="70" font-size="11" fill="#0e5f5b" text-anchor="middle">ODOMETRY</text>
+  <text x="194" y="86" font-size="9" fill="#0e5f5b" text-anchor="middle">scan matching</text>
+  <line x1="253" y1="73" x2="263" y2="73" stroke="#23201a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="265" y="50" width="118" height="46" fill="none" stroke="#23201a" stroke-width="1.5" rx="4"/>
+  <text x="324" y="70" font-size="11" fill="#23201a" text-anchor="middle">LOCAL MAP</text>
+  <text x="324" y="86" font-size="9" fill="#23201a" text-anchor="middle">ikd-tree / submap</text>
+  <path d="M 324 50 C 324 28, 194 28, 194 48" fill="none" stroke="#0e5f5b" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arrteal)"/>
+  <text x="259" y="26" font-size="9" fill="#0e5f5b" text-anchor="middle">scan-to-map</text>
+  <line x1="383" y1="73" x2="393" y2="73" stroke="#23201a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="395" y="50" width="118" height="46" fill="none" stroke="#a97b1f" stroke-width="2" rx="4"/>
+  <text x="454" y="70" font-size="11" fill="#a97b1f" text-anchor="middle">LOOP CLOSURE</text>
+  <text x="454" y="86" font-size="9" fill="#a97b1f" text-anchor="middle">recognize + verify</text>
+  <line x1="513" y1="73" x2="523" y2="73" stroke="#23201a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="525" y="50" width="118" height="46" fill="none" stroke="#23201a" stroke-width="1.5" rx="4"/>
+  <text x="584" y="70" font-size="11" fill="#23201a" text-anchor="middle">POSE GRAPH</text>
+  <text x="584" y="86" font-size="9" fill="#23201a" text-anchor="middle">global optimize</text>
+  <line x1="643" y1="73" x2="653" y2="73" stroke="#23201a" stroke-width="1.5" marker-end="url(#arr)"/>
+  <rect x="655" y="50" width="118" height="46" fill="none" stroke="#b3401e" stroke-width="2" rx="4"/>
+  <text x="714" y="70" font-size="11" fill="#b3401e" text-anchor="middle">MAP PRODUCTS</text>
+  <text x="714" y="86" font-size="9" fill="#b3401e" text-anchor="middle">grid · TSDF · mesh</text>
+  <rect x="70" y="140" width="118" height="36" fill="none" stroke="#23201a" stroke-width="1.2" stroke-dasharray="5 3" rx="4"/>
+  <text x="129" y="162" font-size="11" fill="#23201a" text-anchor="middle">IMU, 200 Hz</text>
+  <line x1="100" y1="140" x2="62" y2="100" stroke="#23201a" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+  <line x1="160" y1="140" x2="192" y2="100" stroke="#23201a" stroke-width="1.2" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+  <text x="230" y="165" font-size="9" fill="#23201a">dashed: IMU feeds deskew and the odometry prior</text>
+</svg>
+</div>
+<figcaption>Fig 3.1: the six-box skeleton of every LiDAR SLAM system since 2014.</figcaption>
+</figure>
+<div class="keypoint">Deskew the scan, match it against a local map to get odometry, fold it into that map, watch for revisits, relax the pose graph when one fires, and render the map into whatever format the planner eats. Every named system in this chapter is a set of choices inside those six boxes.</div>
+
+<h2><span class="sec-no">3.3</span>Deskew, the Rolling-Shutter Problem of Lasers</h2>
+<p>A spinning lidar takes about 100 ms to complete one revolution. The scan is not a photograph; it is a 100 ms exposure. If the robot moved during the sweep, points captured early and points captured late live in different frames, and treating them as one rigid snapshot smears the geometry.</p>
+<p>How bad is it? Run the numbers. At 1 m/s of straight-line motion, the sensor moves 10 cm during the sweep. Walls come out 10 cm thick instead of 2 cm, and scan-to-map matching mostly soaks it up; you lose accuracy, not the mission. Rotation is another animal. At 15 rad/s (a drone flipping, or a handheld scanner being waved carelessly), the frame turns about 86 degrees within one sweep. A point 10 m away appears displaced by roughly 13 m from where it belongs. No matcher recovers from that.</p>
+<pre>sweep time      0.1 s  (10 Hz spinning lidar)
+translation:    smear ≈ v · 0.1 s
+                1 m/s  → 10 cm      annoying, survivable
+rotation:       smear ≈ 2 r sin(ω · 0.05 s)   at range r
+                1 rad/s,  r = 10 m → 1.0 m    matcher struggles
+                15 rad/s, r = 10 m → 13.6 m   matcher dead</pre>
+<p>The practical rule falls out of the table: translation degrades deskew-free scans linearly and gently, rotation destroys them, and the damage scales with range.</p>
+<p>The fix is to estimate the motion <em>during</em> the sweep and re-project every point to a common instant, usually the sweep end. Three grades of sophistication:</p>
+<p><strong>Constant velocity.</strong> Assume the last inter-scan twist held during this sweep, interpolate each point's pose by its timestamp. Free, no extra sensor, and what KISS-ICP ships with. Fails exactly when acceleration is high, which is when you needed it most.</p>
+<p><strong>IMU-aided.</strong> Integrate the 200 to 400 Hz gyro and accelerometer across the sweep and interpolate each point's correction from that trajectory. This is the standard in every serious system (LIO-SAM, FAST-LIO2), and it is why a $10 IMU is non-negotiable on a lidar robot. Chapter 2 covers the calibration and time-sync you need for the IMU samples to line up with the point timestamps.</p>
+<p>The third grade treats the trajectory as a <strong>continuous-time</strong> function, a spline or Gaussian process over SE(3), and lets every point query its exact capture pose while the optimizer fits the spline to both IMU and lidar residuals. Elastic-style pipelines and DLIO's coarse-to-fine motion correction live here. It is the cleanest formulation, costs more compute, and shines on non-repetitive-pattern lidars like Livox where "one sweep" is a fuzzy concept anyway.</p>
+<div class="analogy">A panorama photo taken while leaning out of a moving train bends, unless the stitcher knows how far the train traveled between the first frame and the last. Deskew is the un-bending, with the IMU as the train's speedometer.</div>
+
+<h2><span class="sec-no">3.4</span>Scan Matching, the Engine of LiDAR Odometry</h2>
+<p>Given a fresh (deskewed) scan and a reference (the previous scan, or better, the accumulated local map), find the rigid transform T ∈ SE(3) that lines them up. That transform <em>is</em> your motion estimate. Everything in lidar odometry is a variation on how you define "lines up" and how you search for correspondences.</p>
+
+<h3>Point-to-Point ICP, the Ancestor</h3>
+<p>Iterative Closest Point, Besl and McKay, 1992. The loop:</p>
+<pre>given: source scan P, target map Q, initial guess T0
+repeat:
+  1. transform:    P' = T · P
+  2. correspond:   for each p' in P', find nearest q in Q   (kd-tree)
+  3. reject:       drop pairs with ||p' - q|| &gt; threshold
+  4. solve:        T* = argmin_T  Σ ||T·p - q||²             (closed form: SVD)
+  5. update:       T = T*
+until change in error &lt; epsilon, or max iterations
+</pre>
+<p>Step 4 has a closed-form solution (subtract centroids, SVD of the cross-covariance, rotation from the orthogonal factors). The loop converges because each step provably does not increase the error. What it converges <em>to</em> depends entirely on the initial guess, which is the subject of the warfield box below.</p>
+
+<h3>Point-to-Plane, Why It Wins on Real Buildings</h3>
+<p>The physical objection to point-to-point: the lidar never samples the same physical point twice. Your source point and its "nearest neighbor" are different samples of the same wall, so pulling them together point-to-point fights the sampling pattern. Point-to-plane (Chen and Medioni, 1992) instead penalizes only the offset along the local surface normal n: minimize Σ (n · (T·p − q))². Sliding along the wall is free, exactly as it should be. On structured scenes this converges in a handful of iterations where point-to-point takes dozens, because whole planar regions stop generating fake tangential residuals. The cost function loses its closed form and needs a small Gauss-Newton solve per iteration, which nobody minds.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 190" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <defs><marker id="ar2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#b3401e"/></marker>
+  <marker id="ar3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#0e5f5b"/></marker></defs>
+  <text x="90" y="26" font-size="12" fill="#23201a">point-to-point</text>
+  <line x1="40" y1="130" x2="330" y2="118" stroke="#23201a" stroke-width="1"/>
+  <circle cx="70" cy="129" r="3.5" fill="#23201a"/><circle cx="130" cy="126" r="3.5" fill="#23201a"/><circle cx="190" cy="124" r="3.5" fill="#23201a"/><circle cx="250" cy="121" r="3.5" fill="#23201a"/><circle cx="310" cy="119" r="3.5" fill="#23201a"/>
+  <circle cx="160" cy="70" r="4.5" fill="#b3401e"/>
+  <text x="172" y="66" font-size="11" fill="#b3401e">p</text>
+  <line x1="160" y1="75" x2="132" y2="121" stroke="#b3401e" stroke-width="1.5" marker-end="url(#ar2)"/>
+  <text x="88" y="95" font-size="10" fill="#b3401e">pulls to a sample</text>
+  <text x="40" y="168" font-size="10" fill="#23201a">residual: ||p - q||, tangential error punished too</text>
+  <text x="480" y="26" font-size="12" fill="#23201a">point-to-plane</text>
+  <line x1="420" y1="130" x2="720" y2="118" stroke="#23201a" stroke-width="2"/>
+  <circle cx="560" cy="70" r="4.5" fill="#0e5f5b"/>
+  <text x="572" y="66" font-size="11" fill="#0e5f5b">p</text>
+  <line x1="560" y1="75" x2="558" y2="120" stroke="#0e5f5b" stroke-width="1.5" marker-end="url(#ar3)"/>
+  <line x1="558" y1="124" x2="556" y2="90" stroke="#23201a" stroke-width="1" stroke-dasharray="3 3"/>
+  <text x="568" y="105" font-size="11" fill="#23201a">n</text>
+  <line x1="490" y1="60" x2="640" y2="54" stroke="#0e5f5b" stroke-width="1" stroke-dasharray="5 4"/>
+  <text x="470" y="46" font-size="10" fill="#0e5f5b">sliding along the wall is free</text>
+  <text x="420" y="168" font-size="10" fill="#23201a">residual: n·(p - q), only the normal offset counts</text>
+</svg>
+</div>
+<figcaption>Fig 3.2: point-to-point pulls toward a specific sampled point; point-to-plane penalizes only offset along the normal, letting scans slide into place along walls.</figcaption>
+</figure>
+
+<h3>GICP and NDT, Two Ways to Get Probabilistic</h3>
+<p><strong>GICP</strong> (Segal et al., RSS 2009) generalizes both: model every point, source and target, as a small Gaussian whose covariance is estimated from its neighbors (flat disc on a wall, cigar on an edge), then minimize the Mahalanobis distance between matched distributions. Plane-to-plane matching falls out as a special case. It is the workhorse inside DLO/DLIO and half the localization stacks in industry, usually via the <code>small_gicp</code> or <code>fast_gicp</code> libraries.</p>
+<p><strong>NDT</strong>, the Normal Distributions Transform (Biber and Strasser 2003, 3D by Magnusson 2007), flips the data structure: chop the <em>map</em> into voxels of 1 to 2 m, fit one Gaussian per voxel, and align the scan by maximizing its likelihood under that mixture. No per-point nearest-neighbor search at all, just a voxel lookup, and the cost surface is smooth and differentiable, so it tolerates worse initial guesses than vanilla ICP. The price is voxel-boundary artifacts and sensitivity to the cell size. NDT is the traditional matcher in autonomous-driving localization, including Autoware's classic <code>ndt_matching</code>.</p>
+
+<h3>Feature-Based Matching, the LOAM Idea</h3>
+<p>LOAM's contribution was to not match all the points. Compute a curvature score along each ring: points where the ring bends sharply are <strong>edges</strong> (poles, door frames, rack corners), points where it stays flat are <strong>planes</strong> (walls, floor). Keep a few hundred of each, match edges to map edge-lines with point-to-line residuals and planes to map planes with point-to-plane residuals, and you get LOAM-class accuracy at a fraction of the compute of dense ICP. The cost: the feature extractor is tuned to spinning-lidar ring geometry, and it throws information away, which is exactly the assumption FAST-LIO2 later attacked (Section 3.8).</p>
+
+<p>A cheat sheet for choosing among them:</p>
+<table>
+  <tr><th>Matcher</th><th>Residual</th><th>Correspondence</th><th>Reach for It When</th></tr>
+  <tr><td>Point-to-point ICP</td><td>‖p − q‖²</td><td>nearest neighbor</td><td>baseline, unstructured scenes, KISS-ICP style</td></tr>
+  <tr><td>Point-to-plane ICP</td><td>(n·(p − q))²</td><td>nearest neighbor + normal</td><td>buildings, warehouses, most robots</td></tr>
+  <tr><td>GICP</td><td>Mahalanobis, dist-to-dist</td><td>nearest neighbor + local covariances</td><td>accuracy matters, compute available</td></tr>
+  <tr><td>NDT</td><td>likelihood under voxel Gaussians</td><td>voxel lookup, no NN search</td><td>poor initial guesses, AD localization</td></tr>
+  <tr><td>LOAM features</td><td>point-to-line and point-to-plane</td><td>NN among edge/plane features</td><td>tight compute, spinning lidar with rings</td></tr>
+</table>
+<h3>Where Correspondences Come From</h3>
+<p>Nearest-neighbor search is where scan matchers actually spend their milliseconds, so the data structure holding the map is a first-class design decision.</p>
+<ul>
+  <li><strong>kd-tree</strong>: the default. Build in O(n log n), query in about O(log n). The catch is that it is static; growing the map means rebuilding the tree, and at map scale rebuilds cost more than the matching.</li>
+  <li><strong>ikd-tree</strong> (Cai, Xu, Zhang, 2021): an incremental kd-tree supporting point insertion, box-wise deletion, and lazy re-balancing in the background. The map structure updates in milliseconds instead of being rebuilt, and this single data structure is a large share of why FAST-LIO2 is fast.</li>
+  <li><strong>Voxel hashing</strong>: a hash map from integer voxel coordinates to the points (or a Gaussian, or a small array of points) inside. O(1) lookup, trivially incremental, cache-friendly. KISS-ICP and Faster-LIO's iVox both bet on it; the trend since 2022 is voxel hashing quietly replacing trees.</li>
+</ul>
+
+<h3>Convergence Basins and the Initial Guess</h3>
+<p>Every matcher above is a local optimizer. It has a <strong>convergence basin</strong>: the set of initial guesses from which it reaches the true alignment rather than a nearby impostor. Dense point-to-plane on a structured scene might have a basin of ±1 m and ±20 degrees; drop a repetitive scene (racks, columns, fences) and the basin shrinks to less than the spacing of the repeating structure. Your job is to always start inside the basin, which is what the motion prior is for: integrate the IMU since the last scan (best), or assume constant velocity (fine at car speeds on smooth trajectories). This is also the honest answer to why lidar odometry hates fast rotation: the prior degrades exactly when the basin shrinks.</p>
+<p>One vocabulary upgrade worth using in interviews: matching each scan to the <em>previous scan</em> ("scan-to-scan") accumulates error at every step; matching to an accumulated <em>local map</em> ("scan-to-map") is what every modern system does, because the map averages away single-scan noise and gives correspondences a longer memory.</p>
+<div class="warfield">
+  <p><strong>Bad initial guess, wrong local minimum.</strong> ICP is a hill climber. Start it outside the basin (fast rotation, dropped scans, teleop jerk) and it locks onto a plausible-looking wrong alignment with a <em>good fitness score</em>. Symptom: the map grows a second copy of the room at a slight angle. Cure: better prior (IMU), coarse-to-fine matching, and a sanity gate on the pose delta.</p>
+  <p><strong>Repetitive structure.</strong> Warehouse racks at a 1.5 m pitch mean an alignment error of exactly 1.5 m scores nearly as well as the truth. The matcher cannot save you; the prior and loop closure must. Keep the odometry uncertainty honest so the graph knows how far to trust it.</p>
+  <p><strong>Degenerate geometry.</strong> Corridors, tunnels, open fields: some direction is simply unobservable from geometry. Big enough to get its own section (3.9).</p>
+</div>
+
+<h2><span class="sec-no">3.5</span>Loop Closure for LiDAR</h2>
+<p>Odometry drifts, roughly 0.1 to 1 percent of distance traveled for good LIO (Chapter 0 explains why this is structural). Loop closure is the correction mechanism, and for lidar it comes in two stages: propose candidates, then verify them geometrically. Never skip the second stage.</p>
+<p><strong>Stage one, proposing.</strong> The cheapest proposer is a <strong>radius search</strong>: if the current pose estimate is within a few meters of an old keyframe pose, try to match against it. This works until drift exceeds your search radius, which on long loops it will. The classic drift-proof answer is <a href="https://github.com/gisbi-kim/scancontext">Scan Context (Kim and Kim, IROS 2018)</a>: flatten the scan into a polar image, rings by sectors, each cell holding the max point height in that bin. The result is a small 2D fingerprint; a fast ring-key lookup shortlists candidates, and comparing column-shifted copies buys rotation invariance for free (a column shift is a yaw rotation). Successors refine the recipe: Scan Context++ adds lateral robustness, <a href="https://github.com/hku-mars/STD">STD (stable triangle descriptors)</a> and BTC match triangles of keypoints, which are invariant to viewpoint by construction. Learned descriptors (OverlapTransformer, LoGG3D-Net) are Chapter 6 material.</p>
+<p><strong>Stage two, verifying.</strong> Run a real registration (ICP or GICP) between the candidate pair, seeded by the descriptor's yaw estimate, and accept only if it converges with a tight fitness score and enough inlier overlap. The reason for the paranoia: a <strong>false loop closure welds two different places together</strong>, and the graph optimizer will happily bend the entire trajectory to satisfy the lie. One bad loop factor can do more damage than an hour of drift. This is also why the back-end keeps robust kernels and switchable constraints on the loop edges (Chapter 1 covers Huber, Cauchy, and switchable constraints); the verification gate keeps the false-positive rate low, the robust kernel survives the ones that get through.</p>
+<div class="keypoint">Loop closure is a two-gate system: a cheap descriptor proposes, an expensive registration verifies, and a robust kernel in the graph forgives. A missed loop costs you some drift. A false loop accepted into the graph costs you the map.</div>
+<dl class="jargon">
+  <dt>Place recognition</dt><dd>Answering "have I been here?" from sensor data alone, without trusting the pose estimate. Needed exactly because drift makes the pose estimate untrustworthy on long loops.</dd>
+  <dt>Descriptor</dt><dd>A compact fingerprint of a scan (Scan Context's polar image, STD's triangles) built so that similar places give similar fingerprints and comparison is cheap enough to run against thousands of candidates.</dd>
+  <dt>Geometric verification</dt><dd>Running a full registration on a proposed loop pair and accepting only on tight convergence with high inlier overlap. The stage that keeps false positives out of the graph.</dd>
+  <dt>Fitness score</dt><dd>Mean residual of a converged registration. Necessary but not sufficient evidence: degenerate and repetitive scenes produce great scores for wrong alignments.</dd>
+</dl>
+
+<h2><span class="sec-no">3.6</span>The Factor Graph on a LiDAR Robot</h2>
+<p>Chapter 1 built the machinery; here is what it holds on a real lidar robot. Nodes are keyframe poses (and usually velocity and IMU biases). The factors, in the order you add them:</p>
+<ul>
+  <li><strong>Prior factor</strong> on the first pose, pinning the gauge freedom so the problem has a unique solution.</li>
+  <li><strong>Odometry factors</strong>: relative-pose constraints between consecutive keyframes, produced by the scan matcher, with covariance taken from the matcher's Hessian (honest covariances here are what make degeneracy handling possible).</li>
+  <li><strong>IMU preintegration factors</strong>: hundreds of IMU samples between two keyframes compressed into one constraint on relative pose, velocity, and bias (Forster et al.). These also make <strong>gravity observable</strong>, which is what keeps your map's roll and pitch pinned to the horizon over kilometers.</li>
+  <li><strong>Loop factors</strong>: relative poses from verified loop closures, wrapped in a robust kernel.</li>
+  <li><strong>GPS factors</strong> (outdoor): unary position constraints, added sparsely, typically only when the GPS covariance is small and the graph has drifted enough to make them informative. LIO-SAM does exactly this.</li>
+</ul>
+<p><strong>Keyframing policy</strong> is the quiet decision that controls cost. You do not add every scan to the graph; you add a keyframe when the robot has moved enough for the new scan to say something new. Typical thresholds: 1 m of translation or 10 to 15 degrees of rotation, plus a time cap so a parked robot does not go silent. Too dense and the graph balloons with redundant, correlated factors; too sparse and loop closures have nothing nearby to latch onto and deskew priors get stale. Solvers are GTSAM's iSAM2 (incremental, re-linearizes only what changed) or Ceres in batch; see <a href="https://gtsam.org/">GTSAM</a> and <a href="http://ceres-solver.org/">Ceres</a>. When a loop closure fires and the whole map visibly snaps into place in rviz, what you are watching is this graph relaxing.</p>
+<dl class="jargon">
+  <dt>Keyframe</dt><dd>A scan promoted to a graph node because it was sufficiently far, in distance or angle, from the previous one. Everything else is used for odometry and discarded.</dd>
+  <dt>IMU preintegration</dt><dd>The trick (Forster et al., 2015) of summarizing all IMU samples between two keyframes into a single factor whose value can be corrected for bias changes without re-integrating. It is what makes IMUs usable in graph back-ends.</dd>
+  <dt>Gauge freedom</dt><dd>A pure relative-constraint graph can slide and rotate as a whole with no cost change. The prior factor nails it down.</dd>
+</dl>
+
+<h2><span class="sec-no">3.7</span>The Classic Systems</h2>
+<p>These four still come up by name in interviews, and each earned its slot with one idea.</p>
+<table>
+  <tr><th>System</th><th>The One Idea</th><th>Status</th></tr>
+  <tr><td><strong>LOAM</strong> (2014)</td><td>Two-speed odometry on extracted edge and plane features: fast rough scan-to-scan, slow precise scan-to-map.</td><td>Ancestor of everything</td></tr>
+  <tr><td><strong>LeGO-LOAM</strong> (2018)</td><td>Segment the ground plane first; solve (z, roll, pitch) from ground points and (x, y, yaw) from the rest.</td><td>Legacy, ground robots</td></tr>
+  <tr><td><strong>Cartographer</strong> (2016)</td><td>Local submaps matched with Ceres; global loop search over all submaps via branch-and-bound on a multi-resolution grid stack.</td><td>Maintenance mode, still strong for 2D</td></tr>
+  <tr><td><strong>hdl_graph_slam</strong> (2019)</td><td>Plain NDT or GICP odometry plus an explicit, readable pose graph with floor and GPS factors.</td><td>Teaching codebase, still deployed</td></tr>
+</table>
+<p><strong>LOAM</strong> (Zhang and Singh, RSS 2014) mattered because it made real-time 6-DoF lidar odometry work on a laptop by refusing to match all the points, and by splitting the problem into a fast loop for responsiveness and a slow loop for accuracy. Every system since inherits at least one of those two moves. In an interview, credit it for the edge/plane feature idea and the two-speed architecture, then note that its assumptions (fixed ring geometry, no IMU in the core loop) are what the modern era dismantled.</p>
+<p><strong>LeGO-LOAM</strong> (Shan and Englot, IROS 2018) is LOAM made honest for ground robots: since a UGV's lidar sees mostly ground, segment that ground explicitly, use it to solve the three DoF it actually constrains (height, roll, pitch), then solve the remaining three from wall features. Cheaper and more stable on rough terrain than vanilla LOAM. Say "two-step optimization exploiting the ground prior" and you have said the whole paper.</p>
+<p><strong>Cartographer</strong> (Hess et al., ICRA 2016) matters for the back half of the pipeline. Scans match into small local <strong>submaps</strong> (probability grids), which cap local drift; loop closure searches <em>all</em> past submaps with a <strong>branch-and-bound</strong> scheme over a precomputed multi-resolution stack of the grid, pruning hopeless regions wholesale at coarse resolution. The result is an exact global search that runs in real time, with no learned components. If an interviewer asks for an algorithm you admire, this is a strong and slightly unusual pick, and you can explain the bound in two sentences: the coarse grid stores the max score of the cells beneath it, so the score of any coarse cell upper-bounds every alignment inside it.</p>
+<p><strong>hdl_graph_slam</strong> (Koide et al., 2019) never claimed algorithmic novelty; it mattered because it was the first widely used codebase where the whole skeleton is visible in one place: interchangeable odometry front-end, explicit g2o graph, floor-plane factors to keep multistory maps sane, optional GPS. When you need to explain the pipeline to a new engineer, this is still the code to open. Repo: <a href="https://github.com/koide3/hdl_graph_slam">github.com/koide3/hdl_graph_slam</a>.</p>
+
+<h2><span class="sec-no">3.8</span>The Modern Era</h2>
+<p>Everything since 2020 is a fight about coupling and data structures. Two definitions first, because "tightly-coupled" gets waved around loosely. <strong>Loosely coupled</strong>: each sensor pipeline produces its own pose estimate, and you blend the <em>outputs</em>, typically in an EKF (this is what <code>robot_localization</code> does). <strong>Tightly coupled</strong>: raw measurements from all sensors enter one joint estimator, so when the lidar goes weak for two seconds in a corridor, the IMU's raw constraints keep the shared state honest instead of merging with an already-broken lidar pose. Tighter is more accurate exactly when one sensor is briefly bad, at the price of one bigger, touchier estimator.</p>
+<p><strong><a href="https://arxiv.org/abs/2007.00258">LIO-SAM (Shan et al., IROS 2020)</a></strong> is the reference factor-graph design: IMU preintegration factors, lidar odometry factors from a LOAM-style matcher, optional GPS factors and loop factors, all in one GTSAM graph solved incrementally with iSAM2. The IMU also runs a fast prediction loop between keyframes so the controller gets 200 Hz odometry. Study its factor-graph figure; it is the cleanest picture in the literature of how the factors of Section 3.6 coexist.</p>
+<p><strong><a href="https://arxiv.org/abs/2107.06829">FAST-LIO2 (Xu et al., 2021)</a></strong> is the default since about 2022, and for two reasons you should be able to state precisely. First, <em>no feature extraction</em>: register raw points directly to the map with point-to-plane residuals, because feature extraction discards information and breaks on non-spinning lidars. Second, the map lives in an <strong>ikd-tree</strong>, so inserting a scan and querying neighbors are both incremental and cheap. Fusion is an <strong>iterated error-state extended Kalman filter</strong>: iterate the measurement update like a Gauss-Newton solve until the linearization point converges, which buys near-optimizer accuracy at filter cost, with a formulation that keeps the Kalman gain computation in the dimension of the state rather than the (huge) measurement. Wrap-up numbers for the interview: full-rate odometry on a laptop CPU at 100 Hz with thousands of points per update.</p>
+<p><strong><a href="https://github.com/gaoxiang12/faster-lio">Faster-LIO (Bai et al., RA-L 2022)</a></strong> keeps the FAST-LIO2 estimator and swaps the ikd-tree for <strong>iVox</strong>, an incremental sparse voxel hash. Same accuracy, roughly 1.5 to 2x the throughput, and evidence for the claim that the data structure, not the filter, was the bottleneck.</p>
+<p><strong><a href="https://arxiv.org/abs/2209.15397">KISS-ICP (Vizzo et al., RA-L 2023)</a></strong> is the counterpoint, and its title is the thesis: point-to-point ICP, a constant-velocity motion prior, adaptive-threshold correspondence rejection, a voxel-hash map, no IMU, and essentially no parameters to tune. It embarrasses far more complicated systems on cars, drones, handhelds, and segways with the same config. It is the correct first baseline on any new platform, and the correct interview answer to "what would you try first?": if KISS-ICP works, you may not need the complexity; if it fails, the way it fails tells you what to add.</p>
+<p><strong><a href="https://github.com/vectr-ucla/direct_lidar_inertial_odometry">DLO / DLIO (Chen et al., 2022 and 2023)</a></strong>: GICP-based direct matching with a clever submap built from keyframe neighborhoods, then (DLIO) a <strong>continuous-time</strong> motion correction where deskew and integration come from one analytically integrated trajectory, giving each point its exact pose cheaply. Strong on aggressive handheld and drone motion. <strong><a href="https://github.com/hku-mars/Point-LIO">Point-LIO (He et al., 2023)</a></strong> goes further and updates the filter <em>per point</em> rather than per scan, so there is no scan-accumulation latency at all; it survives spinning-drone abuse and outputs odometry at kilohertz rates. <strong><a href="https://github.com/koide3/glim">GLIM (Koide et al., 2024)</a></strong> and <strong><a href="https://github.com/MOLAorg/mola">MOLA</a></strong> are the modular back-end frameworks to name when the question is about extensible architecture; GLIM in particular does GPU-accelerated matching and a proper global optimization layer.</p>
+<p>The landscape in one table, for the interview minute where you place the systems relative to each other:</p>
+<table>
+  <tr><th>System</th><th>Estimator</th><th>Map Structure</th><th>IMU Coupling</th><th>Claim to Fame</th></tr>
+  <tr><td>LIO-SAM (2020)</td><td>factor graph, iSAM2</td><td>feature clouds per keyframe</td><td>tight, preintegration</td><td>reference graph design, GPS-ready</td></tr>
+  <tr><td>FAST-LIO2 (2021)</td><td>iterated error-state EKF</td><td>ikd-tree</td><td>tight</td><td>the 2022+ default, direct and fast</td></tr>
+  <tr><td>Faster-LIO (2022)</td><td>iterated error-state EKF</td><td>iVox voxel hash</td><td>tight</td><td>proved the data structure was the bottleneck</td></tr>
+  <tr><td>KISS-ICP (2023)</td><td>none, plain ICP</td><td>voxel hash</td><td>none</td><td>the baseline that embarrasses complexity</td></tr>
+  <tr><td>DLIO (2023)</td><td>hierarchical GICP + filter</td><td>keyframe submaps</td><td>tight, continuous-time</td><td>exact per-point deskew, cheap</td></tr>
+  <tr><td>Point-LIO (2023)</td><td>per-point EKF updates</td><td>ikd-tree</td><td>tight</td><td>kHz odometry, survives violent motion</td></tr>
+  <tr><td>GLIM (2024)</td><td>factor graph, GPU matching</td><td>voxel/submap hybrid</td><td>tight</td><td>modular back end with real global optimization</td></tr>
+</table>
+<div class="setup">
+<p><strong>Setup B: FAST-LIO2 on a Public Bag, This Weekend</strong></p>
+<p><strong>Goal:</strong> run state-of-the-art LIO on recorded data and learn its three classic failure modes on purpose. <strong>Prereqs:</strong> the original <a href="https://github.com/hku-mars/FAST_LIO">FAST_LIO</a> is ROS 1; the cleanest path in 2026 is Ubuntu 20.04 + ROS Noetic in Docker, or a community ROS 2 port (several exist on GitHub under FAST_LIO_ROS2; APIs drift, so check the port's README against the original). Commands below are the ROS 1 original. You need ~8 GB RAM and no GPU.</p>
+<pre># deps: Livox SDK + driver (required even for non-Livox lidars, it is a build dep)
+mkdir -p ~/fastlio_ws/src &amp;&amp; cd ~/fastlio_ws/src
+git clone https://github.com/Livox-SDK/livox_ros_driver.git
+git clone --recursive https://github.com/hku-mars/FAST_LIO.git   # --recursive pulls ikd-Tree
+cd ~/fastlio_ws &amp;&amp; catkin_make &amp;&amp; source devel/setup.bash</pre>
+<p>Grab a bag: the FAST_LIO README links sample Livox Avia bags; for a spinning lidar, any Ouster+IMU dataset works (NTU VIRAL, or a Hilti SLAM Challenge sequence). The config file is where beginners die, so know these fields in <code>config/ouster64.yaml</code>:</p>
+<pre>common:
+    lid_topic: "/os_cloud_node/points"   # MUST match the bag: rosbag info your.bag
+    imu_topic: "/os_cloud_node/imu"
+    time_sync_en: false                  # true only if lidar and IMU clocks disagree
+preprocess:
+    lidar_type: 3                        # 1 Livox, 2 Velodyne, 3 Ouster
+    scan_line: 64
+    blind: 4                             # ignore returns closer than 4 m (the robot itself)
+mapping:
+    acc_cov: 0.1
+    gyr_cov: 0.1
+    extrinsic_T: [ 0.0, 0.0, 0.0 ]       # lidar origin in IMU frame, meters
+    extrinsic_R: [ 1, 0, 0,
+                   0, 1, 0,
+                   0, 0, 1 ]             # from your calibration or the sensor datasheet</pre>
+<pre>roslaunch fast_lio mapping_ouster64.launch    # terminal 1, opens rviz
+rosbag play your_dataset.bag                  # terminal 2</pre>
+<p><strong>What you should see:</strong> a dense colored cloud growing in rviz with crisp, single-thickness walls, a smooth <code>/Odometry</code> stream at the lidar rate (10 Hz on most bags), and per-scan processing times well under the 100 ms budget in the console.</p>
+<p><strong>Sanity checks and classic symptoms:</strong> (1) The first 1 to 2 seconds of the bag must be stationary; FAST-LIO estimates gravity and gyro bias then, and a bag that starts mid-motion yields a map tilted or flying away immediately. (2) Verify per-point timestamps exist (<code>rostopic echo -n1 --noarr</code> the cloud and look for a <code>t</code> or <code>time</code> field); without them deskew silently degrades and walls curve during turns. (3) If the map is fine in translation but doubles or smears on every rotation, your <code>extrinsic_R</code> is wrong; if there is a constant offset that grows with speed, suspect <code>extrinsic_T</code> or time sync. (4) Watch RAM: the map is never pruned by default, and a 30-minute bag can eat several GB, which is your cue to look at the loop-closure-equipped systems instead.</p>
+</div>
+
+<h2><span class="sec-no">3.9</span>Degeneracy, the LiDAR Killer</h2>
+<p>Scan matching estimates 6 numbers from geometry. Sometimes the geometry only constrains 5 of them, or 3. A long featureless corridor: both walls are parallel planes, and sliding the scan along the corridor axis changes nothing about how well it matches. A tunnel adds a second free axis if it is smooth-bored. An open field constrains z, roll, and pitch through the ground plane and almost nothing else. The optimizer does not crash in these cases. It confidently returns a number for the unconstrained direction, and that number is fiction driven by noise.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 170" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <defs><marker id="ar4" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#b3401e"/></marker>
+  <marker id="ar5" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 z" fill="#0e5f5b"/></marker></defs>
+  <line x1="30" y1="45" x2="730" y2="45" stroke="#23201a" stroke-width="2.5"/>
+  <line x1="30" y1="125" x2="730" y2="125" stroke="#23201a" stroke-width="2.5"/>
+  <path d="M 200 75 L 230 85 L 200 95 z" fill="#0e5f5b"/>
+  <line x1="290" y1="85" x2="560" y2="85" stroke="#b3401e" stroke-width="1.5" marker-end="url(#ar4)"/>
+  <line x1="540" y1="85" x2="290" y2="85" stroke="#b3401e" stroke-width="1.5" marker-end="url(#ar4)"/>
+  <text x="330" y="76" font-size="10" fill="#b3401e">unobservable: every shift matches equally well</text>
+  <line x1="120" y1="70" x2="120" y2="52" stroke="#0e5f5b" stroke-width="1.5" marker-end="url(#ar5)"/>
+  <line x1="120" y1="100" x2="120" y2="118" stroke="#0e5f5b" stroke-width="1.5" marker-end="url(#ar5)"/>
+  <text x="46" y="90" font-size="10" fill="#0e5f5b">constrained</text>
+  <text x="580" y="155" font-size="10" fill="#23201a">Hessian eigenvalue along x ≈ 0</text>
+</svg>
+</div>
+<figcaption>Fig 3.3: in a corridor the walls pin the lateral axis and heading, while the along-corridor axis is invisible to scan matching.</figcaption>
+</figure>
+<p><strong>Detection</strong> is a solved problem and a favorite interview follow-up. The scan matcher's Gauss-Newton step builds a 6x6 Hessian (JᵀJ); eigen-decompose it. A well-constrained problem has six healthy eigenvalues. A near-zero eigenvalue flags a degenerate direction, and its eigenvector tells you <em>which</em> direction. Zhang, Kaess, and Singh formalized this at ICRA 2016 ("On Degeneracy of Optimization-based State Estimation Problems") along with <strong>solution remapping</strong>: solve the update only in the well-conditioned subspace and let the prior carry the sick direction. Thresholds are sensor and scene dependent; calibrate on your own corridors, and log the minimum eigenvalue as a health metric in production.</p>
+<p><strong>Survival</strong> means fusing something that observes what the lidar cannot. Wheel odometry observes along-corridor translation well (corridors are flat, wheels barely slip). The IMU observes short-term velocity, enough to bridge tens of meters before its own drift takes over, which is a real argument for tight coupling: in a tightly coupled filter the IMU constraint is already in the estimator, correctly weighted, when the lidar goes blind. Outdoors, GPS or a radar odometry channel plays the same role. And a loop closure at the corridor's far end retroactively repairs whatever error leaked through.</p>
+<div class="warfield">
+  <p><strong>Symptom: the corridor stretches like taffy.</strong> The mapped corridor comes out 60 m long when the building says 45. Odometry undershot or overshot along the degenerate axis, and every scan agreed with the error. Fitness scores looked great the whole time; degeneracy does not show up in residuals, only in the Hessian.</p>
+  <p><strong>Symptom: z sinks in open fields.</strong> On flat outdoor ground, height and pitch are constrained only by the ground plane under you, and a slight miscalibration in extrinsics makes altitude ramp steadily. Check the minimum eigenvalue and the IMU gravity alignment before blaming the lidar.</p>
+  <p><strong>Symptom: pose snaps sideways entering a doorway.</strong> The moment new geometry becomes visible, the estimator jumps to reconcile accumulated invisible error. If your controller feeds from the SLAM pose directly, the robot twitches. This is one reason the odom/map frame split exists (Chapter 8).</p>
+</div>
+
+<h2><span class="sec-no">3.10</span>2D SLAM Still Pays Salaries</h2>
+<p>A planar lidar on a flat floor is a solved problem with mature tooling, and a large share of deployed AMRs, cleaning robots, and warehouse fleets run exactly this. Do not let the 3D literature convince you 2D is beneath you; it is cheaper in every dimension that matters commercially: a $100 2D lidar versus a $4,000 3D one, single-digit percent CPU, and a map that Nav2 consumes directly with zero conversion (Chapter 8).</p>
+<p><strong>gmapping</strong> is the name your interviewer over 40 will mention. It is a Rao-Blackwellized particle filter (Chapter 1): each particle carries a full map hypothesis, and importance weighting plus resampling keep the plausible ones alive. It worked, it shipped on the PR2 and a thousand robots after, and its weaknesses (particle depletion on big loops, memory per particle, no life-long operation) are exactly what its successor fixed. Treat it as history you can explain, not something you deploy in 2026.</p>
+<p><strong><a href="https://github.com/SteveMacenski/slam_toolbox">SLAM Toolbox (Macenski)</a></strong> is the ROS 2 default and the thing you will actually run. Under the hood it is Karto's scan matcher plus a Ceres pose graph, but its production features are the reason it won: <strong>lifelong mapping</strong> (open yesterday's map, keep refining it today), <strong>serialized pose graphs</strong> (save the graph itself, not just a rendered image, so the map stays editable and extendable), a <strong>localization mode</strong> (freeze the graph, keep matching against it), and interactive tools to delete bad nodes from a map you otherwise like. When flat-floor assumptions hold, choose it and move on to the actual product problem.</p>
+<p>When is 2D the wrong call? Ramps and multi-floor sites (the planar assumption breaks), overhanging obstacles the scan plane misses (forklift tines at chest height are the canonical incident report), and outdoor terrain. The moment any of those appear, you pay the 3D tax. Until then, 2D wins on cost, compute, and maturity.</p>
+<div class="setup">
+<p><strong>Setup A: SLAM Toolbox on ROS 2 Jazzy, Zero Hardware</strong></p>
+<p><strong>Goal:</strong> build a 2D map in simulation, watch a loop closure snap in rviz, and save both map products for reuse in Chapter 8. <strong>Prereqs:</strong> Ubuntu 24.04, ROS 2 Jazzy installed. Everything runs in Gazebo, no robot needed.</p>
+<pre>sudo apt install ros-jazzy-slam-toolbox ros-jazzy-turtlebot3-gazebo \
+  ros-jazzy-turtlebot3-teleop ros-jazzy-nav2-map-server
+# if turtlebot3-gazebo is missing from your mirror, build the ROBOTIS
+# turtlebot3_simulations repo (jazzy branch) in a workspace instead
+export TURTLEBOT3_MODEL=burger
+ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py            # terminal 1</pre>
+<p>Save the parameters below as <code>mapper_params.yaml</code>. These are the ones that matter; everything omitted keeps the stock default from <code>mapper_params_online_async.yaml</code> in the package.</p>
+<pre>slam_toolbox:
+  ros__parameters:
+    mode: mapping
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+    resolution: 0.05               # 5 cm cells; halving this quadruples map cost
+    max_laser_range: 12.0          # clamp to the lidar's honest range, not its datasheet
+    minimum_travel_distance: 0.3   # add a graph node every 30 cm...
+    minimum_travel_heading: 0.3    # ...or ~17 deg of turn; raise both on big sites
+    map_update_interval: 5.0
+    do_loop_closing: true
+    loop_search_maximum_distance: 4.0        # radius search for candidates, meters
+    loop_match_minimum_response_coarse: 0.35 # raise if you ever see a false closure
+    loop_match_minimum_response_fine: 0.45</pre>
+<pre>ros2 launch slam_toolbox online_async_launch.py \
+  slam_params_file:=./mapper_params.yaml use_sim_time:=true          # terminal 2
+ros2 run turtlebot3_teleop teleop_keyboard                           # terminal 3
+rviz2   # add Map (topic /map) and LaserScan displays, fixed frame: map</pre>
+<p>Drive a full lap of the world and come back to where you started. Watch the map edges misalign slightly as drift accumulates, then <em>snap</em> into agreement when the loop closes: that snap is the pose graph relaxing, live. Then save both products:</p>
+<pre>mkdir -p ~/maps
+ros2 run nav2_map_server map_saver_cli -f ~/maps/tb3_world           # PGM + YAML for Nav2
+ros2 service call /slam_toolbox/serialize_map \
+  slam_toolbox/srv/SerializePoseGraph "{filename: '$HOME/maps/tb3_world'}"  # editable graph</pre>
+<p><strong>Sanity checks and classic symptoms:</strong> (1) <code>ros2 run tf2_tools view_frames</code> must show map → odom → base_footprint; if slam_toolbox is not publishing map → odom, your <code>base_frame</code> or <code>scan_topic</code> is wrong. (2) "Message filter dropping messages" spam means TF timing trouble; confirm <code>use_sim_time:=true</code> on every node. (3) Double walls after fast spins mean the scan matcher is being outrun: turn slower, or raise <code>minimum_travel_heading</code> so nodes are added less often mid-spin. (4) A map that shears once and never recovers usually means a false loop closure; raise the two <code>loop_match_minimum_response</code> thresholds and rebuild.</p>
+</div>
+
+<h2><span class="sec-no">3.11</span>Map Products</h2>
+<p>The pose trajectory is half the deliverable. The other half is a map some other module can use, and "use" means different things to a graph-search planner, a trajectory optimizer, and a fleet dashboard. Two big families, plus two pragmatic in-betweens.</p>
+<h3>Occupancy: May I Enter This Cell?</h3>
+<p><strong><a href="https://octomap.github.io/">OctoMap (Hornung et al., 2013)</a></strong> is the classic 3D answer: an octree (each cube splits into 8 children) storing per-cell occupancy as <strong>log-odds</strong>, a running score nudged up when a beam <em>hits</em> in the cell and down for every cell a beam <em>passes through</em> (found by raycasting), clamped so cells can change their mind later. It distinguishes free from unknown space, which planners and exploration modules need. Its weakness after a decade is mechanical: pointer-chasing through a deep tree is slow on modern cache-hungry CPUs.</p>
+<p><strong><a href="https://github.com/facontidavide/Bonxai">Bonxai (Faconti, 2023)</a></strong> is the modern replacement: a VDB-style hierarchical voxel grid (the structure movie-VFX volumetrics run on) with no per-node pointers, cache-friendly and drop-in faster. <strong><a href="https://github.com/ethz-asl/wavemap">wavemap (ETH, 2023)</a></strong> compresses occupancy with wavelets, storing coarse where the world is boring and fine where it is not.</p>
+<h3>Distance Fields: How Far Is the Nearest Surface?</h3>
+<p>A <strong>TSDF</strong> (truncated signed distance field) stores, in a narrow band around surfaces, the signed distance to the surface: negative inside, positive outside, zero at the wall. Integrate outward and you get an <strong>ESDF</strong> (Euclidean SDF) where <em>every</em> cell knows its distance to the nearest obstacle, and the gradient points away from trouble, which is exactly the quantity trajectory optimizers consume. The reference pipeline is <strong><a href="https://arxiv.org/abs/1611.03631">Voxblox (Oleynikova et al., 2016)</a></strong>; its GPU descendant <strong><a href="https://github.com/nvidia-isaac/nvblox">nvblox (NVIDIA)</a></strong> runs real time on a Jetson and is the name to drop when the target platform is NVIDIA edge hardware.</p>
+<h3>The Pragmatic Middle: 2.5D and Meshes</h3>
+<p>Legged and off-road robots often want an <strong>elevation map</strong> (a 2.5D grid: one height, or a small height distribution, per cell), via <code>grid_map</code> and <code>elevation_mapping</code> from ANYbotics. It is dramatically cheaper than full 3D and matches how walking controllers think. <strong>Meshes</strong>, extracted from a TSDF by marching cubes or fitted by Poisson reconstruction, are the product for humans: inspection reports, digital twins, game-engine simulation. Few planners consume meshes directly.</p>
+<p>Concrete numbers anchor this in interviews. Back-of-envelope storage for one 100 m x 100 m warehouse with 8 m ceilings:</p>
+<table>
+  <tr><th>Map Product</th><th>Resolution</th><th>Ballpark Size</th></tr>
+  <tr><td>2D occupancy grid (PGM + YAML)</td><td>5 cm</td><td>2000 x 2000 cells, 4 MB raw, under 1 MB compressed</td></tr>
+  <tr><td>SLAM Toolbox serialized posegraph</td><td>n/a</td><td>tens of MB (it stores the raw scans per node)</td></tr>
+  <tr><td>Registered raw point cloud</td><td>full</td><td>10 to 30 M points, 160 to 500 MB as PCD</td></tr>
+  <tr><td>OctoMap (.bt file)</td><td>10 cm</td><td>5 to 20 MB on disk, much more in RAM</td></tr>
+  <tr><td>TSDF (voxblox)</td><td>10 cm, 40 cm truncation</td><td>30 to 100 MB in RAM, surface band only</td></tr>
+  <tr><td>ESDF, dense</td><td>20 cm</td><td>10 M voxels x 4 B = 40 MB</td></tr>
+  <tr><td>Elevation 2.5D grid</td><td>10 cm</td><td>1000 x 1000 x 4 B = 4 MB</td></tr>
+  <tr><td>Decimated mesh</td><td>adaptive</td><td>10 to 50 MB</td></tr>
+</table>
+<div class="keypoint">The one-liner: occupancy answers "may I enter this cell?" (graph-search planners, exploration, raycast fusion); TSDF/ESDF answers "how far is the nearest surface, and in which direction?" (gradient-based trajectory optimization). Planners often want the ESDF; the ESDF is built from a TSDF or an occupancy map. Ship the cheapest product the consumer can eat.</div>
+<p>The research frontier makes the map a small neural network holding an implicit SDF: <a href="https://arxiv.org/abs/2401.09101">PIN-SLAM (2024)</a> and SHINE-Mapping. That thread continues in Chapter 6.</p>
+
+<h2><span class="sec-no">3.12</span>Reading List, in Priority Order</h2>
+<a class="paper" href="https://arxiv.org/abs/2209.15397"><span class="p-title">KISS-ICP: In Defense of Point-to-Point ICP</span><span class="p-meta">Vizzo, Guadagnino, Mersch, Wiesmann, Behley, Stachniss · RA-L 2023 · arXiv:2209.15397 · github.com/PRBonn/kiss-icp</span><span class="p-why">Short and readable, the one paper here to read cover to cover. Teaches what actually matters in lidar odometry by deleting everything that does not.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2107.06829"><span class="p-title">FAST-LIO2: Fast Direct LiDAR-Inertial Odometry</span><span class="p-meta">Xu, Cai, He, Lin, Zhang · 2021 · arXiv:2107.06829 · github.com/hku-mars/FAST_LIO</span><span class="p-why">The current default LIO. Read for the iterated error-state filter and the direct, feature-free registration argument.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2102.10808"><span class="p-title">ikd-Tree: An Incremental K-D Tree for Robotic Applications</span><span class="p-meta">Cai, Xu, Zhang · 2021 · arXiv:2102.10808 · github.com/hku-mars/ikd-Tree</span><span class="p-why">The data structure underneath FAST-LIO2. Incremental map structures are an interview topic of their own.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2007.00258"><span class="p-title">LIO-SAM: Tightly-Coupled Lidar Inertial Odometry via Smoothing and Mapping</span><span class="p-meta">Shan, Englot, Meyers, Wang, Ratti, Rus · IROS 2020 · arXiv:2007.00258</span><span class="p-why">Study its factor-graph diagram, the cleanest picture of odometry, IMU preintegration, GPS, and loop factors sharing one graph.</span></a>
+<a class="paper" href="https://research.google/pubs/real-time-loop-closure-in-2d-lidar-slam/"><span class="p-title">Real-Time Loop Closure in 2D LIDAR SLAM (Cartographer)</span><span class="p-meta">Hess, Kohler, Rapp, Andor · ICRA 2016 · docs: google-cartographer.readthedocs.io</span><span class="p-why">For the submap architecture and the branch-and-bound loop search, an exact global search made real time by bounding.</span></a>
+<a class="paper" href="https://github.com/gisbi-kim/scancontext"><span class="p-title">Scan Context: Egocentric Spatial Descriptor for Place Recognition</span><span class="p-meta">Kim, Kim · IROS 2018 · github.com/gisbi-kim/scancontext</span><span class="p-why">The lidar place-recognition baseline everything since gets compared to. The polar-image trick is explainable in one whiteboard minute.</span></a>
+<a class="paper" href="https://www.ri.cmu.edu/pub_files/2014/7/Ji_LidarMapping_RSS2014_v8.pdf"><span class="p-title">LOAM: Lidar Odometry and Mapping in Real-Time</span><span class="p-meta">Zhang, Singh · RSS 2014</span><span class="p-why">Skim for the edge/plane feature idea and the two-speed odometry architecture everyone since has inherited.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2203.03749"><span class="p-title">DLIO: Direct LiDAR-Inertial Odometry with Continuous-Time Motion Correction</span><span class="p-meta">Chen, Nemiroff, Lopez · ICRA 2023 · arXiv:2203.03749 · github.com/vectr-ucla/direct_lidar_inertial_odometry</span><span class="p-why">The cleanest entry point into continuous-time deskew, and a strong performer on aggressive motion.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1611.03631"><span class="p-title">Voxblox: Incremental 3D ESDFs for On-Board MAV Planning</span><span class="p-meta">Oleynikova, Taylor, Fehr, Siegwart, Nieto · 2016 · arXiv:1611.03631</span><span class="p-why">The TSDF-to-ESDF pipeline that connects mapping to planning; Chapter 8 depends on this thread.</span></a>
+<a class="paper" href="https://octomap.github.io/"><span class="p-title">OctoMap: An Efficient Probabilistic 3D Mapping Framework Based on Octrees</span><span class="p-meta">Hornung, Wurm, Bennewitz, Stachniss, Burgard · Autonomous Robots 2013 · github.com/OctoMap/octomap</span><span class="p-why">The classic, read for log-odds updates and the free/unknown distinction. Then look at Bonxai (github.com/facontidavide/Bonxai) as its modern replacement.</span></a>
+
+<h2><span class="sec-no">3.13</span>Interview Questions, Answer Out Loud First</h2>
+<details class="qa"><summary>Lidar odometry drifts along the axis of a long corridor. Why, and what do you do about it?</summary><div class="a">
+<p><strong>Why:</strong> geometric degeneracy. Both walls are parallel planes, so sliding the scan along the corridor axis changes nothing about how well it matches. That direction is unobservable to scan matching, and the estimate wanders freely along it while staying accurate in the other five.</p>
+<p><strong>Detect:</strong> eigen-decompose the matcher's Hessian (or information matrix). A near-zero eigenvalue flags the sick direction online, and the eigenvector names it (Zhang, Kaess, Singh, ICRA 2016).</p>
+<p><strong>Fix:</strong> fuse a sensor that does observe that axis (wheel odometry, IMU velocity), solve the update only in the well-conditioned subspace, and let a loop closure at the corridor's end repair whatever leaked through.</p>
+</div></details>
+<details class="qa"><summary>Point-to-point versus point-to-plane ICP: what changes and why does it matter?</summary><div class="a">
+<p>Point-to-point minimizes the distance between matched sample points; point-to-plane minimizes only the component along the target's surface normal. The physical justification is that the lidar never samples the same physical point twice, so tangential offsets between correspondences are sampling artifacts, not errors. Point-to-plane lets scans slide along walls into place, converging in a handful of iterations on structured scenes where point-to-point takes dozens. The price is losing the closed-form solve, replaced by a small Gauss-Newton step per iteration. GICP generalizes both by matching local Gaussians with Mahalanobis distance.</p>
+</div></details>
+<details class="qa"><summary>Why is FAST-LIO2 fast?</summary><div class="a">
+<p>Three specific reasons. It registers raw points directly, so there is no feature extraction stage and nothing breaks on unusual scan patterns. The map lives in an ikd-tree, so map updates are incremental insertions with lazy re-balancing instead of full kd-tree rebuilds. And the estimator is an iterated error-state Kalman filter with a formulation that keeps the gain computation in the dimension of the state rather than the measurement, so thousands of point residuals per update stay cheap. The follow-up worth volunteering: Faster-LIO swapped the ikd-tree for a sparse voxel hash and got another 1.5 to 2x, evidence the data structure was the bottleneck.</p>
+</div></details>
+<details class="qa"><summary>How does OctoMap update a cell from a laser scan?</summary><div class="a">
+<p>For each beam, raycast from the sensor to the hit point. Every cell the ray passes through gets its log-odds occupancy decremented (evidence of free space); the endpoint cell gets incremented (evidence of a surface). Log-odds are clamped to a min and max so no cell becomes so certain it can never change its mind, which matters in dynamic environments. Cells never touched by any ray stay unknown, a distinct state from free, and planners rely on that distinction.</p>
+</div></details>
+<details class="qa"><summary>A loop closure fires mid-mission and the map jumps 30 cm. What happens to navigation?</summary><div class="a">
+<p>The pose graph relaxed and the map→odom correction jumped, but the odom→base_link chain the local controller consumes stayed smooth, so the wheels never see a teleport. The global planner, which works in the map frame, replans on the corrected map. This frame-contract answer is developed fully in Chapter 8, and giving it unprompted is what marks the answer as senior.</p>
+</div></details>
+<details class="qa"><summary>What does a false loop closure cost, and how do you guard against it?</summary><div class="a">
+<p>A false loop factor welds two different places together, and the optimizer bends the entire trajectory to satisfy it; one bad edge can outweigh an hour of honest drift. Guard in layers: a descriptor (Scan Context or similar) only proposes candidates, a full registration with a strict fitness and inlier-overlap gate verifies them, and the loop edges that survive still get a robust kernel or switchable constraint in the graph so a rare escapee is down-weighted instead of obeyed. If a deployed map suddenly shears and never recovers, a false closure is the first suspect.</p>
+</div></details>
+<details class="qa"><summary>When would you choose Cartographer over FAST-LIO2?</summary><div class="a">
+<p>Cartographer for 2D indoor mapping with a weak or absent IMU, when you want the built-in occupancy grid output and a pure-localization mode as one package. FAST-LIO2 for 3D, aggressive motion, and a decent IMU, when you need the fastest, most robust odometry and are willing to assemble loop closure and map products around it yourself. Different jobs: a complete 2D system versus a best-in-class 3D odometry engine.</p>
+</div></details>
+<details class="qa"><summary>When does 2D SLAM beat 3D, honestly?</summary><div class="a">
+<p>Flat single-floor sites with walls in the scan plane: warehouses, hospitals, offices. There, 2D wins on sensor cost (roughly 100 versus several thousand dollars), compute (single-digit percent of one core), tooling maturity (SLAM Toolbox's lifelong mapping and localization mode), and the fact that Nav2 eats the occupancy grid directly. It loses the moment the planar assumption breaks: ramps, multiple floors, overhangs the scan plane misses (forklift tines are the canonical incident), or outdoor terrain. The senior answer names the boundary rather than a winner.</p>
+</div></details>
+<details class="qa"><summary>Design a mapping stack for a robot you know well. Which pieces from this chapter, and why?</summary><div class="a">
+<p>Structure the answer as the skeleton. Pick an odometry engine: KISS-ICP first as the baseline, FAST-LIO2 if there is a good IMU and 3D lidar, SLAM Toolbox if the site is flat and the lidar is planar. Add Scan Context proposals with GICP verification for loop closure, a GTSAM pose graph with robust kernels on the loop edges, and keyframes at 1 m or 15 degrees. Then generate two map products: an occupancy grid (Bonxai or OctoMap) for planning and coverage, and a TSDF/ESDF (nvblox if there is a Jetson) for smooth trajectory optimization. Close by naming the failure mode you would monitor, minimum Hessian eigenvalue for degeneracy, because connecting the pipeline to operations is what makes the answer land.</p>
+</div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

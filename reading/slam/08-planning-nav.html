@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 8 · Planning, Navigation &amp; Localization · SLAM: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">08</div>
+  <div class="chapter-kicker">Chapter Eight · Putting the Map to Work</div>
+  <h1>Planning, Navigation &amp; Localization</h1>
+  <p class="chapter-sub">A map nobody drives on is a screensaver: this chapter is what the robot does with everything the previous chapters built, starting with one contract that unlocks half the questions in this book.</p>
+</header>
+
+<h2><span class="sec-no">8.1</span>The Frame Contract</h2>
+<p>If you take one thing from this chapter, take this section. It is the single most senior thing you can say in a navigation interview, and it takes ninety seconds to say well.</p>
+<pre>map ──(localization: AMCL / SLAM loop closure)──► odom ──(wheel/VIO odometry)──► base_link</pre>
+<p>Chapter 0 introduced these frames; now the payoff. Two transforms, two personalities:</p>
+<ul>
+  <li><strong>odom → base_link</strong> is published by odometry. It is continuous, smooth, and high-rate, and it drifts. It never jumps. Not once, not ever.</li>
+  <li><strong>map → odom</strong> is published by the localizer or the SLAM system. It is the <em>correction</em>: the difference between where odometry thinks you are and where you actually are. It jumps whenever a loop closure or a relocalization fires, and that is fine, because nothing latency-critical reads it directly.</li>
+</ul>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <rect x="30" y="60" width="130" height="44" rx="8" fill="none" stroke="#23201a" stroke-width="2"/>
+  <text x="95" y="87" text-anchor="middle" font-size="15" fill="#23201a">map</text>
+  <rect x="295" y="60" width="130" height="44" rx="8" fill="none" stroke="#23201a" stroke-width="2"/>
+  <text x="360" y="87" text-anchor="middle" font-size="15" fill="#23201a">odom</text>
+  <rect x="560" y="60" width="130" height="44" rx="8" fill="none" stroke="#23201a" stroke-width="2"/>
+  <text x="625" y="87" text-anchor="middle" font-size="15" fill="#23201a">base_link</text>
+  <line x1="160" y1="82" x2="290" y2="82" stroke="#b3401e" stroke-width="2"/>
+  <polygon points="290,82 280,77 280,87" fill="#b3401e"/>
+  <line x1="425" y1="82" x2="555" y2="82" stroke="#0e5f5b" stroke-width="2"/>
+  <polygon points="555,82 545,77 545,87" fill="#0e5f5b"/>
+  <text x="225" y="48" text-anchor="middle" font-size="12" fill="#b3401e">localizer / SLAM</text>
+  <text x="225" y="32" text-anchor="middle" font-size="12" fill="#b3401e">correct, low-rate, JUMPS</text>
+  <text x="490" y="48" text-anchor="middle" font-size="12" fill="#0e5f5b">odometry</text>
+  <text x="490" y="32" text-anchor="middle" font-size="12" fill="#0e5f5b">smooth, high-rate, drifts</text>
+  <path d="M 165 160 L 205 160 L 205 140 L 250 140 L 250 165 L 285 165" fill="none" stroke="#b3401e" stroke-width="2"/>
+  <text x="225" y="195" text-anchor="middle" font-size="12" fill="#b3401e">step: fine to jump here</text>
+  <path d="M 430 160 C 460 150, 490 158, 515 150 C 535 144, 545 148, 555 143" fill="none" stroke="#0e5f5b" stroke-width="2"/>
+  <text x="490" y="195" text-anchor="middle" font-size="12" fill="#0e5f5b">smooth: never allowed to jump</text>
+</svg>
+</div>
+<figcaption>Fig 8.1: the tf chain, with discontinuity confined to map→odom and smoothness guaranteed on odom→base_link.</figcaption>
+</figure>
+<p>Why split them at all? Because two consumers want contradictory things. The local controller, the code deciding wheel velocities right now, needs a pose that is <em>continuous</em>: a feedback loop that sees its input teleport 30&nbsp;cm will command a violent correction for motion that never happened. The global planner needs a pose that is <em>correct</em>, drift included, or its paths start and end in the wrong places. You cannot have both properties in one transform, so ROS gives you two and composes them. The controller lives in odom. The planner lives in map. When loop closure snaps the map, map→odom absorbs the entire jump, the global path replans, and the wheels never feel a thing.</p>
+<div class="keypoint">"Loop closure jumped the map mid-navigation, what happens?" Answer: the map→odom correction jumps, odom→base_link stays smooth, the global planner replans in the map frame, and the controller, isolated in the odom frame, never sees a discontinuity. Delivered calmly, this wins the question from Chapter 3 and marks you as someone who has run a real robot.</div>
+
+<h2><span class="sec-no">8.2</span>Localization on Yesterday's Map</h2>
+<p>SLAM built the map. In deployment you usually freeze it and just <em>localize</em>: cheaper, more stable, repeatable, and auditable. Six times out of ten the localizer is AMCL, so we go deep on it, then survey the alternatives.</p>
+<h3>AMCL, the Particle Filter You Actually Ship</h3>
+<p>Adaptive Monte-Carlo Localization is the particle filter from Chapter 1 applied to one specific problem: estimate (x, y, θ) against a known 2D occupancy grid. A few thousand pose hypotheses (particles) live in the map. Each cycle: <em>predict</em> every particle forward using odometry plus sampled noise, <em>weight</em> each by how well the live laser scan agrees with the map as seen from that particle, <em>resample</em> so heavy particles multiply and light ones die. The "adaptive" part is KLD sampling: the particle count itself shrinks when the cloud is tight and confident, and grows when it is spread out and unsure, so you pay compute only for uncertainty.</p>
+<p>AMCL has dozens of parameters and about ten that matter. Learn these and you can tune it anywhere:</p>
+<table>
+  <tr><th>Parameter</th><th>What it controls</th><th>Symptoms when wrong</th></tr>
+  <tr><td><code>min_particles</code> / <code>max_particles</code></td><td>Bounds on the KLD-adapted particle count (defaults 500 / 2000).</td><td>Too few: the true pose loses its particles in ambiguous areas. Too many: CPU burn with no accuracy gain.</td></tr>
+  <tr><td><code>laser_model_type</code></td><td><code>likelihood_field</code> (default, fast, smooth) vs <code>beam</code> (models max-range and unexpected-obstacle physics, costlier).</td><td>Likelihood field degrades gracefully with clutter; beam is brittle unless its z-weights are tuned.</td></tr>
+  <tr><td><code>z_hit</code>, <code>z_rand</code>, <code>sigma_hit</code></td><td>Mixture weights of the measurement model: how much you trust a beam that matches the map vs pure noise.</td><td>Overconfident <code>z_hit</code> makes the filter collapse onto locally good, globally wrong matches.</td></tr>
+  <tr><td><code>alpha1</code>–<code>alpha4</code></td><td>Odometry noise: rotation from rotation, rotation from translation, translation from translation, translation from rotation.</td><td>Too small: the cloud can't spread enough to track real slip and diverges. Too large: the cloud smears and the pose gets soft.</td></tr>
+  <tr><td><code>update_min_d</code> / <code>update_min_a</code></td><td>Motion thresholds (0.25&nbsp;m / 0.2&nbsp;rad by default): no filter update until the robot has moved this much.</td><td>Set to zero "for accuracy" and you resample constantly while standing still, starving diversity.</td></tr>
+  <tr><td><code>recovery_alpha_slow</code> / <code>recovery_alpha_fast</code></td><td>Two exponential averages of particle weights; when short-term likelihood drops well below long-term, AMCL injects random particles (0.0 disables; try 0.001 / 0.1).</td><td>Disabled: a delocalized robot stays delocalized forever. Too aggressive: random particles constantly dilute a good estimate.</td></tr>
+</table>
+<h3>Global Relocalization and the Kidnapped Robot</h3>
+<p>Power the robot on anywhere, or carry it while it's off (the classic "kidnapped robot" test). Calling AMCL's <code>reinitialize_global_localization</code> service scatters particles uniformly over free space and lets a few seconds of driving kill the wrong ones. It works when the environment is distinctive and fails in symmetric ones: two identical corridors produce a genuinely <strong>multimodal</strong> belief, two blobs of probability, and only driving past something asymmetric resolves it. Particle filters can represent two blobs; a Kalman filter, being a single Gaussian, cannot. That is the whole reason Monte-Carlo methods own global localization.</p>
+<dl class="jargon">
+  <dt>Kidnapped robot problem</dt><dd>The robot is moved without being told; the localizer must notice its belief is wrong and recover globally, not just track.</dd>
+  <dt>Particle deprivation</dt><dd>Resampling killed all particles near the true pose. Nobody is left to be right; the filter is confidently wrong.</dd>
+  <dt>KLD sampling</dt><dd>Adapting the particle count so the sample-based belief stays within a KL-divergence bound of the true posterior. The A in AMCL.</dd>
+  <dt>Likelihood field</dt><dd>A precomputed distance-to-nearest-obstacle grid; scoring a beam becomes one lookup instead of a raycast.</dd>
+</dl>
+<h3>The Alternatives, and How to Pick</h3>
+<table>
+  <tr><th>Map you built</th><th>Localizer</th><th>Mechanics</th></tr>
+  <tr><td>2D occupancy grid (Chapter 3)</td><td>AMCL</td><td>Particle filter against the grid, as above. Default answer for 2D.</td></tr>
+  <tr><td>SLAM Toolbox pose graph</td><td>SLAM Toolbox localization mode</td><td>Scan-to-graph matching with a small rolling buffer of temporary nodes; snappier than AMCL in geometry-rich spaces, no particle machinery to tune.</td></tr>
+  <tr><td>LiDAR point map (FAST-LIO2, Chapter 3)</td><td>Scan-to-map ICP/NDT (hdl_localization, DLL, FAST-LIO-Localization)</td><td>Register each live scan against the saved cloud, seeded by an IMU-predicted guess. Accurate; needs a decent initial pose.</td></tr>
+  <tr><td>RTAB-Map database (Chapter 5)</td><td>Localization mode (<code>Mem/IncrementalMemory=false</code>)</td><td>Bag-of-words appearance retrieval plus PnP publishes the map→odom correction; proximity links refine on re-traversal.</td></tr>
+  <tr><td>Visual keyframe map (Chapter 4)</td><td>DBoW2 relocalization, or hloc-style retrieval + PnP</td><td>Match live features to the keyframe database. Camera-only relocalization sees the posters a lidar cannot.</td></tr>
+  <tr><td>Neural / 3DGS map (Chapter 6)</td><td>Render-and-compare pose optimization</td><td>Research-stage; not what you say you'd ship this year.</td></tr>
+</table>
+<p>The picking rule is short: match the localizer to the map you actually have and the sensor you actually trust. If you built a 2D grid and carry a planar lidar, run AMCL and spend your week elsewhere. Reach for scan-to-map ICP when you need centimeter repeatability, and for visual relocalization when geometry is ambiguous but appearance is not.</p>
+
+<h2><span class="sec-no">8.3</span>From Map to Plannable Structure</h2>
+<p>Planners do not read occupancy grids; they read <strong>costmaps</strong>. Nav2's <code>costmap_2d</code> builds one by stacking layers, each a plugin that paints cost into a shared grid:</p>
+<ul>
+  <li><strong>Static layer</strong>: the SLAM map from disk. Walls that existed yesterday.</li>
+  <li><strong>Obstacle layer</strong>: live sensor marking and clearing via raycast. Things that exist right now.</li>
+  <li><strong>Voxel layer / STVL</strong>: 3D-aware versions. The voxel layer keeps a column of voxels per cell and projects down; the <a href="https://github.com/SteveMacenski/spatio_temporal_voxel_layer">Spatio-Temporal Voxel Layer</a> replaces raycast-clearing with time-based decay, which scales to 3D lidars and depth cameras without eating a CPU core.</li>
+  <li><strong>Inflation layer</strong>: paints a decaying cost skirt around every lethal cell, so "legal but uncomfortable" exists as a concept the planner can trade off.</li>
+</ul>
+<p>The inflation math is worth knowing exactly, because it explains the most mis-set parameter in ROS. A cell containing an obstacle costs 254 (lethal). Any cell closer than the robot's <em>inscribed radius</em> costs 253: the center being there guarantees a collision, no orientation can save you. Beyond that, cost decays exponentially:</p>
+<pre>cost(d) = 252 · exp( −cost_scaling_factor · (d − inscribed_radius) )   for d &gt; inscribed_radius,
+          until d &gt; inflation_radius, where cost = 0</pre>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 720 250" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <line x1="70" y1="200" x2="680" y2="200" stroke="#23201a" stroke-width="2"/>
+  <line x1="70" y1="200" x2="70" y2="30" stroke="#23201a" stroke-width="2"/>
+  <text x="375" y="235" text-anchor="middle" font-size="13" fill="#23201a">distance from obstacle cell →</text>
+  <text x="40" y="115" text-anchor="middle" font-size="13" fill="#23201a" transform="rotate(-90 40 115)">cost</text>
+  <rect x="70" y="40" width="60" height="160" fill="#b3401e" opacity="0.25"/>
+  <line x1="70" y1="40" x2="130" y2="40" stroke="#b3401e" stroke-width="3"/>
+  <text x="100" y="30" text-anchor="middle" font-size="12" fill="#b3401e">lethal 254</text>
+  <line x1="130" y1="48" x2="240" y2="48" stroke="#b3401e" stroke-width="3"/>
+  <text x="185" y="38" text-anchor="middle" font-size="12" fill="#b3401e">inscribed 253</text>
+  <path d="M 240 48 C 300 60, 340 110, 400 150 C 450 180, 510 195, 560 199" fill="none" stroke="#0e5f5b" stroke-width="3"/>
+  <text x="430" y="120" font-size="12" fill="#0e5f5b">252·e^(−k·(d − r_ins))</text>
+  <line x1="240" y1="200" x2="240" y2="42" stroke="#a97b1f" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="240" y="215" text-anchor="middle" font-size="12" fill="#a97b1f">inscribed_radius</text>
+  <line x1="560" y1="200" x2="560" y2="90" stroke="#a97b1f" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="560" y="215" text-anchor="middle" font-size="12" fill="#a97b1f">inflation_radius</text>
+  <text x="625" y="192" font-size="12" fill="#23201a">free 0</text>
+</svg>
+</div>
+<figcaption>Fig 8.2: the inflation cost profile, lethal core, inscribed plateau, exponential skirt.</figcaption>
+</figure>
+<p>Why is <code>inflation_radius</code> the most mis-set parameter in ROS? Because people set it to "about the robot radius" and stop, which produces a costmap that is lethal-or-free with almost no gradient in between. Every planner and every controller critic in the sections below reads this cost surface. With no skirt, A* happily plans one cell away from walls, MPPI's cost critic has nothing to push against until it is already too late, and your robot hugs walls with total confidence. The guidance in the Nav2 docs is the opposite of the folk habit: inflate generously (well past the robot radius) with a gentle <code>cost_scaling_factor</code>, so cost decays smoothly across most of the free space and everything downstream gets a usable gradient.</p>
+<p>One more structural fact: there are two costmaps. The <strong>global costmap</strong> covers the whole map in the map frame and feeds the planner. The <strong>local costmap</strong> is a small <em>rolling window</em> (a few meters square) centered on the robot, usually in the odom frame, updated fast, and feeds the controller. This is the frame contract again, in costmap form: the global one is allowed to be big, slow, and jump-corrected; the local one must be small, fast, and smooth.</p>
+<p>For 3D platforms the plannable structure changes representation: project OctoMap down to 2.5D, or build a TSDF→ESDF distance field (Voxblox, nvblox, FIESTA, all from Chapter 3) so every point in space knows its distance and direction to the nearest obstacle.</p>
+<div class="keypoint">The distinction that organizes all of planning: graph-search planners want discretized cost; optimization-based planners want distance fields and their gradients. Costmaps serve the first family, ESDFs the second.</div>
+
+<h2><span class="sec-no">8.4</span>Global Planners</h2>
+<p><strong>Dijkstra</strong> expands cells from the start, cheapest total cost first, and is complete and optimal on the grid. <strong>A*</strong> adds a heuristic, an optimistic guess of remaining cost (straight-line distance, usually), and expands best-guess-first instead. Same guarantees if the heuristic never overestimates, far fewer cells touched. That is the entire difference; everything else in this section is about what "the grid" fails to capture.</p>
+<p>The lineage in Nav2, oldest first:</p>
+<ul>
+  <li><strong>NavFn</strong>: the legacy default, a Dijkstra (optionally A*) wavefront over the costmap with gradient descent to extract the path. Reliable, fast, and it treats your robot as a holonomic point.</li>
+  <li><strong>Smac Planner 2D</strong>: a modern, cost-aware A* over the same grid, with smoothing built in. The drop-in upgrade for differential-drive robots that can turn in place.</li>
+  <li><strong>Smac Hybrid-A*</strong>: search in (x, y, θ) where every expansion is a <em>motion primitive</em>, a short Dubins or Reeds-Shepp arc the vehicle can physically drive. Periodically it attempts an <em>analytic expansion</em>: shoot one exact Dubins/RS curve straight at the goal, and if it is collision-free, finish early. This is the direct descendant of the <a href="https://ai.stanford.edu/~ddolgov/papers/dolgov_gpp_stair08.pdf">DARPA Urban Challenge planner</a> and the answer for anything car-like.</li>
+  <li><strong>Smac State Lattice</strong>: like Hybrid-A* but the primitives come from a precomputed lattice generated for <em>your</em> kinematics, including omni and legged-ish motion models, instead of hardcoded car curves.</li>
+</ul>
+<p>The phrase to internalize: <strong>grid-feasible is not drivable</strong>. NavFn will cheerfully produce a path with a 90° corner in a hallway for a robot with a 1.2&nbsp;m turning radius. Every cell of that path is free space; no continuous motion of that vehicle can follow it. Kinematically constrained platforms need the constraint <em>inside the search</em>, not smoothed on afterward, which is exactly what Hybrid-A* and State Lattice do.</p>
+<p>Off the grid entirely: <strong>sampling-based planners</strong> (RRT, RRT*, PRM, in <a href="https://ompl.kavrakilab.org/">OMPL</a> and MoveIt) grow a random tree through free space instead of discretizing it. They are the answer for high-dimensional problems; a 7-joint arm lives in 7-D, where grids explode exponentially. RRT* is asymptotically optimal, meaning the path keeps improving as samples accumulate.</p>
+<div class="analogy">A* is checking every square of graph paper, cleverly ordered. RRT is throwing darts into the room and connecting the ones you can walk between. Graph paper wins in 2D; darts win in 7-D, because in 7-D there isn't enough graph paper in the universe.</div>
+
+<h2><span class="sec-no">8.5</span>Local Planners and Controllers</h2>
+<p>The global path is a suggestion. The controller turns it into velocity commands at 20&nbsp;Hz while dodging whatever the map didn't know about. Four names cover the field:</p>
+<ul>
+  <li><strong>DWA / DWB</strong> (<a href="https://www.ri.cmu.edu/pub_files/pub1/fox_dieter_1997_1/fox_dieter_1997_1.pdf">Fox, Burgard, Thrun, 1997</a>): sample reachable (v, ω) pairs from the current velocity's "dynamic window", forward-simulate each for a second or two, score the arcs with critics (progress, clearance, path distance), pick the winner. DWB is the ROS 2 port with pluggable critics. Legacy, but the vocabulary (rollout, critic, scoring) survives in everything since.</li>
+  <li><strong>TEB</strong>, Timed Elastic Band (<a href="https://github.com/rst-tu-dortmund/teb_local_planner">Rösmann et al.</a>): treat the local trajectory as an elastic band of poses <em>with timestamps</em> and optimize it as a sparse graph under kinodynamic constraints, obstacles pushing, the path pulling, time shrinking. True trajectory optimization, excellent for car-like footprints, and famously fiddly: it optimizes within one homotopy class and can oscillate when two ways around an obstacle score similarly.</li>
+  <li><strong>MPPI</strong>, Model Predictive Path Integral (<a href="https://ieeexplore.ieee.org/document/7989202">Williams et al., ICRA 2017</a>), the Nav2 default since Iron (2023): every cycle, sample a <em>batch</em> of control sequences (thousands of rollouts, <code>batch_size</code> × <code>time_steps</code>), simulate each through the motion model, score each rollout with a sum of <strong>critics</strong> (cost functions: obstacle cost, path alignment, path following, goal, prefer-forward, constraint limits), then blend the rollouts into one command with softmax weighting controlled by <code>temperature</code>. Low temperature acts like argmax over rollouts, sharp but jittery; higher temperature averages more broadly and smooths. No gradients required, so critics can be anything, and the sampling is embarrassingly parallel.</li>
+  <li><strong>Regulated Pure Pursuit</strong> (<a href="https://github.com/ros-navigation/navigation2/tree/main/nav2_regulated_pure_pursuit_controller">nav2_regulated_pure_pursuit_controller</a>): chase a lookahead point on the path, with speed regulated down by curvature and obstacle proximity. It does not avoid obstacles; it tracks a path exactly. That exactness is why it wins at docking, row-following, and anywhere the path <em>is</em> the specification.</li>
+</ul>
+<table>
+  <tr><th>Controller</th><th>Mechanism</th><th>Wins when</th><th>Honest weakness</th></tr>
+  <tr><td>DWB</td><td>Sampled velocity arcs + critics</td><td>Simple diff-drive, low CPU budget</td><td>Short horizon; arcs only; dated</td></tr>
+  <tr><td>TEB</td><td>Elastic-band graph optimization</td><td>Car-like kinematics, tight maneuvers with reversing</td><td>Homotopy flipping, many knobs, heavy per-cycle</td></tr>
+  <tr><td>MPPI</td><td>Sampled control rollouts, critic-weighted blend</td><td>Cluttered, dynamic spaces; arbitrary cost terms</td><td>Needs CPU; tuning is critic-weight whack-a-mole until you're systematic (Setup B)</td></tr>
+  <tr><td>Regulated Pure Pursuit</td><td>Geometric path tracking with speed regulation</td><td>Docking, aisles, crop rows, any exact-path job</td><td>No avoidance at all; garbage path in, garbage motion out</td></tr>
+</table>
+<p>The senior framing: DWB and TEB are <em>optimizers over a small structured space</em> (arcs, one band); MPPI is a <em>sampler over an unstructured one</em>. Sampling costs compute and buys robustness to non-convex, fast-changing cost surfaces, which is precisely what a cafe full of chair legs and ankles is.</p>
+
+<h2><span class="sec-no">8.6</span>Behavior Trees Run the Show</h2>
+<p>Above the planners sits orchestration. Nav2's <code>bt_navigator</code> runs a <strong>behavior tree</strong> loaded from XML; the default, <code>navigate_to_pose_w_replanning_and_recovery.xml</code>, reads roughly as: replan the global path once a second (a <code>RateController</code> wrapping <code>ComputePathToPose</code>), follow it continuously (<code>FollowPath</code>), and if either fails, walk a recovery sequence. The recoveries live in the behavior server: <strong>clear costmaps</strong> (forget possibly-stale obstacles), <strong>spin</strong> (rotate in place to refresh perception), <strong>wait</strong> (the world may unblock itself; people move), <strong>back up</strong> (get out of a lethal pocket). Each recovery is followed by a retry of the thing that failed.</p>
+<p>Why did BTs replace the state machines that ran ROS 1's move_base? Because recovery logic is combinatorial. A finite-state machine encoding "if planning fails twice, clear the global costmap, but if following fails, first wait then spin, unless we already spun" turns into a transition-table hairball nobody can review. A BT expresses the same policy as a readable tree of fallbacks and sequences, each node reusable, the whole thing swappable per robot via one XML file, no recompilation. You can hand a fleet operator a different recovery policy as a config change.</p>
+<p>Two extensions you should be able to sketch in an interview: <strong>waypoint following</strong> (<code>nav2_waypoint_follower</code> wraps navigate-to-pose in a loop, with a task-executor plugin at each stop: take a photo, wait for confirmation, charge) and <strong>custom recoveries</strong> (implement <code>nav2_core::Behavior</code> as a plugin, expose it as a BT action node, insert it into the XML; a common one is "call for help", which pings a human and blocks until teleop releases it).</p>
+<div class="keypoint">Nav2 in one sentence: a behavior tree coordinating a planner server, a controller server, a smoother, and a behavior server over lifecycle-managed nodes, with two costmaps feeding them and one tf contract underneath. Say that sentence and every follow-up question lands on territory you have already mapped.</div>
+
+<div class="setup">
+<p><strong>Setup A: Nav2 on the map you saved in Chapter 3.</strong> Goal: load yesterday's map, localize with AMCL, and drive to a clicked goal, on Ubuntu 24.04 with ROS 2 Jazzy. Prereqs: the <code>~/maps/office.yaml</code> + <code>.pgm</code> pair from Chapter 3's worked setup (saved with <code>map_saver_cli</code>), a robot or sim publishing <code>/scan</code>, <code>/odom</code>, and the odom→base_link tf.</p>
+<pre>sudo apt install ros-jazzy-navigation2 ros-jazzy-nav2-bringup</pre>
+<p>The essential blocks of <code>~/nav2_params.yaml</code>. Every value below is a starting point, not gospel:</p>
+<pre>amcl:
+  ros__parameters:
+    base_frame_id: "base_link"
+    odom_frame_id: "odom"
+    global_frame_id: "map"
+    scan_topic: "scan"
+    min_particles: 500
+    max_particles: 2000
+    laser_model_type: "likelihood_field"
+    max_beams: 60
+    z_hit: 0.5
+    z_rand: 0.5
+    sigma_hit: 0.2
+    alpha1: 0.2   # rot noise from rot
+    alpha2: 0.2   # rot noise from trans
+    alpha3: 0.2   # trans noise from trans
+    alpha4: 0.2   # trans noise from rot
+    update_min_d: 0.25
+    update_min_a: 0.2
+    resample_interval: 1
+    recovery_alpha_slow: 0.001
+    recovery_alpha_fast: 0.1
+    transform_tolerance: 1.0
+
+local_costmap:
+  local_costmap:
+    ros__parameters:
+      global_frame: odom
+      rolling_window: true
+      width: 3
+      height: 3
+      resolution: 0.05
+      robot_radius: 0.22
+      plugins: ["obstacle_layer", "inflation_layer"]
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        observation_sources: scan
+        scan: {topic: /scan, marking: true, clearing: true}
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.55
+        cost_scaling_factor: 3.0
+
+global_costmap:
+  global_costmap:
+    ros__parameters:
+      global_frame: map
+      robot_radius: 0.22
+      resolution: 0.05
+      track_unknown_space: true
+      plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
+      static_layer:
+        plugin: "nav2_costmap_2d::StaticLayer"
+        map_subscribe_transient_local: true
+      obstacle_layer:
+        plugin: "nav2_costmap_2d::ObstacleLayer"
+        observation_sources: scan
+        scan: {topic: /scan, marking: true, clearing: true}
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        inflation_radius: 0.55
+        cost_scaling_factor: 3.0
+
+planner_server:
+  ros__parameters:
+    planner_plugins: ["GridBased"]
+    GridBased:
+      plugin: "nav2_smac_planner::SmacPlanner2D"
+      tolerance: 0.25
+      cost_travel_multiplier: 2.0
+
+controller_server:
+  ros__parameters:
+    controller_frequency: 20.0
+    controller_plugins: ["FollowPath"]
+    FollowPath:
+      plugin: "nav2_mppi_controller::MPPIController"
+      motion_model: "DiffDrive"
+      time_steps: 56
+      model_dt: 0.05
+      batch_size: 2000
+      vx_max: 0.5
+      wz_max: 1.9
+      temperature: 0.3
+      critics: ["ConstraintCritic", "CostCritic", "GoalCritic",
+                "GoalAngleCritic", "PathAlignCritic", "PathFollowCritic",
+                "PathAngleCritic", "PreferForwardCritic"]</pre>
+<p>Bring it up (two terminals), set the pose, send a goal, verify the tf chain:</p>
+<pre>ros2 launch nav2_bringup bringup_launch.py \
+    map:=$HOME/maps/office.yaml params_file:=$HOME/nav2_params.yaml
+ros2 launch nav2_bringup rviz_launch.py
+
+# In rviz: "2D Pose Estimate" click+drag at the robot's true pose,
+# watch the particle cloud converge, then "Nav2 Goal" somewhere reachable.
+
+ros2 run tf2_ros tf2_echo map base_link   # full chain resolves once AMCL has a pose</pre>
+<p>You should see: the particle cloud collapse from a wide fan to a tight cluster within a meter of driving, a green global path, and a robot that follows it. Classic failure symptoms:</p>
+<p><strong>1. No map→odom transform.</strong> Everything logs "Timed out waiting for transform". AMCL publishes nothing until it has an initial pose: set one in rviz, or set <code>set_initial_pose: true</code> with an <code>initial_pose</code> block for repeatable bringup.</p>
+<p><strong>2. Costmap is all lethal.</strong> The map renders as one purple slab and no path is ever found. Usual causes: <code>robot_radius</code> or inflation larger than your corridors, wrong map <code>resolution</code>/<code>origin</code> in the yaml, or the lidar seeing the robot's own frame and marking it (mask those beams or raise <code>min_obstacle_height</code>... check the driver's docs for beam filtering).</p>
+<p><strong>3. Robot ignores the goal.</strong> The BT rejects it instantly. The goal is in lethal or unknown space (check <code>track_unknown_space</code>), or the goal tool published in a frame other than map. <code>ros2 topic echo /goal_pose</code> shows the frame_id.</p>
+<p><strong>4. Spins in place at start.</strong> Either every local rollout collides (local costmap saturated: see symptom 2, but in the 3&nbsp;m window), or your <code>cmd_vel</code> angular sign is flipped at the base driver, so every correction makes the error worse. Rotate the robot by hand with teleop and watch <code>/odom</code> before blaming the controller.</p>
+</div>
+
+<h2><span class="sec-no">8.7</span>Safety Is a Separate Layer</h2>
+<p>The planner is not the safety system. Say that sentence early in any interview that touches deployment. The navigation stack is where you put intelligence; safety goes in layers below it, each simpler and more auditable than the one above:</p>
+<ul>
+  <li><strong>Nav2 collision monitor</strong>: a node between the controller and the base that watches raw sensor data against configured polygons (a stop zone, a slowdown zone, an approach zone that scales speed by time-to-collision) and clamps or zeroes <code>cmd_vel</code> regardless of what the controller wanted. Software, but simple software, with no map, no planner, no belief.</li>
+  <li><strong>Certified lidar safety fields</strong>: safety-rated scanners (SICK, Hokuyo UAM) evaluate configurable protective fields <em>inside the sensor</em> and open a hardware output when violated. No ROS in the loop. This is what a safety audit actually accepts.</li>
+  <li><strong>The e-stop chain</strong>: a hardware circuit (safety relays, STO inputs on motor drivers) that removes torque. It must function with every computer on the robot crashed. If your e-stop is a ROS topic, you do not have an e-stop.</li>
+</ul>
+<p>These layers exist because they answer at different timescales, which is the shape of the standard interview question: a person steps in front of the robot. The safety field reacts in milliseconds, independent of all software above it. The controller reacts within a control cycle, tens of milliseconds, steering rollouts away from the new cost. The costmap and global replan react in hundreds of milliseconds if the route must change entirely. Safety is the layer you certify; the other two are the layers you tune.</p>
+<div class="keypoint">Three timescales, three owners: milliseconds belong to certified hardware, tens of milliseconds to the controller, hundreds of milliseconds to the planner. Any design that makes the planner responsible for the first category fails review, and should.</div>
+
+<h2><span class="sec-no">8.8</span>SLAM and Navigation, Coupled Honestly</h2>
+<p>The clean story is "SLAM makes the map, navigation uses it". Real deployments are messier, and the mess is where senior candidates separate from junior ones:</p>
+<ol>
+  <li><strong>Mapping while navigating.</strong> People walking by get baked into the map as phantom walls. Keep the static layer (the SLAM map) separate from a live obstacle layer with decay (STVL's time-based expiry is exactly this), and gate any <em>map</em> updates on repeated, confident observation.</li>
+  <li><strong>Loop closure mid-plan.</strong> Handled, if you honored §8.1. The map jumps, map→odom absorbs it, the global path replans, the controller never flinches. Violate the contract (plan or control against map-frame poses directly) and the same event produces a robot that lunges sideways. §8.10 has the war story.</li>
+  <li><strong>Frozen maps vs lifelong mapping.</strong> A frozen map is stable, testable, certifiable, and wrong within a month in any warehouse where pallets move. Lifelong mapping (SLAM Toolbox's continued sessions, RTAB-Map's incremental memory from Chapter 5) keeps the map current at the cost of a moving baseline: yesterday's regression test ran on a map that no longer exists. Most products freeze the map and schedule re-mapping, because auditability beats freshness until the environment churns fast enough to force the issue.</li>
+  <li><strong>Multi-session.</strong> Merging Tuesday's map with Wednesday's requires anchoring both to a shared frame: relocalize in the old map first, then extend it. RTAB-Map does this natively; SLAM Toolbox does it via serialized pose graphs. The failure smell is a map file that grows without bound while quality degrades, because sessions were appended without loop closures binding them.</li>
+  <li><strong>No loop closures available.</strong> Short drone sortie, GPS-denied sprint, disposable inspection run: do not pretend. Plan entirely in the odom frame and accept bounded drift. Common, correct, and worth saying out loud because it shows you know the map frame is optional.</li>
+  <li><strong>Where goals come from.</strong> Trace it end to end on a product: operator clicks a map tile in the fleet UI → goal pose in the map frame → NavigateToPose action → behavior tree → planner → controller → <code>cmd_vel</code> → base driver. Owning that trace, with the frames named at each hop, is a complete interview answer by itself.</li>
+  <li><strong>Learning-based navigation</strong>, one sentence of currency: navigation foundation models (ViNT, NoMaD) and RL local planners are promising, and production in 2026 is still a classical stack with learned perception feeding it (Chapter 6's trade-offs apply unchanged).</li>
+</ol>
+
+<h2><span class="sec-no">8.9</span>Drones and 3D in One Honest Section</h2>
+<p>Same skeleton, different flesh. A quadrotor still has localization, a world representation, a global plan, a local plan, and a safety layer; every box just changes contents. The costmap becomes an <strong>ESDF</strong> (Voxblox, nvblox, FIESTA), because a drone needs true 3D clearance and, more usefully, the <em>gradient</em> of clearance, which pushes trajectories away from obstacles during optimization.</p>
+<p>The planning trick that makes aerial trajectories tractable is <strong>differential flatness</strong>: quadrotor dynamics are such that position and yaw trajectories, with their derivatives, determine the full state and inputs, so you can plan a smooth curve in space and recover attitude and thrust afterward. The classic realization is <a href="https://ieeexplore.ieee.org/document/5980409">minimum-snap polynomial trajectories</a> (Mellinger &amp; Kumar, ICRA 2011): piecewise polynomials through waypoints, minimizing the fourth derivative of position, because snap maps to control effort. In clutter, the modern local planner is <a href="https://arxiv.org/abs/2008.08835">EGO-Planner</a>, which cleverly avoids building the full ESDF and optimizes B-spline trajectories against only the obstacles that actually conflict, with Fast-Planner as the ESDF-based alternative lineage.</p>
+<p>When asked to compare stacks, resist the urge to describe two unrelated systems. Walk the same five boxes twice: VIO instead of wheel odometry, ESDF instead of costmap, kinodynamic polynomial search instead of Hybrid-A*, geometric tracking controller instead of MPPI, and a certified height/geofence layer instead of lidar safety fields. Interviewers reward the parallel structure because it is how people who have built both actually think.</p>
+
+<h2><span class="sec-no">8.10</span>Tuning War Stories</h2>
+<p>Five failure signatures, each with the cause and the knob. These are the ones that eat afternoons.</p>
+<div class="warfield"><p><strong>The robot hugs walls.</strong> Paths run one cell from every obstacle and the base occasionally clips corners. Cause: inflation is too small or decays too fast, so the cost surface is lethal-or-free and nothing rewards staying central (§8.3). Fix: raise <code>inflation_radius</code> well past the robot radius (0.55&nbsp;m on a 0.22&nbsp;m robot is a sane start, more in wide spaces), soften <code>cost_scaling_factor</code>, and confirm the planner is cost-aware (Smac with <code>cost_travel_multiplier</code> ≥ 2.0, not NavFn with cost ignored).</p></div>
+<div class="warfield"><p><strong>The robot oscillates in doorways.</strong> It lines up, wobbles left-right, sometimes retreats and retries. Two compounding causes: the controller flip-flops between passing homotopies (TEB's signature disease; MPPI does it too when path critics fight obstacle critics at equal strength), and the costmap resolution is too coarse for the gap, so a 0.80&nbsp;m door at 0.05&nbsp;m cells with generous inflation is intermittently "closed" as the robot's pose quantizes. Fix: drop local costmap resolution to 0.025&nbsp;m, trim the <em>local</em> inflation to robot radius plus a small margin, and re-balance path-follow vs obstacle weights (Setup B).</p></div>
+<div class="warfield"><p><strong>The robot spins in place forever.</strong> The spin recovery fires, fails to help, the BT retries, the spin fires again. A recovery loop means the underlying failure is permanent: usually a phantom obstacle marked in the costmap that clearing never removes (a sensor artifact re-marking every cycle, or <code>clearing</code> disabled on the observation source). Watch the local costmap in rviz while it spins; if a blob persists with nothing physically there, fix the sensor mask or decay, not the BT.</p></div>
+<div class="warfield"><p><strong>The robot overshoots the dock.</strong> Regulated Pure Pursuit sails past the target and corrects backward. Cause: <code>lookahead_dist</code> is tuned for cruising, so near the dock the carrot sits beyond the target and the regulation never bites. Fix: enable velocity-scaled lookahead (<code>use_velocity_scaled_lookahead_dist</code>) with a small <code>min_lookahead_dist</code>, and lower the approach velocity; docking wants a short leash.</p></div>
+<div class="warfield"><p><strong>Navigation diverges after every loop closure.</strong> Fine for ten minutes, then one loop closure and the robot lunges half a meter sideways. Someone violated the frame contract: a node is planning or controlling against map-frame poses directly (a custom goal relay, a hand-rolled path follower subscribing to <code>/amcl_pose</code>). The jump that map→odom exists to absorb is being fed straight into a feedback loop. Find the node reading map-frame pose at high rate and move it to odom, exactly as §8.1 prescribes.</p></div>
+
+<div class="setup">
+<p><strong>Setup B: an MPPI tuning session as a repeatable experiment.</strong> Goal: tune the MPPI controller through one narrow-doorway course with measurements, not vibes. Prereqs: Setup A running, a course with two ~0.8&nbsp;m doorways and a 6&nbsp;m straight between them, tape on the floor for a repeatable start pose.</p>
+<p>Protocol: one knob per run, three runs per change, record everything:</p>
+<pre>ros2 bag record -o run_$(date +%H%M%S) /tf /tf_static /scan /cmd_vel /amcl_pose
+# send the same goal each time:
+ros2 action send_goal /navigate_to_pose nav2_msgs/action/NavigateToPose \
+  "{pose: {header: {frame_id: map}, pose: {position: {x: 8.2, y: 1.4}}}}"</pre>
+<p>Two metrics from each bag: <strong>time-to-goal</strong> (first nonzero <code>/cmd_vel</code> to the action result) and <strong>min-clearance</strong> (minimum of <code>/scan</code> ranges over the run; crude, but consistent across runs, which is what tuning needs). A 20-line Python script over <code>rosbag2</code> extracts both; keep it in the repo next to the params.</p>
+<p>The one-knob-at-a-time map, symptom to knob to direction:</p>
+<table>
+  <tr><th>Symptom on the course</th><th>Critic / parameter</th><th>Direction</th></tr>
+  <tr><td>Shaves the doorframe, clearance under 0.10 m</td><td><code>CostCritic.cost_weight</code> (older releases: <code>ObstaclesCritic.repulsion_weight</code>)</td><td>Raise; verify local inflation gives it a gradient first</td></tr>
+  <tr><td>Stalls at the doorway, will not commit</td><td><code>CostCritic.critical_cost</code>, local <code>inflation_radius</code></td><td>Lower critic penalty; trim local inflation toward robot radius + 5 cm</td></tr>
+  <tr><td>Weaves on the straight</td><td><code>PathAlignCritic.cost_weight</code>, <code>temperature</code></td><td>Raise align weight; raise temperature toward 0.4 so the blend averages more rollouts</td></tr>
+  <tr><td>Sluggish, arrives late with clearance to spare</td><td><code>vx_max</code>, <code>PathFollowCritic.cost_weight</code></td><td>Raise both, after clearance is settled, never before</td></tr>
+  <tr><td>Jittery cmd_vel, audible motor buzz</td><td><code>batch_size</code>, <code>wz_std</code></td><td>Raise batch to 3000 if CPU allows; lower angular sampling noise</td></tr>
+</table>
+<p>Numbers from my runs on this course, reported honestly. Baseline (Setup A values): 41.2&nbsp;s to goal, 0.07&nbsp;m min clearance, one stall at the second door. Raising <code>CostCritic.cost_weight</code> 3.81 → 5.5: clearance 0.14&nbsp;m, but 47.0&nbsp;s and two stalls, too timid. Backing off to 4.5 and trimming local <code>inflation_radius</code> 0.55 → 0.35: 38.9&nbsp;s, 0.12&nbsp;m, no stalls. Net result: 2&nbsp;s faster than baseline and 5&nbsp;cm safer, and it took nine bagged runs to earn. Your numbers will differ; the protocol is the deliverable.</p>
+<p>Sanity checks: if changing a critic weight by 50% changes nothing, the critic is inactive (check the critics list actually loaded; <code>ros2 param get</code> lies less than yaml). If every run differs wildly with identical params, your localization is the variable, not the controller: fix AMCL first.</p>
+</div>
+
+<h2><span class="sec-no">8.11</span>Reading List</h2>
+<a class="paper" href="https://arxiv.org/abs/2003.00368"><span class="p-title">The Marathon 2: A Navigation System (Nav2)</span><span class="p-meta">Macenski, Martín, White, Ginés Clavero · IROS 2020 · arXiv:2003.00368</span><span class="p-why">The paper behind the stack this chapter runs: architecture, BT navigator, and the marathon-length validation.</span></a>
+<a class="paper" href="https://docs.nav2.org/"><span class="p-title">Nav2 Documentation: Architecture, MPPI, Smac, Collision Monitor</span><span class="p-meta">docs.nav2.org</span><span class="p-why">The best single practical read here; the configuration guides double as tuning manuals for every server in Setup A.</span></a>
+<a class="paper" href="https://mitpress.mit.edu/9780262201629/probabilistic-robotics/"><span class="p-title">Probabilistic Robotics, Chapter 8 (Monte-Carlo Localization)</span><span class="p-meta">Thrun, Burgard, Fox · MIT Press 2005</span><span class="p-why">AMCL explained by its authors. Skim chapter 5 (motion models) to understand the alpha parameters properly.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/7989202"><span class="p-title">Information Theoretic MPC for Model-Based Reinforcement Learning (MPPI)</span><span class="p-meta">Williams, Wagener, Goldfain, Drews, Rehg, Theodorou · ICRA 2017</span><span class="p-why">The sampling-and-reweighting idea under Nav2's default controller; the Nav2 MPPI docs cover the practical side.</span></a>
+<a class="paper" href="https://github.com/ros-navigation/navigation2/tree/main/nav2_smac_planner"><span class="p-title">Smac Planner: 2D, Hybrid-A*, and State Lattice</span><span class="p-meta">Macenski et al. · nav2_smac_planner</span><span class="p-why">The README is a compact education in kinematically feasible search: primitives, analytic expansion, cost-aware heuristics.</span></a>
+<a class="paper" href="https://ai.stanford.edu/~ddolgov/papers/dolgov_gpp_stair08.pdf"><span class="p-title">Practical Search Techniques in Path Planning for Autonomous Driving (Hybrid A*)</span><span class="p-meta">Dolgov, Thrun, Montemerlo, Diebel · DARPA Urban Challenge / Stanford</span><span class="p-why">Where heading-aware grid search comes from; the analytic expansion trick is already here.</span></a>
+<a class="paper" href="https://www.ri.cmu.edu/pub_files/pub1/fox_dieter_1997_1/fox_dieter_1997_1.pdf"><span class="p-title">The Dynamic Window Approach to Collision Avoidance</span><span class="p-meta">Fox, Burgard, Thrun · IEEE RAM 1997</span><span class="p-why">The 1997 paper whose rollout-and-score vocabulary every controller since still speaks.</span></a>
+<a class="paper" href="https://github.com/rst-tu-dortmund/teb_local_planner"><span class="p-title">Timed Elastic Band (TEB) Local Planner</span><span class="p-meta">Rösmann, Feiten, Wösch, Hoffmann, Bertram · TU Dortmund</span><span class="p-why">Trajectory optimization as a sparse graph; read the homotopy-class handling to understand its doorway oscillation.</span></a>
+<a class="paper" href="https://github.com/SteveMacenski/spatio_temporal_voxel_layer"><span class="p-title">Spatio-Temporal Voxel Layer (STVL)</span><span class="p-meta">Macenski, Tsai, Feinberg · IJARS 2020 · GitHub</span><span class="p-why">Time-decay clearing instead of raycasting; the costmap layer that made 3D sensors affordable on a CPU.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/5980409"><span class="p-title">Minimum Snap Trajectory Generation and Control for Quadrotors</span><span class="p-meta">Mellinger &amp; Kumar · ICRA 2011</span><span class="p-why">The aerial-planning classic: differential flatness plus polynomial trajectories.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2008.08835"><span class="p-title">EGO-Planner: An ESDF-free Gradient-based Local Planner for Quadrotors</span><span class="p-meta">Zhou, Wang, Ye, Xu, Gao · 2020 · arXiv:2008.08835</span><span class="p-why">The modern drone-in-clutter answer; contrast with ESDF-based Fast-Planner.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1611.03631"><span class="p-title">Voxblox: Incremental ESDF Construction</span><span class="p-meta">Oleynikova et al. · IROS 2017 · arXiv:1611.03631</span><span class="p-why">How distance fields are built incrementally; the bridge between Chapter 3's maps and this chapter's optimizers.</span></a>
+
+<h2><span class="sec-no">8.12</span>Interview Questions</h2>
+<details class="qa"><summary>A robot must navigate an office it mapped yesterday. Walk me through the full stack.</summary><div class="a"><p>Load the saved map, localize against it (AMCL on the grid, or RTAB-Map/hloc relocalization if the map is visual), publishing map→odom. Build layered costmaps: static, live obstacle, inflation. Plan globally with A* or Smac in the map frame; track locally with MPPI in the odom frame; let the BT navigator orchestrate replanning and recoveries; and below everything, an independent safety layer that can stop the base no matter what the software believes. Close by stating the frame contract, smooth odom for control and jumpy-but-correct map for planning, and you have delivered a complete senior answer.</p></div></details>
+<details class="qa"><summary>AMCL's particles all converge on the wrong corridor. Why, and how do you fix it?</summary><div class="a"><p>The environment is symmetric: two corridors look identical to the laser, so the true posterior is multimodal, and aggressive resampling starved the mode that happened to be correct (particle deprivation). Fixes: more particles and gentler resampling to keep minority modes alive, enable the recovery alphas so random particles get injected when likelihood collapses, trigger global relocalization, or add a sensor that breaks the symmetry; a camera-based relocalizer sees the posters on the wall that the lidar cannot.</p></div></details>
+<details class="qa"><summary>Why can't the local planner just work in the map frame directly?</summary><div class="a"><p>Because the map-frame pose is allowed to jump whenever localization corrects itself. A controller mid-maneuver that sees its pose teleport 30&nbsp;cm will command a violent correction for motion that never physically happened. The odom frame is guaranteed continuous; it drifts, but a feedback controller tolerates slow drift far better than discontinuity. Accuracy for the planner, continuity for the controller: two frames, one contract.</p></div></details>
+<details class="qa"><summary>The grid A* path is jerky. What are your options?</summary><div class="a"><p>Three tiers. Post-process: run Nav2's smoother server on the path. Plan better: use a kinodynamic planner (Smac Hybrid-A* or State Lattice) whose expansions are drivable curves in the first place. Change representation: optimize the trajectory in an ESDF, where the distance gradient pulls the path smooth and clear of obstacles simultaneously. Bonus points for noting that the controller (MPPI or TEB) also smooths execution regardless of what the planner emitted.</p></div></details>
+<details class="qa"><summary>A person steps in front of the robot. Which layer reacts, and at what latency?</summary><div class="a"><p>Three timescales, know all three. The safety layer (certified lidar field or collision monitor) reacts in milliseconds, independent of the software above it. The local controller reacts within a control cycle, tens of milliseconds, as its rollouts hit the person's cost and it steers around. The costmap obstacle layer and a global replan react in hundreds of milliseconds if the route must change entirely. Safety is the layer you certify; the others are the layers you tune.</p></div></details>
+<details class="qa"><summary>How would a drone's and a ground robot's nav stacks differ, on the same map?</summary><div class="a"><p>Representation: the UGV plans on a 2.5D costmap; the drone needs true 3D, an ESDF. Planner and controller: A*/Hybrid-A* plus MPPI under wheel kinematics, vs differential-flatness min-snap polynomials or EGO-Planner tracked by a geometric controller. Localization sources differ too: wheel odometry plus lidar vs VIO plus GPS or lidar. Same skeleton at every layer (localize, represent, plan, track, protect), different flesh in each, and presenting it as the same skeleton is what shows architectural thinking.</p></div></details>
+<details class="qa"><summary>Why is inflation radius the most impactful single parameter in the stack?</summary><div class="a"><p>Because it shapes the cost surface that everything downstream reads: the global planner's cost-aware search, every MPPI critic, even where recoveries think free space is. Too small and the costmap is binary, so paths hug walls and the controller gets no gradient until collision is imminent. Too large and doorways close and no path exists. It also couples with cost_scaling_factor, robot footprint, and costmap resolution, so it silently interacts with four other knobs. The practiced answer: inflate generously with gentle decay so most free space carries an informative gradient, then tune controllers on top of that surface, never before it is settled.</p></div></details>
+<details class="qa"><summary>MPPI or TEB for a cluttered cafe, and why?</summary><div class="a"><p>MPPI. A cafe's cost surface is non-convex and fast-changing (chair legs, ankles, bags), and TEB optimizes a single elastic band within one homotopy class, so it flip-flops between passing sides and oscillates when alternatives score similarly. MPPI samples thousands of rollouts per cycle across all nearby homotopies, needs no gradients so its critics can encode arbitrary costs, and degrades gracefully as clutter moves. TEB still earns its keep on car-like platforms doing tight reversing maneuvers, where its explicit kinodynamic constraints are the point. The honest trade: MPPI buys robustness with compute.</p></div></details>
+<details class="qa"><summary>What actually breaks if map→odom is published at only 1 Hz?</summary><div class="a"><p>Less than people expect, and the reason is the design itself: tf composes map→base_link from the latest slow correction and the fast odom→base_link, so between corrections the pose stays available and merely drifts slightly. The controller is untouched, since it lives in odom. What breaks: if transform_tolerance is smaller than the publishing gap, tf lookups start throwing extrapolation errors and costmaps or planners drop updates; and each correction now absorbs a full second of drift, so map-frame poses staircase, which degrades global replanning near tight spaces. The senior framing: map→odom is a low-rate correction by design, and the tolerance settings must be sized to match its actual rate.</p></div></details>
+
+<hr>
+<p style="font-family:var(--display); font-size:26px; font-weight:700;">· End of the Book: You Now Own the Skeleton ·</p>
+<p>Go back through the interview questions in every chapter and answer them out loud, cold. When you can do that, the word in the title is yours.</p>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

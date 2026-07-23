@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 6 · Learning-Based SLAM · SLAM: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">06</div>
+  <div class="chapter-kicker">Chapter 6 · Learning Meets Geometry</div>
+  <h1>Learning-Based SLAM</h1>
+  <p class="chapter-sub">"Do you use deep learning in SLAM?" is a trap if you answer yes or no. The right answer is a sorting machine: three depths of learning, and a clear view of where networks win and where forty years of geometry still hold the line.</p>
+</header>
+
+<h2><span class="sec-no">6.1</span>The Mental Model: Three Depths of Learning</h2>
+<p>Every "AI + SLAM" idea ever published fits one of three buckets. Sorting a question into its bucket out loud, before answering it, is what reads as senior. The buckets differ in how much of the classical pipeline survives:</p>
+<ol>
+  <li><strong>Learned modules inside classical pipelines.</strong> Keep the geometric skeleton; swap individual organs for networks. Features, matching, depth priors, place recognition, dynamic masking. <em>Production-ready today.</em></li>
+  <li><strong>End-to-end differentiable systems.</strong> The whole pipeline trains as one network, but with a real geometric solver embedded inside it. <em>The research-to-product edge (the DROID lineage).</em></li>
+  <li><strong>Learned map representations.</strong> The map itself becomes a neural object: implicit fields, Gaussians, scene graphs, or the weights of a feed-forward geometry model. <em>Research, moving fast.</em></li>
+</ol>
+<p>Use it as a sorting machine in conversation. "Should we use learning for X" becomes three narrower, answerable questions: is there a module swap (depth 1) with a classical veto behind it, does X need gradients flowing through the solver (depth 2), or is X really a question about what the map stores (depth 3)? The depths also order the risk. Each step down replaces more auditable geometry with more learned behavior, and Sections 6.5 and 6.6 are about deciding how far down your product can afford to go.</p>
+<div class="analogy">Depth 1 is an organ transplant: new parts, same body plan, and the immune system (geometric verification) rejects bad grafts. Depth 2 rebuilds the nervous system but keeps the skeleton, because the bones (the solver) already work. Depth 3 grows a new creature entirely and then asks whether you can trust its reflexes in traffic.</div>
+<p>The history explains the buckets. Around 2015 the field tried to replace everything at once (PoseNet regressed camera pose straight from pixels) and it lost badly to classical relocalization. From roughly 2018 the module era took over: SuperPoint and NetVLAD proved that networks beat hand-crafted appearance processing while geometry stayed in charge. In 2021 DROID-SLAM showed how to differentiate through the geometry rather than around it. And since 2023 the feed-forward line (DUSt3R and its children) has been asking whether a large enough model can carry the geometry prior in its weights. Each wave kept more of what the previous one learned about the division of labor: <strong>networks handle appearance, solvers handle consistency</strong>.</p>
+
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <g fill="none" stroke="#23201a" stroke-width="1.6">
+    <rect x="20" y="34" width="110" height="42" rx="6"/>
+    <rect x="168" y="34" width="110" height="42" rx="6"/>
+    <rect x="316" y="34" width="110" height="42" rx="6"/>
+    <rect x="464" y="34" width="110" height="42" rx="6"/>
+    <rect x="612" y="34" width="120" height="42" rx="6"/>
+    <path d="M130 55 L166 55 M278 55 L314 55 M426 55 L462 55 M574 55 L610 55" stroke-width="1.4"/>
+    <path d="M160 51 L166 55 L160 59 M308 51 L314 55 L308 59 M456 51 L462 55 L456 59 M604 51 L610 55 L604 59"/>
+  </g>
+  <g font-size="12" fill="#23201a" text-anchor="middle">
+    <text x="75" y="59">images</text>
+    <text x="223" y="59">features</text>
+    <text x="371" y="59">matching</text>
+    <text x="519" y="59">pose + BA</text>
+    <text x="672" y="59">map</text>
+  </g>
+  <g stroke="#0e5f5b" fill="none" stroke-width="1.6">
+    <path d="M168 100 L168 112 L426 112 L426 100"/>
+  </g>
+  <text x="297" y="132" font-size="12" fill="#0e5f5b" text-anchor="middle">depth 1: swap the modules</text>
+  <g stroke="#a97b1f" fill="none" stroke-width="1.6">
+    <path d="M168 158 L168 170 L574 170 L574 158"/>
+  </g>
+  <text x="371" y="190" font-size="12" fill="#a97b1f" text-anchor="middle">depth 2: differentiate through the solver</text>
+  <g stroke="#b3401e" fill="none" stroke-width="1.6">
+    <path d="M612 100 L612 112 L732 112 L732 100"/>
+  </g>
+  <text x="672" y="132" font-size="12" fill="#b3401e" text-anchor="middle">depth 3: the map</text>
+  <text x="672" y="147" font-size="12" fill="#b3401e" text-anchor="middle">itself is learned</text>
+  <text x="75" y="225" font-size="11" fill="#23201a" text-anchor="middle" font-style="italic">deeper learning,</text>
+  <text x="75" y="239" font-size="11" fill="#23201a" text-anchor="middle" font-style="italic">fewer guarantees</text>
+</svg>
+</div>
+<figcaption>Fig 6.1: the three depths, drawn over the pipeline from Chapters 3 and 4. Each bucket replaces a different span of it.</figcaption>
+</figure>
+
+<dl class="jargon">
+  <dt>Global descriptor</dt><dd>One vector per image summarizing its appearance. Place recognition becomes nearest-neighbor search in descriptor space.</dd>
+  <dt>Pointmap</dt><dd>A per-pixel 3D coordinate image: H×W×3, each pixel mapped to a point in some camera frame. The output format of the DUSt3R family.</dd>
+  <dt>Affine-invariant depth</dt><dd>Depth predicted up to an unknown per-image scale and shift. Great for ordering, useless as a metric measurement until you solve for those two numbers.</dd>
+  <dt>Differentiable bundle adjustment</dt><dd>A least-squares solver written so gradients pass through its iterations, letting a network upstream train against the solver's output error.</dd>
+  <dt>Sim-to-real gap</dt><dd>The accuracy drop when a model trained on synthetic images meets real sensors. Small for low-level tasks like matching, large for semantic ones.</dd>
+  <dt>VPR</dt><dd>Visual place recognition: "have I seen this place before?", answered by retrieval rather than geometry.</dd>
+</dl>
+
+<h2><span class="sec-no">6.2</span>Depth 1: Learned Modules, One Good Option per Slot</h2>
+<p>Recall the pipeline from Chapters 3 through 5. Each slot has a classical incumbent and a learned drop-in, and for each slot you should be able to name the 2026 pick and defend it:</p>
+<table>
+  <tr><th>Pipeline slot</th><th>Classical</th><th>Learned options</th><th>2026 pick</th></tr>
+  <tr><td>Keypoints</td><td>ORB, GFTT</td><td><a href="https://arxiv.org/abs/1712.07629">SuperPoint</a>, <a href="https://arxiv.org/abs/2006.13566">DISK</a>, <a href="https://arxiv.org/abs/2304.03608">ALIKED</a></td><td>SuperPoint for ecosystem, ALIKED for speed</td></tr>
+  <tr><td>Matching</td><td>NN + ratio test</td><td><a href="https://arxiv.org/abs/1911.11763">SuperGlue</a>, <a href="https://arxiv.org/abs/2306.13643">LightGlue</a>, <a href="https://arxiv.org/abs/2305.15404">RoMa</a>, <a href="https://arxiv.org/abs/2104.00680">LoFTR</a></td><td>LightGlue</td></tr>
+  <tr><td>Place recognition</td><td>Bag-of-words (DBoW2)</td><td><a href="https://arxiv.org/abs/1511.07247">NetVLAD</a>, <a href="https://arxiv.org/abs/2303.02190">MixVPR</a>, <a href="https://arxiv.org/abs/2311.15937">SALAD</a>, MegaLoc</td><td>SALAD or MixVPR</td></tr>
+  <tr><td>Depth prior</td><td>Stereo or RGB-D hardware</td><td><a href="https://arxiv.org/abs/2406.09414">Depth Anything V2</a>, <a href="https://arxiv.org/abs/2404.15506">Metric3D v2</a>, <a href="https://arxiv.org/abs/2403.18913">UniDepth</a></td><td>DA v2 relative, UniDepth when you need metric</td></tr>
+  <tr><td>Optical flow</td><td>Lucas-Kanade</td><td><a href="https://arxiv.org/abs/2003.12039">RAFT</a>, <a href="https://arxiv.org/abs/2405.14793">SEA-RAFT</a></td><td>SEA-RAFT (RAFT quality, several times faster)</td></tr>
+  <tr><td>Dynamic masking</td><td>Robust kernels only</td><td><a href="https://arxiv.org/abs/1806.05620">DynaSLAM</a>-style segmentation + geometry</td><td>Any fast segmenter, DynaSLAM recipe</td></tr>
+  <tr><td>LiDAR odometry</td><td>ICP variants</td><td>DeLORA, learned features</td><td>Stay classical; geometry already wins here</td></tr>
+  <tr><td>LiDAR place recognition</td><td>Scan Context</td><td>OverlapTransformer, LoGG3D-Net</td><td>Learned, if you have training data in-domain</td></tr>
+  <tr><td>Uncertainty</td><td>Hand-tuned covariances</td><td>Learned confidence and covariance heads</td><td>Use, but recalibrate on held-out data</td></tr>
+</table>
+
+<h3>Features: SuperPoint, DISK, ALIKED</h3>
+<p><a href="https://arxiv.org/abs/1712.07629">SuperPoint</a> (2018) is still the default, less because it is the best detector than because everything downstream was trained against it: matchers, localization toolboxes, pretrained weights everywhere. Its training trick is worth knowing on its own. There are no human labels for "what is a good keypoint", so it bootstraps: train on synthetic corners, then warp real images with random homographies and require the detector to agree with itself across warps (homographic adaptation). <a href="https://arxiv.org/abs/2006.13566">DISK</a> trains detection and description jointly with a reward signal on successful matches, and tends to fire more densely, which helps offline reconstruction recall. <a href="https://arxiv.org/abs/2304.03608">ALIKED</a> uses deformable convolutions for a lighter, faster network with strong accuracy per watt. The 2026 rule: SuperPoint when you want the ecosystem (hloc, pretrained LightGlue), ALIKED when you are counting milliseconds on an embedded GPU, DISK for max-recall offline mapping.</p>
+
+<h3>Matching: SuperGlue to LightGlue, and the Dense Option</h3>
+<p><a href="https://arxiv.org/abs/1911.11763">SuperGlue</a> (2020) replaced the nearest-neighbor-plus-ratio-test with a transformer that reasons over both keypoint sets jointly, using position and context, and it roughly doubled match quality under viewpoint and lighting stress. <a href="https://arxiv.org/abs/2306.13643">LightGlue</a> (2023) is the deployable version: it prunes easy points early and exits early on easy pairs, so compute adapts to difficulty. An easy pair costs a fraction of a hard one. When keypoints themselves fail (texture-poor walls, repetitive facades), detector-free dense matchers apply: <a href="https://arxiv.org/abs/2104.00680">LoFTR</a> matches on a coarse grid then refines; <a href="https://arxiv.org/abs/2305.15404">RoMa</a> (2024) is the current heavyweight, robust to extreme baselines but too slow for a hot loop. Pick LightGlue by default; reach for RoMa offline or when overlap is desperate.</p>
+
+<h3>Monocular Depth, and the Metric Trap</h3>
+<p><a href="https://arxiv.org/abs/2406.09414">Depth Anything V2</a> made single-image depth genuinely good: crisp edges, robust across scenes, trained by distilling a huge teacher through synthetic data. But read the fine print on what "depth" means. The base models are <em>affine-invariant</em>: correct up to an unknown scale and shift per image. Feed that raw into a metric SLAM back-end and you have injected a measurement whose units the estimator cannot know. The metric-tuned variants (and intrinsics-aware models like <a href="https://arxiv.org/abs/2404.15506">Metric3D v2</a> and <a href="https://arxiv.org/abs/2403.18913">UniDepth</a>) help, with caveats: they are biased toward their training distribution (indoor models fail outdoors and vice versa), they silently assume your camera's intrinsics resemble what they saw in training, and consecutive frames can flicker in scale because each prediction is independent. The honest uses: resolving monocular scale ambiguity as a <em>prior</em> with generous covariance, densifying sparse maps, and bootstrapping initialization. Not as a stereo replacement in the measurement model.</p>
+<div class="warfield">Field report, repeated at many labs: monodepth output fused straight into a TSDF produces walls that curve away from the camera and a floor with a gentle bowl in it. Per-image scale error of 5 to 20 percent is normal off-distribution, and the errors are spatially correlated, so averaging does not save you. If you fuse learned depth, solve per-frame scale and shift against your sparse geometric points first, then inflate the covariance, then fuse. In that order.</div>
+
+<h3>Optical Flow: RAFT and Its Descendants</h3>
+<p><a href="https://arxiv.org/abs/2003.12039">RAFT</a> (2020) matters to SLAM less as a module you deploy and more as the architecture that made depth 2 possible: an all-pairs correlation volume plus a recurrent update operator that iteratively refines a flow field. DROID-SLAM is RAFT with a geometric solver in the loop. If you need standalone flow in 2026 (dynamic object checks, video stabilization), <a href="https://arxiv.org/abs/2405.14793">SEA-RAFT</a> gives near-RAFT accuracy several times faster.</p>
+
+<h3>Place Recognition: NetVLAD to MixVPR and SALAD</h3>
+<p>This is the slot where learning wins hardest, because bag-of-words dies precisely when you need it: revisiting a place under different lighting, weather, or season. <a href="https://arxiv.org/abs/1511.07247">NetVLAD</a> (2016) made the global-descriptor recipe standard: CNN features aggregated into one vector, trained on Street View revisits so the vector is invariant to the things that change and sensitive to the things that do not. <a href="https://arxiv.org/abs/2303.02190">MixVPR</a> (2023) swapped the aggregation for feature mixing and jumped the benchmarks; <a href="https://arxiv.org/abs/2311.15937">SALAD</a> (2024) put a DINOv2 backbone under an optimal-transport aggregation and jumped them again. Retrieval is cheap at runtime (one descriptor per keyframe, nearest-neighbor search), so there is little excuse for BoW in a new design unless you are CPU-only. Every retrieved candidate still goes through geometric verification before it touches the graph; retrieval proposes, RANSAC disposes.</p>
+
+<h3>Dynamic Object Masking: the DynaSLAM Idea</h3>
+<p>Classical SLAM assumes a static world and treats moving things as outliers for the robust kernel to absorb. That works until the moving things cover half the image (a bus at a stoplight, a crowd). <a href="https://arxiv.org/abs/1806.05620">DynaSLAM</a> (2018) made the fix explicit: run a segmenter (Mask R-CNN then, any fast instance segmenter now), mask out the a-priori-dynamic classes (people, vehicles) before feature extraction, and add a multi-view geometric consistency check to catch movable-but-currently-static objects, like a parked chair that later gets carried away. The recipe survives unchanged in 2026 because it respects the boundary: the network answers "what pixels are untrustworthy", the geometry does everything else. Budget one segmentation pass per keyframe, not per frame, and it fits on an embedded GPU.</p>
+
+<h3>Learned Uncertainty</h3>
+<p>The quietest and most underrated slot. Classical pipelines carry hand-tuned constants where covariances should be; networks can predict per-measurement confidence instead: which matches to trust, how much to weight a depth pixel, when tracking quality is degrading. DROID-SLAM's confidence weights are the proof it matters, since the system's accuracy lives in its ability to down-weight bad correspondences. The catch is calibration: a raw confidence head is a ranking signal, not a probability. Before you use one as a covariance, recalibrate it on held-out data (temperature scaling is often enough) and verify the χ² statistics downstream actually look χ². Mentioning this unprompted is an interview point few candidates score.</p>
+
+<div class="keypoint">Depth 1 wins in production because it keeps geometric optimality, interpretability, and a CPU-friendly back-end, and spends neural compute only where classical methods are genuinely brittle: appearance. Recognizing and matching things under blur, texture poverty, and lighting change is perception; networks where perception is hard, math where geometry is solved.</div>
+
+<div class="setup">
+<p><strong>Worked Setup A: an hloc Localization Pipeline on Your Own Photos.</strong> Goal: build a SuperPoint + LightGlue + COLMAP map of one room from 30 phone photos, then localize 3 fresh query photos against it. This is the depth-1 stack end to end, on your own data, in an afternoon.</p>
+<p>Prereqs: Ubuntu 24.04, Python 3.11, ~10 GB disk. A CUDA GPU with 4 GB+ helps (CPU works, roughly 10x slower). Take ~30 photos of a textured room with generous overlap between consecutive shots, plus 3 extra photos from viewpoints you did not map, all with the same camera and fixed zoom.</p>
+<pre>git clone --recursive https://github.com/cvg/Hierarchical-Localization
+cd Hierarchical-Localization
+python -m pip install -e .        # pulls torch, pycolmap, lightglue
+mkdir -p datasets/room/mapping datasets/room/query
+# copy 30 mapping photos and 3 query photos into those folders</pre>
+<p>Mapping, as a Python script (this is the real hloc API, see the repo's <code>demo.ipynb</code> for the same flow):</p>
+<pre>from pathlib import Path
+from hloc import extract_features, match_features, reconstruction, \
+                 pairs_from_exhaustive, localize_sfm
+
+images  = Path("datasets/room/mapping")
+outputs = Path("outputs/room"); outputs.mkdir(parents=True, exist_ok=True)
+sfm_pairs, feats, matches = outputs/"pairs-sfm.txt", outputs/"feats.h5", outputs/"matches.h5"
+
+fconf = extract_features.confs["superpoint_max"]      # ~2048 kpts/image
+mconf = match_features.confs["superpoint+lightglue"]
+
+refs = [p.name for p in images.iterdir()]
+extract_features.main(fconf, images, feature_path=feats)
+pairs_from_exhaustive.main(sfm_pairs, image_list=refs)   # 30 imgs = 435 pairs
+match_features.main(mconf, sfm_pairs, features=feats, matches=matches)
+model = reconstruction.main(outputs/"sfm", images, sfm_pairs, feats, matches)</pre>
+<p>Expected: extraction runs at a few images per second on GPU; reconstruction registers 28 to 30 of 30 images with mean reprojection error near 1 px and mean track length 4 to 8. For localization, extract features for the queries into the same file, generate query-to-map pairs with <code>pairs_from_exhaustive.main(loc_pairs, image_list=query_names, ref_list=refs)</code>, match, then call <code>localize_sfm.main(...)</code> with a queries text file holding each query's camera model and intrinsics (format in the repo docs; pull focal length from EXIF). Expected: all 3 queries localize with 150 to 800 inliers each; below ~50 inliers, treat the pose as suspect.</p>
+<p>Classic failure symptoms: (1) textureless walls give under 300 keypoints per image and registration falls apart, so reshoot with more of the room's furniture and edges in frame; (2) auto-exposure swings between shots tank match counts on otherwise fine pairs, so lock exposure or shoot in even light; (3) repetitive texture (tiles, bookshelves, radiators) produces confident wrong matches that survive matching and die only at RANSAC, visible as high match counts but low inlier ratios, and occasionally as a ghost-merged reconstruction. If the model splits into two disconnected components, that is usually symptom 1 or 2 on the photos bridging them.</p>
+</div>
+
+<h2><span class="sec-no">6.3</span>Depth 2: End-to-End Done Right</h2>
+<p>Chapter 4 covered <a href="https://arxiv.org/abs/2108.10869">DROID-SLAM</a> as a visual SLAM system; here it matters as a lesson in architecture. Read it from the learning side and ask: what did the network actually have to learn, and what was it spared from learning?</p>
+<p>What the network learns: a RAFT-style GRU that, given correlation features between frame pairs, predicts <em>revisions</em> to the current dense correspondence field, plus a confidence weight per pixel. That is all. What stays geometric: the differentiable bundle adjustment layer, an honest damped Gauss-Newton solver over poses and per-pixel depths, Schur complement and all, that converts those weighted correspondences into globally consistent geometry. The network never learns projection, triangulation, or consistency; those come for free, exactly, from the solver. And because gradients flow through the solver's iterations during training, the loss on final pose error teaches the network to produce correspondences and confidences that the solver digests well. The network learns to <em>feed</em> geometry, not to imitate it. That sentence is the answer to "why does differentiable BA matter?"</p>
+<p><a href="https://arxiv.org/abs/2208.04726">DPVO</a> (2023) is the same recipe made frugal: track sparse random patches instead of dense fields, cutting compute and memory several-fold to reach real time on a modest GPU, with DPV-SLAM (2024) adding loop closure back. The dense-to-sparse move cost surprisingly little accuracy, which tells you the value was never in density; it was in learned correspondence plus exact optimization.</p>
+<p>The training data story is the part people skip. These systems train almost entirely on <a href="https://arxiv.org/abs/2003.14338">TartanAir</a>, a large synthetic dataset rendered in Unreal Engine with perfect ground-truth poses, depth, and flow across aggressively varied environments (forests, factories, fog, snow). Sim-to-real transfer works here because correspondence is a low-level task: matching textures across two rendered views exercises the same machinery as matching real ones, and the domain gap that ruins synthetic training for semantic tasks barely bites. <a href="https://arxiv.org/abs/2011.00359">TartanVO</a> made this point first: a learned odometry model trained only in simulation that generalized across real datasets. The uncomfortable corollary: if your deployment domain has structure TartanAir lacks (fisheye optics, rolling shutter artifacts, underwater scattering), the pretrained model has never seen anything like your data, and you will find out at runtime.</p>
+<p>Know the cautionary tale at the other extreme: <strong>absolute pose regression</strong> (<a href="https://arxiv.org/abs/1505.07427">PoseNet</a>, 2015, and descendants). Feed an image, regress the 6-DoF pose directly, no geometry anywhere. It consistently loses to classical relocalization because without a geometric bottleneck the network can only memorize the scene, interpolating between training viewpoints and failing on new ones. The one-line verdict: end-to-end without a geometric bottleneck degenerates into memorization.</p>
+<div class="keypoint">The depth-2 systems that work are not "geometry replaced by learning". They are geometry made differentiable, with learning confined to the one thing it is best at: producing and weighting correspondences. The solver is the spine; the network is the sensor cortex.</div>
+
+<h2><span class="sec-no">6.4</span>Depth 3: Learned Maps</h2>
+<h3>Implicit Fields and Gaussians as Maps</h3>
+<p>A map does not have to be a point cloud or a voxel grid. It can be a function: query a 3D coordinate, get back occupancy, signed distance, color, or a feature vector. On the camera side the line runs <a href="https://arxiv.org/abs/2103.12352">iMAP</a> (a single MLP as the whole map) through <a href="https://arxiv.org/abs/2112.12130">NICE-SLAM</a> (hierarchical feature grids for scale) to <a href="https://arxiv.org/abs/2304.14377">Co-SLAM</a> (hash grids for speed). Gaussian-splatting SLAM (SplaTAM, MonoGS) trades the implicit function for an explicit soup of Gaussians that rasterizes fast; Chapter 4 covers that era from the SLAM side. On the lidar side the standout is <a href="https://arxiv.org/abs/2401.09101">PIN-SLAM</a> (2024): an elastic, point-anchored implicit neural SDF that deforms with loop closures and runs at practical speed. It is the best single citation for "something newer than OctoMap, learned edition".</p>
+<h3>Semantic Fields and Scene Graphs</h3>
+<p>Robots increasingly need "which room am I in, where is the chair", not just occupied cells. <a href="https://arxiv.org/abs/1910.02490">Kimera</a> builds metric-semantic meshes in real time; <a href="https://arxiv.org/abs/2201.13360">Hydra</a> (2022) builds full 3D scene graphs, a live hierarchy of places, rooms, and objects; <a href="https://arxiv.org/abs/2309.16650">ConceptGraphs</a> and <a href="https://arxiv.org/abs/2404.13696">Clio</a> (2024) make the graphs open-vocabulary and task-driven. A parallel thread fuses CLIP-style language features into the 3D map itself (OpenScene, LERF-style feature fields) so you can query the map with a sentence: "find the fire extinguisher". Related and rising: scene completion, where a network hallucinates the geometry your sensors have not seen yet (the far side of furniture, occluded corridors) so the planner has something better than "unknown". Useful, provided everyone downstream remembers which voxels are measured and which are guessed.</p>
+<h3>The Feed-Forward Line: the Model Is the Geometry Prior</h3>
+<p><a href="https://arxiv.org/abs/2312.14132">DUSt3R</a> (2024) took the most radical position in this chapter: give a transformer two images, no intrinsics, no poses, and it directly regresses a <em>pointmap</em> for each, both expressed in the first camera's frame, with per-pixel confidence. Correspondence, calibration, relative pose, and dense geometry all fall out of one forward pass, recoverable by post-processing. <a href="https://arxiv.org/abs/2406.09756">MASt3R</a> grounds it further with a metric-scale head and a dense matching head, and <a href="https://arxiv.org/abs/2412.12392">MASt3R-SLAM</a> (2025) wraps a real-time SLAM system around it. The philosophical shift deserves stating plainly: in the classical stack, geometric constraints are the prior and pixels are the evidence. Here, the network's weights, distilled from millions of image pairs, <em>are</em> the prior, and two-view geometry is something the model has internalized rather than something you enforce. That is why it works on impossible inputs (almost no overlap, unknown cameras) and also why it fails differently: it will always answer, and nothing structural prevents a confident wrong answer.</p>
+<h3>What Querying a Learned Map Costs at Robot Rates</h3>
+<p>A planner (Chapter 8) asks two queries at brutal rates: "is this cell occupied" and "how far is the nearest obstacle", thousands of times per planning cycle, with hard latency bounds. Classical grids and ESDFs answer in nanoseconds per lookup. A NeRF-style map answers with an MLP evaluation per sample, and distance queries need marching or many samples; Gaussian maps rasterize images fast but answer spatial occupancy queries awkwardly, since splats are neither surfaces nor volumes. The workable patterns in 2026: keep a classical occupancy or SDF layer for planning and treat the neural map as the reconstruction and semantics product, or use a learned SDF like PIN-SLAM's where distance queries are native. Sending a planner to query a radiance field directly is a demo, not an architecture.</p>
+
+<div class="setup">
+<p><strong>Worked Setup B: MASt3R Two-Image Inference, Metric Pointmaps in One Forward Pass.</strong> Goal: run MASt3R on two overlapping photos, read the pointmap and confidence outputs, and export a point cloud, so depth 3 stops being an abstraction.</p>
+<p>Prereqs: Ubuntu 24.04, NVIDIA GPU with 8 GB+ VRAM, CUDA 12.x driver, conda. The ViT-Large checkpoint is ~2.6 GB.</p>
+<pre>git clone --recursive https://github.com/naver/mast3r
+cd mast3r
+conda create -n mast3r python=3.11 -y &amp;&amp; conda activate mast3r
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+pip install -r requirements.txt
+mkdir -p checkpoints
+wget https://download.europe.naverlabs.com/ComputerVision/MASt3R/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth -P checkpoints/</pre>
+<p>Quickest look: <code>python demo.py --model_name MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric</code> starts a Gradio page on <code>localhost:7860</code>; drop in two photos, get an interactive 3D view and a downloadable GLB. For the programmatic version:</p>
+<pre>from mast3r.model import AsymmetricMASt3R
+from dust3r.inference import inference
+from dust3r.utils.image import load_images
+
+model = AsymmetricMASt3R.from_pretrained(
+    "checkpoints/MASt3R_ViTLarge_BaseDecoder_512_catmlpdpt_metric.pth").to("cuda")
+imgs = load_images(["a.jpg", "b.jpg"], size=512)
+out  = inference([tuple(imgs)], model, "cuda", batch_size=1)
+
+pts_a  = out["pred1"]["pts3d"]                 # H x W x 3, camera-A frame
+pts_b  = out["pred2"]["pts3d_in_other_view"]   # B's pixels, also in A's frame
+conf_a = out["pred1"]["conf"]                  # per-pixel confidence, &gt;= 1</pre>
+<p>Interpretation: both pointmaps live in camera A's frame, so the relative pose is implicit in <code>pts_b</code> (recover it with a Procrustes fit, or use the repo's global aligner). The metric checkpoint outputs roughly real-world meters; expect scale within 10 to 20 percent on ordinary indoor scenes, worse on unusual optics. To export: mask pixels with <code>conf &lt; 1.5</code> (starting point, tune by eye), stack the rest into an N×3 array, write a PLY with open3d or trimesh, view in MeshLab.</p>
+<p>Honest numbers: on an RTX 4090 a 512-px pair takes about 0.2 s with ~6 GB peak VRAM; a laptop 3060 runs it in roughly a second; CPU-only takes minutes per pair, fine for one experiment, useless beyond. Now the instructive part: feed it two photos with <em>no overlap</em> (two different rooms). It still answers. You get two plausible pointmaps welded into one frame at some hallucinated relative pose, and while confidence dips, it does not reliably crash to zero. A classical pipeline would return "0 inliers, no estimate": an honest failure. The feed-forward model has no abstain path; the prior always fills in an answer. That single experiment is the whole argument of Section 6.5, runnable in ten minutes.</p>
+</div>
+
+<h2><span class="sec-no">6.5</span>Where ML Still Loses to Geometry</h2>
+<p>This section is the debate ammunition. Not "networks bad", but five specific places where the geometric stack retains a structural advantage in 2026.</p>
+<p><strong>Extrapolation off the training manifold.</strong> Epipolar geometry holds for every camera that ever will be built; a matcher trained on photographs holds for data resembling photographs. Fisheye lenses, thermal imagers, underwater scattering, upside-down mounting, heavy rolling shutter: each is a step off the manifold, and performance degrades unpredictably rather than gracefully. The classical stack needs a calibration file to handle a new lens. The learned stack may need a retraining campaign, and you will not know until you test.</p>
+<p><strong>Latency and VRAM on embedded compute.</strong> The robot's GPU is shared: perception, learned SLAM modules, video encode, maybe a language model, all contending on a Jetson-class device with a power budget in the tens of watts. SuperPoint plus LightGlue at 640×480 costs on the order of 15 to 30 ms per frame on an Orin with TensorRT, which is affordable; DROID-class dense systems want roughly 8 to 11 GB of VRAM and desktop-class throughput, which is not. DPVO shrinks it to a few GB and remains a meaningful line item. Meanwhile the factor-graph back-end runs on two CPU cores. Every learned module must argue for its slice of the GPU against everything else the robot does.</p>
+<p><strong>Calibration and metric guarantees.</strong> A geometric pipeline consumes your camera's actual intrinsics and extrinsics (Chapter 2) and produces estimates whose error statistics you can derive and audit: reprojection errors in pixels, covariances from the information matrix. A network was trained on other people's cameras and carries their assumptions invisibly. When a customer asks "what is your localization accuracy, with what confidence bound", the geometric stack has an answer that survives cross-examination.</p>
+<p><strong>Certification and testability.</strong> Safety cases want requirements traced to components, bounded input-output behavior, and regression tests that mean something. A χ² gate is one line of auditable math. A 300M-parameter matcher is a statistical artifact whose behavior on untested inputs is an empirical question, and "the transformer felt strongly about it" is not an incident report. This is why learned modules ship inside classically guarded loops in regulated domains, if they ship at all.</p>
+<p><strong>Failure style: silent versus graceful.</strong> When ICP degrades, residuals grow, inlier fractions fall, and the covariance balloons; you can watch it fail in telemetry and act. When a network fails off-distribution, it often fails at full confidence, producing outputs shaped exactly like good ones. The MASt3R no-overlap experiment in Setup B is the canonical demonstration. Geometric degradation is a slope; learned failure is a cliff with a painted-on road.</p>
+<div class="keypoint">Geometry's advantages are structural, not temporary: it extrapolates by construction, its failures are observable, and its guarantees are auditable. Any learned component you deploy must either inherit those properties from a classical wrapper or answer for their absence.</div>
+
+<h2><span class="sec-no">6.6</span>The Hybrid Default</h2>
+<p>The 2026 production pattern is not in dispute: a learned front-end feeding a classical estimator, the factor-graph machinery of Chapter 1 under the sensor pipelines of Chapters 3 through 5. What separates a considered design from a buzzword is <em>where you draw the boundary</em>, because the boundary determines which failures the learned side absorbs and which safeguards the classical side retains. Three concrete placements, in increasing order of learned responsibility:</p>
+<p><strong>Architecture A: classical stack, learned retrieval.</strong> Keep ORB-SLAM3 or RTAB-Map (Chapter 5) intact and replace only the loop-candidate source with SALAD or MixVPR descriptors. The boundary sits at <em>loop closure proposals</em>. What it absorbs: appearance change across hours, seasons, and lighting, exactly where BoW dies. What it risks: almost nothing, because every proposal still passes geometric verification and graph-consistency gating; a bad network output is a wasted RANSAC call, not a corrupted map. This is the highest benefit-to-risk swap in SLAM, and the right first move for an existing product.</p>
+<p><strong>Architecture B: learned features and matching, classical estimation.</strong> SuperPoint plus LightGlue produce correspondences; a classical VIO or factor-graph back-end consumes them as it would any measurements. The boundary sits at <em>2D matches</em>. What it absorbs: front-end brittleness under blur, low light, and weak texture, meaning tracking itself gets tougher, not just loop closure. What it preserves: the failure signature stays classical and observable (inlier counts, reprojection residuals, χ² tests), so your existing health monitoring still works. The cost: a GPU in the per-frame hot loop, and a latency budget you must defend. This is the default architecture for new visual systems in 2026, and it is exactly the stack Setup A runs offline.</p>
+<p><strong>Architecture C: learned dense geometry as a measurement.</strong> Monodepth or DUSt3R-style pointmaps enter the estimator as depth measurements with honest (inflated, correlated) covariances, or in the extreme, MASt3R-SLAM makes the feed-forward model the front-end outright. The boundary sits at <em>3D measurements</em>. What it absorbs: monocular scale ambiguity, initialization in textureless scenes, dense geometry a sparse pipeline can never provide. What it demands: covariance discipline and consistency gating, because the failure modes of Section 6.5 (correlated scale error, confident hallucination) now enter through the measurement model, the one door the estimator trusts most. Run this boundary only with per-frame scale/shift alignment against sparse geometric points and residual gating on everything.</p>
+
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 265" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <g font-size="12">
+    <text x="14" y="56" fill="#23201a" font-weight="bold">A</text>
+    <rect x="40" y="34" width="215" height="38" rx="6" fill="none" stroke="#a97b1f" stroke-width="1.8"/>
+    <text x="147" y="57" fill="#a97b1f" text-anchor="middle">VPR retrieval (SALAD)</text>
+    <line x1="285" y1="30" x2="285" y2="76" stroke="#b3401e" stroke-width="2" stroke-dasharray="5 4"/>
+    <rect x="315" y="34" width="300" height="38" rx="6" fill="none" stroke="#0e5f5b" stroke-width="1.8"/>
+    <text x="465" y="57" fill="#0e5f5b" text-anchor="middle">full classical SLAM + verification</text>
+    <text x="630" y="57" fill="#23201a" font-size="11">absorbs: seasons,</text>
+    <text x="630" y="71" fill="#23201a" font-size="11">lighting, viewpoint</text>
+
+    <text x="14" y="141" fill="#23201a" font-weight="bold">B</text>
+    <rect x="40" y="119" width="215" height="38" rx="6" fill="none" stroke="#a97b1f" stroke-width="1.8"/>
+    <text x="147" y="142" fill="#a97b1f" text-anchor="middle">SuperPoint + LightGlue</text>
+    <line x1="285" y1="115" x2="285" y2="161" stroke="#b3401e" stroke-width="2" stroke-dasharray="5 4"/>
+    <rect x="315" y="119" width="300" height="38" rx="6" fill="none" stroke="#0e5f5b" stroke-width="1.8"/>
+    <text x="465" y="142" fill="#0e5f5b" text-anchor="middle">VIO / factor graph (Ch. 1)</text>
+    <text x="630" y="142" fill="#23201a" font-size="11">absorbs: blur, low</text>
+    <text x="630" y="156" fill="#23201a" font-size="11">light, weak texture</text>
+
+    <text x="14" y="226" fill="#23201a" font-weight="bold">C</text>
+    <rect x="40" y="204" width="215" height="38" rx="6" fill="none" stroke="#a97b1f" stroke-width="1.8"/>
+    <text x="147" y="227" fill="#a97b1f" text-anchor="middle">monodepth / pointmaps</text>
+    <line x1="285" y1="200" x2="285" y2="246" stroke="#b3401e" stroke-width="2" stroke-dasharray="5 4"/>
+    <rect x="315" y="204" width="300" height="38" rx="6" fill="none" stroke="#0e5f5b" stroke-width="1.8"/>
+    <text x="465" y="227" fill="#0e5f5b" text-anchor="middle">fusion + TSDF, gated by residuals</text>
+    <text x="630" y="227" fill="#23201a" font-size="11">absorbs: scale,</text>
+    <text x="630" y="241" fill="#23201a" font-size="11">textureless init</text>
+  </g>
+  <text x="285" y="18" font-size="11" fill="#b3401e" text-anchor="middle">the boundary</text>
+</svg>
+</div>
+<figcaption>Fig 6.2: three hybrid boundary placements. Gold is learned, teal is classical, the dashed rust line is where trust changes hands.</figcaption>
+</figure>
+
+<div class="analogy">A hybrid SLAM system is a courtroom. The network is an eager eyewitness: fast, perceptive, occasionally certain about things that never happened. RANSAC is the cross-examination, the χ² gate is the rules of evidence, and the factor graph is the judge who weighs everything admitted. You want sharp witnesses. You do not let a witness write the verdict.</div>
+<div class="warfield">A pattern seen in more than one postmortem: a team swaps in a learned matcher, accuracy improves on every benchmark, and monitoring stays green for months. Then a new site has LED lighting that flickers at the camera's shutter frequency, the matcher's inlier counts stay high (it matches the flicker bands, consistently, on both frames), and the map shears. The lesson is not "networks fail". It is that your validation set is now a load-bearing part of the system, and a site survey belongs in your deployment checklist next to the calibration run.</div>
+
+<h2><span class="sec-no">6.7</span>The Trade-Offs, Argued Both Sides</h2>
+<p>Interviewers push here, and they usually push whichever side you did not take. Prepare both.</p>
+<table>
+  <tr><th>Axis</th><th>Learned</th><th>Classical</th></tr>
+  <tr><td>Generalization vs guarantees</td><td>Fails silently out of distribution, confidently wrong in scenes unlike training data</td><td>Fails loudly: inlier counts crash, residuals explode, you can detect it. Loud failure is a safety feature</td></tr>
+  <tr><td>Compute</td><td>Shares the robot's GPU with everything else; DROID-class wants desktop hardware</td><td>Back-ends run on CPU cores you already have</td></tr>
+  <tr><td>Data appetite</td><td>Self-supervised where possible (SuperPoint, monodepth); flow and metric depth need ground truth, hence TartanAir</td><td>Needs calibration, not datasets</td></tr>
+  <tr><td>Failure detection</td><td>Confidence scores are rankings, poorly calibrated as probabilities</td><td>χ² tests and inlier counts: cheap, trustworthy runtime checks</td></tr>
+  <tr><td>Certification and debugging</td><td>Behavior on untested inputs is an open empirical question</td><td>Explainable failure beats two percent more accuracy at a safety-critical customer</td></tr>
+</table>
+<p><strong>Robustness versus interpretability</strong> is the axis interviewers reach for first, and the honest answer is that it is not a strict trade: Architecture B keeps learned robustness while preserving classical observability, because the failure signals live downstream of the boundary. The real trade sits at depth 2 and beyond, where the observable signals thin out.</p>
+<p><strong>Data cost versus engineering cost</strong> is the axis managers reach for. A classical stack costs senior engineering time: months of tuning, per-site parameter files, an expert on call. A learned stack converts that into data cost: collection campaigns, labeling or self-supervision infrastructure, evaluation harnesses, retraining pipelines. Fleets amortize data cost beautifully, which is why fleet operators lean learned. A three-robot pilot project amortizes neither, which is why sensible small deployments start classical with learned retrieval bolted on.</p>
+<p><strong>And sometimes learned is the only option.</strong> Say this in the debate, because it is true and it shows range: no classical descriptor survives severe appearance change. Cross-season place recognition (summer foliage to bare winter branches), day-night relocalization, smoke and fog to clear air: hand-crafted features and BoW simply die, while descriptors trained on revisit pairs across those exact changes keep working. If the requirement is "recognize this place in February that you mapped in July", there is no geometric alternative to buy. The question is not whether to use learning there, but how thick a geometric verification wall to build behind it.</p>
+
+<h2><span class="sec-no">6.8</span>Reading List, in Priority Order</h2>
+<a class="paper" href="https://arxiv.org/abs/1712.07629"><span class="p-title">SuperPoint: Self-Supervised Interest Point Detection and Description</span><span class="p-meta">DeTone, Malisiewicz, Rabinovich · CVPR-W 2018 · arXiv:1712.07629</span><span class="p-why">Half of the practical pair. The homographic-adaptation self-supervision trick is worth understanding on its own.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2306.13643"><span class="p-title">LightGlue: Local Feature Matching at Light Speed</span><span class="p-meta">Lindenberger, Sarlin, Pollefeys · ICCV 2023 · arXiv:2306.13643</span><span class="p-why">The other half of the pair, and the matcher you would actually deploy: compute adapts to pair difficulty.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2108.10869"><span class="p-title">DROID-SLAM: Deep Visual SLAM Through Differentiable Bundle Adjustment</span><span class="p-meta">Teed &amp; Deng · NeurIPS 2021 · arXiv:2108.10869</span><span class="p-why">Re-read the DBA section through this chapter's lens; it is the single most-cited learned-SLAM idea.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2003.14338"><span class="p-title">TartanAir: A Dataset to Push the Limits of Visual SLAM</span><span class="p-meta">Wang, Zhu, Wang, Hu et al. · IROS 2020 · arXiv:2003.14338</span><span class="p-why">The synthetic data that trained the depth-2 era. Read it to understand why sim-to-real works for correspondence.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2406.09414"><span class="p-title">Depth Anything V2</span><span class="p-meta">Yang, Kang, Huang, Zhao et al. · NeurIPS 2024 · arXiv:2406.09414</span><span class="p-why">How monocular depth got good enough to become a standard prior, and where the metric fine print hides.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2312.14132"><span class="p-title">DUSt3R: Geometric 3D Vision Made Easy</span><span class="p-meta">Wang, Leroy, Cabon, Chidlovskii, Revaud · CVPR 2024 · arXiv:2312.14132</span><span class="p-why">The pointmap idea: two images in, dense geometry out, no calibration required. Start of the feed-forward line.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2406.09756"><span class="p-title">MASt3R: Grounding Image Matching in 3D</span><span class="p-meta">Leroy, Cabon, Revaud · ECCV 2024 · arXiv:2406.09756</span><span class="p-why">DUSt3R with metric scale and a matching head; the checkpoint Setup B runs, and the base of MASt3R-SLAM.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2303.02190"><span class="p-title">MixVPR: Feature Mixing for Visual Place Recognition</span><span class="p-meta">Ali-bey, Chaib-draa, Giguère · WACV 2023 · arXiv:2303.02190</span><span class="p-why">The place-recognition upgrade path past NetVLAD; pair with SALAD (arXiv:2311.15937) for the current frontier.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1806.05620"><span class="p-title">DynaSLAM: Tracking, Mapping and Inpainting in Dynamic Scenes</span><span class="p-meta">Bescos, Fácil, Civera, Neira · RA-L 2018 · arXiv:1806.05620</span><span class="p-why">The dynamic-masking recipe that still ships: segment the movers, verify the rest with multi-view geometry.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2401.09101"><span class="p-title">PIN-SLAM: LiDAR SLAM Using a Point-Based Implicit Neural Representation</span><span class="p-meta">Pan, Zhong, Wiesmann, Posewsky, Behley, Stachniss · T-RO 2024 · arXiv:2401.09101</span><span class="p-why">Learned lidar mapping done practically: globally consistent through loop closures, and it actually runs.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2201.13360"><span class="p-title">Hydra: A Real-Time Spatial Perception System for 3D Scene Graph Construction</span><span class="p-meta">Hughes, Chang, Carlone · RSS 2022 · arXiv:2201.13360 · successor: Clio (2024)</span><span class="p-why">Skim for what a scene graph is and why "which room" beats "which voxel" for real tasks.</span></a>
+
+<h2><span class="sec-no">6.9</span>Interview Questions, Answer Out Loud First</h2>
+<details class="qa"><summary>Where would you add learning to a classical SLAM stack first, and why?</summary><div class="a"><p>Place recognition, then features and matching. Appearance is precisely where classical methods are weakest (BoW and ORB die under lighting change, blur, and viewpoint shift) and where networks are strongest. It is also the cheapest risk: the geometric back-end still verifies every proposal, so a bad network suggestion gets vetoed by RANSAC instead of corrupting the map. Maximum benefit, minimum blast radius.</p></div></details>
+<details class="qa"><summary>Why does the differentiable bundle adjustment layer matter in DROID-SLAM?</summary><div class="a"><p>It divides labor correctly. The solver guarantees the output is geometrically consistent, so that structure never has to be learned from data. Because gradients flow through the solver during training, the network is optimized to produce correspondences that the solver turns into accurate poses: it learns to generate good measurements, not to imitate geometry. Contrast with PoseNet-style regression, which lacks the geometric bottleneck and degenerates into memorizing the scene.</p></div></details>
+<details class="qa"><summary>Your learned matcher hallucinates matches in a repetitive warehouse. How do you catch it?</summary><div class="a"><p>Never trust the network's own confidence; wrap it in classical statistics. First, geometric verification: proposed matches must yield a consistent pose under RANSAC with an inlier count above threshold. Second, hypothesis testing over time: require consistent evidence across frames, as RTAB-Map's Bayesian filter does (Chapter 5). Third, covariance and χ² gating in the back-end, so a loop edge that fights the rest of the graph gets down-weighted or switched off via robust kernels or switchable constraints. The theme: learned proposals, classical vetoes.</p></div></details>
+<details class="qa"><summary>Neural map or OctoMap for navigation, today?</summary><div class="a"><p>For the planning interface, OctoMap or an ESDF still wins: planners need cheap, deterministic occupied/free/unknown and distance queries with predictable latency (Chapter 8). Neural maps win where you need reconstruction quality, compression, or semantics. PIN-SLAM is closing the practicality gap on the lidar side because its SDF answers distance queries natively, but the sober 2026 answer is a classical map for navigation and a neural map wherever its extra properties pay rent.</p></div></details>
+<details class="qa"><summary>Where would you NOT put a network in a SLAM system?</summary><div class="a"><p>Anywhere geometry is already near-optimal and the failure cost is high: the optimization back-end, lidar scan matching in structured environments, timestamp handling, and calibration. A factor-graph solver is exact, fast on CPU, and auditable; a network there adds risk and subtracts guarantees while chasing a solved problem. Same for the safety path: anything feeding an emergency-stop decision should have failure modes you can enumerate. The general rule: networks replace hand-crafted heuristics over appearance, not derivable math over geometry.</p></div></details>
+<details class="qa"><summary>How do you validate a learned front-end before shipping it?</summary><div class="a"><p>Three layers. Offline: match precision-recall and downstream ATE/RPE against the classical baseline on standard benchmarks plus a curated in-domain set that includes your known hard cases (Chapter 7 covers the metrics). Shadow mode: run the learned module in parallel with the incumbent on real robots, log disagreements, and inspect the tail rather than the mean, since the mean will flatter the network. Runtime: ship it behind the classical gates (inlier thresholds, χ² checks) with per-site health telemetry, and keep a fallback path to the classical module. Promotion is an evaluation event, not a code merge.</p></div></details>
+<details class="qa"><summary>You feed monocular learned depth into a metric SLAM system. What breaks?</summary><div class="a"><p>Scale, first and worst: most monodepth is affine-invariant, correct up to unknown per-image scale and shift, so raw fusion injects measurements in unknown units. Even metric-tuned models carry training-distribution bias and silently assume intrinsics like the ones they trained on, giving spatially correlated errors of 5 to 20 percent that averaging cannot remove; TSDF fusion then bends walls and bowls floors. Consecutive predictions also flicker in scale because each frame is independent. The workable pattern: solve per-frame scale and shift against sparse geometric points, inflate covariances to reflect correlated error, gate on residuals, and treat the depth as a prior rather than a stereo replacement.</p></div></details>
+<details class="qa"><summary>Your robot maps a campus in July and must relocalize in February. What does it take?</summary><div class="a"><p>This is the case where learning is the only option: foliage, snow, and sun angle change the appearance so much that hand-crafted descriptors and BoW retrieval simply die. Use a place-recognition model trained on cross-condition revisit pairs (SALAD or MixVPR class), which learns invariance to the things that change and sensitivity to the things that do not, and pair it with a matcher that tolerates appearance shift for the verification step. Keep geometric verification mandatory, since repetitive winter scenes raise the false-positive risk. If the deployment allows, refresh the map with verified February loop closures so the descriptor database spans both conditions.</p></div></details>
+<details class="qa"><summary>You operate a robot fleet. How do you build a data engine for learned SLAM components?</summary><div class="a"><p>Turn the fleet's existing infrastructure into a flywheel. On-robot logging captures sensor data plus the classical stack's own outputs: verified loop closures, inlier statistics, localization confidence. Those verifications are free labels. OTA infrastructure pushes updated models out and pulls hard cases back for training: low-confidence episodes, near-failures, sites with anomalous telemetry. Fine-tune place recognition and matching on your own environments, and evaluate against the classical baseline before promotion. If you have personally built the OTA and logging layer, say so; infrastructure you own turning into a data engine is the strongest possible close.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

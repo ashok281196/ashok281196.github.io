@@ -25,6 +25,17 @@ const SITE = {
         { label: '8 tours · 47 matches' },
         { label: 'updated Jul 2026' }
       ]
+    },
+    {
+      file: 'reading/slam/index.html',
+      title: 'SLAM: Zero to Hero — A Field Book',
+      desc: 'A field book on SLAM: foundations, estimation math, sensors and calibration, lidar and visual SLAM, RTAB-Map, learned methods, evaluation, and navigation on top of the map. Worked setups in every chapter.',
+      meta: [
+        { label: 'LIVE', hot: true },
+        { label: 'robotics' },
+        { label: '9 chapters' },
+        { label: 'updated Jul 2026' }
+      ]
     }
   ],
 
