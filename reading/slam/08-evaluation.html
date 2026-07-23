@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Ch. 7 · Evaluation, Datasets &amp; Benchmarks · SLAM: Zero to Hero</title>
+<title>Ch. 8 · Evaluation, Datasets &amp; Benchmarks · SLAM: Zero to Hero</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
@@ -14,24 +14,24 @@
 <div class="topbar" id="booktop"></div>
 
 <header class="chapter-head">
-  <div class="chapter-num">07</div>
-  <div class="chapter-kicker">Chapter Seven · Numbers or It Didn't Happen</div>
+  <div class="chapter-num">08</div>
+  <div class="chapter-kicker">Chapter Eight · Numbers or It Didn't Happen</div>
   <h1>Evaluation, Datasets &amp; Benchmarks</h1>
   <p class="chapter-sub">Anyone can show you a map that looks right. This chapter is about proving it: the metrics, the ground truth, the datasets, and a protocol you can defend in a design review.</p>
 </header>
 
-<h2><span class="sec-no">7.1</span>Why Evaluation Is Its Own Skill</h2>
+<h2><span class="sec-no">8.1</span>Why Evaluation Is Its Own Skill</h2>
 <p>Every SLAM demo looks right. The point cloud is dense, the trajectory is a smooth ribbon, the loop visibly snaps shut in the viewer. And none of that tells you whether the robot ended the run 4&nbsp;cm or 4&nbsp;m from where it believed it was. Human eyes are spectacularly bad at judging metric accuracy from a 3D viewer: a map can be off by 2% of scale, sheared by a degree of uncalibrated IMU mounting, or missing an entire wing that the operator never drove through, and it will still screenshot beautifully.</p>
 <p>The deeper problem is that in the field there is no ground truth. Your warehouse has no motion capture rig. So evaluation splits into two distinct activities: <strong>benchmarking</strong> on public datasets where someone spent real money on a reference trajectory, which tells you how your algorithm compares to the literature, and <strong>field evaluation</strong> on your own robot, which requires you to manufacture partial ground truth (surveyed markers, return-to-start tricks, a slower but better reference system) and to be honest about what you can and cannot claim. Both are engineering work, not an afterthought for the last week of the project.</p>
 <p>It is also the interviewer's favorite trap. "Your SLAM works. Prove it." Candidates who answer with viewer screenshots stop being senior candidates at that moment. The expected answer names a metric, an alignment convention, a dataset, a number of runs, and a failure-counting policy. By the end of this chapter that answer will be reflex.</p>
 <div class="keypoint">A SLAM system without an evaluation protocol is a demo. The protocol is: which metric, aligned how, against what reference of known accuracy, over how many runs, with failures counted how. Five decisions. Interviewers probe all five.</div>
 
-<h2><span class="sec-no">7.2</span>Trajectory Metrics That Matter</h2>
+<h2><span class="sec-no">8.2</span>Trajectory Metrics That Matter</h2>
 <p>Two metrics dominate, both introduced to the community in the form we use today by <a href="https://cvg.cit.tum.de/data/datasets/rgbd-dataset">Sturm et al.'s TUM RGB-D benchmark (IROS 2012)</a>: absolute trajectory error and relative pose error. They answer different questions, and each one lies in a specific way, so you report both.</p>
 
 <h3>Align First, Then Measure</h3>
 <p>Before any comparison, remember that your estimator starts at its own arbitrary origin. The estimate lives in one coordinate frame, the ground truth in another, and the offset between them is not an error, it is a gauge freedom (Chapter 1's unobservable directions, back again). So step zero is to find the rigid transform that best fits the estimate onto the reference, in the least-squares sense. The closed-form solution is <strong>Umeyama's method</strong> (1991): given two matched point sets it returns the optimal rotation, translation, and optionally a scale factor. For metric systems (stereo, RGB-D, lidar, VIO) you align with a scale-free SE(3) transform. For monocular vision, where scale is unobservable, you must align in Sim(3), letting scale float; anything else measures the arbitrary initial scale rather than the algorithm.</p>
-<p>That scale switch is not a technicality. A Sim(3)-aligned monocular result silently forgives all global scale error, so a mono number and a stereo number in the same table are not comparing the same thing. Papers that hide this in a footnote are committing sin number two of Section 7.8.</p>
+<p>That scale switch is not a technicality. A Sim(3)-aligned monocular result silently forgives all global scale error, so a mono number and a stereo number in the same table are not comparing the same thing. Papers that hide this in a footnote are committing sin number two of Section 8.8.</p>
 
 <h3>ATE and RPE, Precisely</h3>
 <pre><code class="language-text">Notation: Q_1..Q_N ground truth poses, P_1..P_N estimated poses, both in SE(3),
@@ -50,7 +50,7 @@ RPE:   over pose pairs (i, i+D), D fixed in seconds, meters, or frames:
        E_i = ( Q_i^-1 * Q_{i+D} )^-1 * ( P_i^-1 * P_{i+D} )
        RPE_trans = rmse of || trans(E_i) ||        RPE_rot = rmse of angle(rot(E_i))
        No global alignment needed: relative motions cancel the frame offset.</code></pre>
-<p><strong>ATE</strong> measures global consistency: after the best rigid fit, how far is each estimated pose from where it should be? Loop closures improve it dramatically because they bend the whole trajectory back into shape. <strong>RPE</strong> measures local accuracy: over each 1-second or 10-meter chunk, how wrong was the estimated motion? It is the drift-rate metric, and it barely notices loop closures. The classic pattern: a loop-closing system posts a great ATE with mediocre RPE (globally consistent, locally jittery), while a good odometry-only stack posts excellent RPE and an ATE that grows with every meter of drift. If you feed a controller (Chapter 8), RPE jitter is what shakes the robot; if you draw a floor plan, ATE is what warps it.</p>
+<p><strong>ATE</strong> measures global consistency: after the best rigid fit, how far is each estimated pose from where it should be? Loop closures improve it dramatically because they bend the whole trajectory back into shape. <strong>RPE</strong> measures local accuracy: over each 1-second or 10-meter chunk, how wrong was the estimated motion? It is the drift-rate metric, and it barely notices loop closures. The classic pattern: a loop-closing system posts a great ATE with mediocre RPE (globally consistent, locally jittery), while a good odometry-only stack posts excellent RPE and an ATE that grows with every meter of drift. If you feed a controller (Chapter 9), RPE jitter is what shakes the robot; if you draw a floor plan, ATE is what warps it.</p>
 <div class="analogy">ATE is grading a traced drawing: slide and rotate the tracing paper until it fits the original as well as possible, then measure the remaining gaps everywhere. RPE ignores where the paper sits and instead compares each individual pencil stroke, its length and its direction, to the corresponding stroke in the original. A drawing can have perfect strokes that accumulate into the wrong overall shape, and vice versa.</div>
 <figure>
 <div class="svgwrap">
@@ -78,7 +78,7 @@ RPE:   over pose pairs (i, i+D), D fixed in seconds, meters, or frames:
   <text x="500" y="262" font-size="12" fill="#a97b1f">error = mismatch of increments, frame-free</text>
 </svg>
 </div>
-<figcaption>Fig 7.1: ATE compares globally aligned poses, RPE compares motion increments. Neither implies the other.</figcaption>
+<figcaption>Fig 8.1: ATE compares globally aligned poses, RPE compares motion increments. Neither implies the other.</figcaption>
 </figure>
 
 <h3>Drift as a Percentage, and Per Axis</h3>
@@ -105,7 +105,7 @@ RPE:   over pose pairs (i, i+D), D fixed in seconds, meters, or frames:
 </dl>
 <div class="keypoint">ATE scores the trajectory as a shape after the best rigid fit. RPE scores the motion increments and is immune to alignment. Report both, state the alignment group (SE(3) or Sim(3)), and normalize drift as % of distance and deg/m so numbers transfer between routes.</div>
 
-<h2><span class="sec-no">7.3</span>The Tooling: evo and Friends</h2>
+<h2><span class="sec-no">8.3</span>The Tooling: evo and Friends</h2>
 <p>Nobody computes these by hand. The community standard is <a href="https://github.com/MichaelGrupp/evo">evo</a>, a Python package that reads every common trajectory format, aligns, computes APE and RPE with full statistics, plots, and packages results into zip files you can compare across runs. The command vocabulary is small:</p>
 <pre><code class="language-bash">pip install evo --upgrade
 
@@ -139,7 +139,7 @@ evo_res run*_ape.zip -p --save_table results.csv                     # compare r
   <text x="480" y="62" font-size="12" fill="#b3401e">that growth rate is the drift</text>
 </svg>
 </div>
-<figcaption>Fig 7.2: relative error against sub-trajectory length, the standard odometry plot produced by rpg_trajectory_evaluation.</figcaption>
+<figcaption>Fig 8.2: relative error against sub-trajectory length, the standard odometry plot produced by rpg_trajectory_evaluation.</figcaption>
 </figure>
 <p>Half of real evaluation work is format wrangling, so learn the formats once:</p>
 <pre><code class="language-text">TUM   : timestamp tx ty tz qx qy qz qw     one pose per line, seconds, gravity-free choice of frame
@@ -170,7 +170,7 @@ evo_res ape.zip rpe.zip -p</code></pre>
 <p>Sanity checks: units are meters, so 0.5 rmse on a desk sequence means a broken pipeline, not a bad algorithm; if the aligned plot is mirrored, suspect quaternion convention; if only a handful of poses get associated, your timestamps are in the wrong epoch or unit.</p>
 </div>
 
-<h2><span class="sec-no">7.4</span>Ground Truth, and Where It Comes From</h2>
+<h2><span class="sec-no">8.4</span>Ground Truth, and Where It Comes From</h2>
 <p>"Ground truth" is a marketing term. What datasets actually have is a reference measurement whose error is 10 to 100 times smaller than the thing being evaluated, and every source has a price, a working volume, and a failure mode you should be able to recite:</p>
 <table>
   <tr><th>Source</th><th>Accuracy</th><th>Rate</th><th>Where it works</th><th>Cost</th><th>The catch</th></tr>
@@ -191,7 +191,7 @@ evo_res ape.zip rpe.zip -p</code></pre>
 <p>Know the circularity trap in your bones. If your reference trajectory came from a lidar-ICP pipeline and your system under test is a lidar-ICP pipeline, shared systematic errors cancel and your scores flatter you. The reference must be independent in mechanism, not just in software version: survey instruments for a SLAM stack, or at minimum a far richer sensor suite run without real-time limits.</p>
 <div class="keypoint">Ground truth is a measurement with much smaller error bars, never truth. Know the reference's own accuracy, and stop trusting comparisons the moment your system's errors approach it: a 1&nbsp;cm SLAM cannot be ranked by a 2&nbsp;cm RTK reference.</div>
 
-<h2><span class="sec-no">7.5</span>The Datasets Everyone Reports On</h2>
+<h2><span class="sec-no">8.5</span>The Datasets Everyone Reports On</h2>
 <p>Datasets are where the field agrees to disagree in public. Each one encodes a sensor suite, an environment, and a set of failure modes it punishes, and knowing which is which tells you how to read any results table:</p>
 <table>
   <tr><th>Dataset</th><th>Year</th><th>Platform and sensors</th><th>Ground truth</th><th>What it punishes</th></tr>
@@ -205,24 +205,24 @@ evo_res ape.zip rpe.zip -p</code></pre>
   <tr><td><strong>M2DGR</strong></td><td>2021</td><td>Ground robot: VLP-32C, six cameras including fisheye and infrared, GNSS, IMU</td><td>RTK outdoors, laser tracker and mocap indoors</td><td>Indoor-outdoor transitions, elevators, night runs</td></tr>
   <tr><td><strong>DARPA SubT</strong></td><td>2019 to 2021</td><td>Competition, teams' own robots, typically lidar + IMU + thermal</td><td>Surveyed artifact positions, scored within 5 m</td><td>Dust, darkness, kilometers of tunnel, no GPS ever</td></tr>
 </table>
-<p><a href="https://www.cvlibs.net/datasets/kitti/eval_odometry.php">KITTI odometry</a> is the automotive standard: 22 driving sequences from Karlsruhe, 11 with public ground truth and 11 held out for the leaderboard, scored by the segment-based drift metric of Section 7.2. Its 10&nbsp;Hz cameras and abundant moving traffic make it a stress test for outlier rejection, and its long straight roads made monocular scale drift famous.</p>
+<p><a href="https://www.cvlibs.net/datasets/kitti/eval_odometry.php">KITTI odometry</a> is the automotive standard: 22 driving sequences from Karlsruhe, 11 with public ground truth and 11 held out for the leaderboard, scored by the segment-based drift metric of Section 8.2. Its 10&nbsp;Hz cameras and abundant moving traffic make it a stress test for outlier rejection, and its long straight roads made monocular scale drift famous.</p>
 <p><a href="https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets">EuRoC MAV</a> (Burri et al., IJRR 2016) is eleven drone flights, graded easy to difficult, with superb hardware synchronization. It has been the standard VIO table for a decade: every visual-inertial paper you read in Chapter 4 reports centimeter ATEs on MH_01 through V2_03. The difficult Vicon-room sequences still break systems with motion blur and near-darkness.</p>
 <p><a href="https://cvg.cit.tum.de/data/datasets/rgbd-dataset">TUM RGB-D</a> (Sturm et al., IROS 2012) is the dataset that taught the community how to evaluate at all: it shipped ATE, RPE, association scripts, and an online evaluation service alongside the data. Kinect v1 imagery, handheld and wheeled sequences, mocap reference. Still the default for RGB-D systems like Chapter 5's RTAB-Map.</p>
 <p><a href="https://cvg.cit.tum.de/data/datasets/visual-inertial-dataset">TUM VI</a> covers what EuRoC cannot: long handheld routes through corridors and outdoors where the mocap reference exists only in the room where runs start and end. It therefore measures accumulated drift honestly, and its photometrically calibrated fisheye stereo made it the benchmark of choice for direct methods.</p>
 <p><a href="https://ori-drs.github.io/newer-college-dataset/">Newer College</a> and its successors matter because the reference covers the whole outdoor trajectory (the ICP-against-survey-scan trick above), so lidar SLAM can finally be graded away from a mocap cage. <a href="http://robots.engin.umich.edu/nclt/">NCLT</a> is the long-term-autonomy dataset: 27 sessions across 15 months of Michigan weather, the benchmark for whether your map survives seasons. The <a href="https://hilti-challenge.com/">Hilti SLAM Challenge</a> brought prize money and millimeter-surveyed construction sites, and promptly humbled a generation of systems that were excellent on EuRoC; its sequences are the closest public proxy to "real industrial deployment." <a href="https://github.com/SJTU-ViSYS/M2DGR">M2DGR</a> gives ground robots the multi-sensor treatment with the transitions that actually kill deployments (doorways to sunlight, elevators, night). And the <a href="https://www.subtchallenge.com/">DARPA SubT challenge</a> was scored not by ATE but by reporting artifact positions within 5&nbsp;m in underground courses, a reminder that in the end the customer metric is "did the map put the thing where the thing was."</p>
 <p>Reading a results table now becomes pattern matching. A system that wins EuRoC but skips Hilti is telling you something. So is a lidar paper that reports KITTI (flat, structured, 64-beam) but not Newer College (handheld, sparse, vegetated). Absence of a dataset from a table is data.</p>
 
-<h2><span class="sec-no">7.6</span>Scoring the Map Itself</h2>
+<h2><span class="sec-no">8.6</span>Scoring the Map Itself</h2>
 <p>Trajectory error is a proxy. If the deliverable is the map (Chapter 3's map products), you can and should score the map directly against a reference point cloud from a survey scanner. The two halves of that score pull against each other:</p>
 <pre><code class="language-text">accuracy      = mean over p in map of      dist(p, reference)     "is what I built correct?"
 completeness  = fraction of q in reference with dist(q, map) &lt; tau  "did I build all of it?"
 chamfer       = mean_{p in map} dist(p, ref)  +  mean_{q in ref} dist(q, map)
 F-score(tau)  = harmonic mean of precision and recall at threshold tau</code></pre>
-<p>Accuracy alone rewards timid maps (only map what you are sure of); completeness alone rewards reckless ones (spray points everywhere). Chamfer distance and the F-score at a stated threshold (commonly 5 or 10&nbsp;cm) combine both, and the reconstruction community brought the F-score convention over to neural mapping papers in Chapter 6. Use point-to-plane distances on structured scenes if you can; point-to-point penalizes sampling density differences that are not errors.</p>
+<p>Accuracy alone rewards timid maps (only map what you are sure of); completeness alone rewards reckless ones (spray points everywhere). Chamfer distance and the F-score at a stated threshold (commonly 5 or 10&nbsp;cm) combine both, and the reconstruction community brought the F-score convention over to neural mapping papers in Chapter 7. Use point-to-plane distances on structured scenes if you can; point-to-point penalizes sampling density differences that are not errors.</p>
 <p>For 2D occupancy grids the comparison is cell-wise against a reference grid over the cells both maps claim to know: a confusion matrix of occupied/free, or simply whether a planner finds the same routes in both (a map metric your operations team actually cares about). When no reference exists at all, no-reference sharpness measures like <strong>mean map entropy</strong> and mean plane variance score how crisp the cloud is: compute the local surface distribution around each point and average its entropy; double walls and smeared ceilings show up as high entropy. They catch degradation between runs even though they cannot certify absolute accuracy.</p>
 <p>Why do map metrics lag trajectory metrics in adoption? Reference clouds cost a survey scanner and a site day, alignment between map and reference adds its own ambiguity, and for decades the trajectory correlated well enough to stand in for the map. That logic inverts in industry: a surveying customer does not care where the scanner thought it was, only that the wall is where the wall is. Expect map-level evaluation to be the part of your protocol that impresses people.</p>
 
-<h2><span class="sec-no">7.7</span>Benchmarking Your Own Robot Honestly</h2>
+<h2><span class="sec-no">8.7</span>Benchmarking Your Own Robot Honestly</h2>
 <p>Public benchmarks rank algorithms. Your robot needs a different instrument: a repeatable protocol that detects regressions and predicts field behavior. A defensible baseline protocol looks like this:</p>
 <ol>
   <li><strong>Fix the routes.</strong> Two or three routes marked with tape on the floor, driven the same direction at the same speed, including at least one full loop where the finish marker is the start marker. A loop gives you a free metric with zero equipment: return-to-start error, measured with a ruler against the tape.</li>
@@ -236,7 +236,7 @@ F-score(tau)  = harmonic mean of precision and recall at threshold tau</code></p
 <div class="warfield"><strong>Things that bite.</strong> Warm-up matters: the first run after power-on often scores worse (IMU bias not settled, exposure adapting), so either discard a warm-up lap by policy or randomize run order. People contaminate runs by walking through them, which is fine, that is your real environment, but log it so a bad number can be explained instead of deleted. And beware the demo route effect: a route chosen because it works is a route that stopped measuring anything months ago.</div>
 <div class="keypoint">Honest robot benchmarking = fixed routes, five or more runs, median and worst reported, hard failures counted separately, same-day calibration, everything bagged. It fits on an index card and most teams still do not do it.</div>
 
-<h2><span class="sec-no">7.8</span>The Seven Deadly Sins of SLAM Evaluation</h2>
+<h2><span class="sec-no">8.8</span>The Seven Deadly Sins of SLAM Evaluation</h2>
 <p>Each of these appears in published papers and in internal slide decks. Learn to spot them in others' results and, less comfortably, in your own:</p>
 <ol>
   <li><strong>The Single Golden Run.</strong> One trajectory, chosen after the fact, presented as typical. Nondeterministic systems (RANSAC, multi-threaded optimization) can vary 2x between identical runs; a single number is a coin flip you got to re-flip.</li>
@@ -245,12 +245,12 @@ F-score(tau)  = harmonic mean of precision and recall at threshold tau</code></p
   <li><strong>The Vanishing Failure Run.</strong> "Runs where tracking was lost were excluded." Excluded from the average, and from the paper, and from the reader's risk model. Failures are the most decision-relevant statistic you have.</li>
   <li><strong>ATE-Only Reporting.</strong> A strong loop closure can pull global error down while local odometry jitters badly, and it is the jitter that shakes the controller and blurs the map. Without RPE alongside ATE, half the behavior is invisible.</li>
   <li><strong>Tuning on the Test Set.</strong> Config files with per-sequence parameters for EuRoC sequences. If your yaml mentions <code>MH_04</code> by name, the benchmark has stopped measuring generalization.</li>
-  <li><strong>Screenshot-Driven Development.</strong> Merging a change because the map "looks cleaner." Looks-cleaner does not survive contact with Section 7.1. Every one of the six sins above starts here, with the belief that eyes are a metric.</li>
+  <li><strong>Screenshot-Driven Development.</strong> Merging a change because the map "looks cleaner." Looks-cleaner does not survive contact with Section 8.1. Every one of the six sins above starts here, with the belief that eyes are a metric.</li>
 </ol>
 
-<h2><span class="sec-no">7.9</span>Regression Testing SLAM in CI</h2>
+<h2><span class="sec-no">8.9</span>Regression Testing SLAM in CI</h2>
 <p>Everything above becomes routine the day it runs on every commit. The pattern is golden-run replay: a small set of blessed recordings fed through the full SLAM stack in CI, the output trajectory scored with evo, and hard gates on the result. A SLAM regression then fails a pipeline instead of a customer site.</p>
-<p>Three kinds of gates earn their keep. <strong>Accuracy gates</strong>: ATE rmse against the recording's reference trajectory below a threshold, with the threshold set from measured run-to-run variance (blessed median plus three standard deviations over ten replays), not from optimism. <strong>Resource gates</strong>: wall-clock processing time and peak memory as hard budgets, because a 20% CPU regression is a field failure on your smallest robot even when accuracy is untouched. <strong>Liveness gates</strong>: the stack produced poses for the whole recording, no gap longer than N seconds, loop closure fired on the loop route. Where does the reference trajectory come from? For a mocap or RTK-covered recording, from the instrument; for everything else, bless a pseudo-ground-truth run (Section 7.4): the full offline pipeline at leisure settings, reviewed once by a human, then frozen. The gate then measures drift from blessed behavior, which is regression testing, and only claims that.</p>
+<p>Three kinds of gates earn their keep. <strong>Accuracy gates</strong>: ATE rmse against the recording's reference trajectory below a threshold, with the threshold set from measured run-to-run variance (blessed median plus three standard deviations over ten replays), not from optimism. <strong>Resource gates</strong>: wall-clock processing time and peak memory as hard budgets, because a 20% CPU regression is a field failure on your smallest robot even when accuracy is untouched. <strong>Liveness gates</strong>: the stack produced poses for the whole recording, no gap longer than N seconds, loop closure fired on the loop route. Where does the reference trajectory come from? For a mocap or RTK-covered recording, from the instrument; for everything else, bless a pseudo-ground-truth run (Section 8.4): the full offline pipeline at leisure settings, reviewed once by a human, then frozen. The gate then measures drift from blessed behavior, which is regression testing, and only claims that.</p>
 <div class="setup">
 <p><strong>Worked Setup B: a Minimal CI Regression Harness.</strong> Goal: a bash-plus-Python skeleton that runs your SLAM binary over a golden recording (a frozen dataset directory of scans or RGB-D frames), computes ATE with evo as a library, and exits nonzero if the gate fails. Any of this book's runnable systems fits the <code>SLAM_CMD</code> slot: <code>kiss_icp_pipeline</code> from Chapter 3, <code>rtabmap-rgbd_dataset</code> from Chapter 5, or your own C++ binary, as long as it writes a TUM-format trajectory. Prereqs: Ubuntu 24.04, <code>pip install evo</code> in the CI image.</p>
 <pre><code class="language-bash"># ci/slam_regress.sh
@@ -289,7 +289,7 @@ sys.exit(0 if rmse &lt; thresh else 1)</code></pre>
 </div>
 <div class="keypoint">Golden-run replay plus an ATE gate plus resource budgets turns SLAM quality from a quarterly panic into a per-commit fact. The gate threshold comes from measured replay variance, and goldens change only through review, never by silent overwrite.</div>
 
-<h2><span class="sec-no">7.10</span>Reading List</h2>
+<h2><span class="sec-no">8.10</span>Reading List</h2>
 <a class="paper" href="https://cvg.cit.tum.de/data/datasets/rgbd-dataset"><span class="p-title">A Benchmark for the Evaluation of RGB-D SLAM Systems</span><span class="p-meta">Sturm, Engelhard, Endres, Burgard, Cremers · IROS 2012</span><span class="p-why">The paper that standardized ATE and RPE and shipped the tools; the vocabulary of this chapter comes from here.</span></a>
 <a class="paper" href="https://www.cvlibs.net/datasets/kitti/eval_odometry.php"><span class="p-title">Are We Ready for Autonomous Driving? The KITTI Vision Benchmark Suite</span><span class="p-meta">Geiger, Lenz, Urtasun · CVPR 2012</span><span class="p-why">The automotive benchmark and the %-per-segment drift metric that every odometry paper still quotes.</span></a>
 <a class="paper" href="https://projects.asl.ethz.ch/datasets/doku.php?id=kmavvisualinertialdatasets"><span class="p-title">The EuRoC Micro Aerial Vehicle Datasets</span><span class="p-meta">Burri, Nikolic, Gohl, Schneider, Rehder, Omari, Achtelik, Siegwart · IJRR 2016</span><span class="p-why">Eleven drone flights with millimeter references; the VIO results table of the last decade.</span></a>
@@ -298,7 +298,7 @@ sys.exit(0 if rmse &lt; thresh else 1)</code></pre>
 <a class="paper" href="https://github.com/uzh-rpg/rpg_trajectory_evaluation"><span class="p-title">rpg_trajectory_evaluation</span><span class="p-meta">Robotics and Perception Group, UZH · GitHub</span><span class="p-why">Publication-grade relative-error box plots and multi-run aggregation, implementing the IROS 2018 tutorial.</span></a>
 <a class="paper" href="https://arxiv.org/abs/2109.11316"><span class="p-title">The Hilti SLAM Challenge Dataset</span><span class="p-meta">Helmberger, Morin, Berner, Kumar, Cioffi, Scaramuzza · RA-L 2022 · arXiv:2109.11316</span><span class="p-why">Millimeter-surveyed construction sites that humbled benchmark-tuned systems; the closest public proxy to industrial deployment.</span></a>
 
-<h2><span class="sec-no">7.11</span>Interview Questions</h2>
+<h2><span class="sec-no">8.11</span>Interview Questions</h2>
 <details class="qa"><summary>Explain ATE versus RPE, and when each one lies.</summary><div class="a"><p>ATE aligns the estimated trajectory to ground truth with a best-fit rigid transform and measures per-pose residuals, so it scores global consistency. RPE compares motion increments over a fixed step, so it scores local drift and needs no alignment. ATE lies when loop closures mask terrible odometry: the global shape is fine while local motion is jittery, which wrecks control. RPE lies in the other direction: an odometry with slow systematic drift can post excellent per-second RPE while the map warps into uselessness over 500 meters. That is why serious reports include both, plus drift as a percentage of distance.</p></div></details>
 <details class="qa"><summary>Why must you align trajectories before computing ATE, and what does Sim(3) alignment hide?</summary><div class="a"><p>The estimator starts in an arbitrary frame, so the offset between estimate and reference frames is gauge freedom, not error; without alignment you mostly measure that arbitrary offset. Umeyama's closed-form least-squares fit removes it in SE(3). Sim(3) adds a free scale factor, which is mandatory for monocular systems where scale is unobservable, but it absorbs all global scale error. Applied to a stereo, RGB-D, or lidar result it silently deletes the error class those sensors are supposed to prevent, so the alignment group must always be stated next to the number.</p></div></details>
 <details class="qa"><summary>Design an evaluation for a warehouse AMR with no motion capture.</summary><div class="a"><p>Layer cheap references: taped fixed routes with return-to-start error measured by ruler on every loop; a handful of surveyed floor markers (total station or even careful tape measurement to building columns) that the robot must stop on, giving absolute checkpoints at centimeter level; and a pseudo-ground-truth trajectory from an offline run of the full pipeline against a survey-scanner map of the site if the budget allows one scanning day. Run five or more repetitions per route, report median and worst, count interventions separately, and bag everything so future versions replay the same data. The claim you can make honestly is checkpoint error and repeatability, not millimeter ATE, and saying so is part of the answer.</p></div></details>

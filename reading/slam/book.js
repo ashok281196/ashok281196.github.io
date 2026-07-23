@@ -63,26 +63,34 @@ const BOOK = {
       tag: 'Hands-on'
     },
     {
-      file: '06-learning-slam.html',
+      file: '06-orb-slam.html',
       num: '06',
+      title: 'ORB-SLAM: Every Version, Explained and Run',
+      navTitle: 'Ch. 6 · ORB-SLAM, Every Version',
+      sub: 'The four threads every release shares, what changed from v1 to v2 to v3, and two builds you run yourself.',
+      tag: 'Deep Dive'
+    },
+    {
+      file: '07-learning-slam.html',
+      num: '07',
       title: 'Learning-Based SLAM',
-      navTitle: 'Ch. 6 · Learning-Based SLAM',
+      navTitle: 'Ch. 7 · Learning-Based SLAM',
       sub: 'Where machine learning actually plugs in, and where it still loses to forty-year-old geometry.',
       tag: 'ML × SLAM'
     },
     {
-      file: '07-evaluation.html',
-      num: '07',
+      file: '08-evaluation.html',
+      num: '08',
       title: 'Evaluation, Datasets & Benchmarks',
-      navTitle: 'Ch. 7 · Evaluation & Benchmarks',
+      navTitle: 'Ch. 8 · Evaluation & Benchmarks',
       sub: 'ATE, RPE, the datasets everyone reports on, the evo toolchain, and how to benchmark your own robot honestly.',
       tag: 'Rigor'
     },
     {
-      file: '08-planning-nav.html',
-      num: '08',
+      file: '09-planning-nav.html',
+      num: '09',
       title: 'Planning, Navigation & Localization',
-      navTitle: 'Ch. 8 · Planning, Navigation & Localization',
+      navTitle: 'Ch. 9 · Planning, Navigation & Localization',
       sub: 'What the robot does with the map: costmaps, A* to MPPI, and the frame contract that holds it all together.',
       tag: 'Autonomy'
     }

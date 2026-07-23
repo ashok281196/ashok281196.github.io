@@ -100,11 +100,11 @@
   <li><strong><a href="https://arxiv.org/abs/1712.07629">SuperPoint (DeTone et al., 2018)</a></strong>: learned keypoint detector and descriptor. The training story is worth retelling: it teaches itself on synthetic corners, then bootstraps to real images by "homographic adaptation," no human labels anywhere. Alternatives with different trade-offs: DISK (differentiable, denser) and ALIKED (lighter, deformable).</li>
   <li><strong>SuperGlue</strong> (Sarlin et al., CVPR 2020): matching as a learned assignment problem. A graph neural network with attention looks at <em>both</em> images' keypoints together before deciding matches, which buys huge robustness at real compute cost.</li>
   <li><strong><a href="https://arxiv.org/abs/2306.13643">LightGlue (Lindenberger et al., 2023)</a></strong>: the deployable successor. It adapts compute to difficulty, exiting early on easy pairs, and runs several times faster than SuperGlue at equal accuracy. <a href="https://arxiv.org/abs/2104.00680">LoFTR</a> and RoMa go further with dense, detector-free matching for the hardest pairs.</li>
-  <li><strong>Place recognition</strong> upgraded from bag-of-words to learned global descriptors: <a href="https://arxiv.org/abs/1511.07247">NetVLAD (2016)</a>, then MixVPR, SALAD, and <a href="https://arxiv.org/abs/2502.17237">MegaLoc (2025)</a>. These survive viewpoint and season changes that break DBoW2 (Chapter 6 goes deeper).</li>
-  <li><strong><a href="https://github.com/cvg/Hierarchical-Localization">hloc</a></strong>: the standard toolbox gluing all of the above into visual relocalization pipelines; the Chapter 6 worked setup builds one.</li>
+  <li><strong>Place recognition</strong> upgraded from bag-of-words to learned global descriptors: <a href="https://arxiv.org/abs/1511.07247">NetVLAD (2016)</a>, then MixVPR, SALAD, and <a href="https://arxiv.org/abs/2502.17237">MegaLoc (2025)</a>. These survive viewpoint and season changes that break DBoW2 (Chapter 7 goes deeper).</li>
+  <li><strong><a href="https://github.com/cvg/Hierarchical-Localization">hloc</a></strong>: the standard toolbox gluing all of the above into visual relocalization pipelines; the Chapter 7 worked setup builds one.</li>
 </ul>
 <p>When does swapping learned parts into a classical stack actually pay? Three honest triggers: your robot works across lighting changes (warehouse day/night shifts), your environment is texture-poor (corridors, white walls), or relocalization against an old map keeps failing at more than about 30 degrees of viewpoint change. If ORB features track fine in your environment, era 3 buys you latency for nothing.</p>
-<div class="keypoint">Era 3 is the "what would you actually ship in 2026" answer: learned front-end where appearance is brittle, classical optimization back-end where geometry is already optimal. Cheap to adopt, keeps interpretability. Chapter 6 dissects this philosophy.</div>
+<div class="keypoint">Era 3 is the "what would you actually ship in 2026" answer: learned front-end where appearance is brittle, classical optimization back-end where geometry is already optimal. Cheap to adopt, keeps interpretability. Chapter 7 dissects this philosophy.</div>
 
 <h2><span class="sec-no">4.6</span>Era 4, the DROID Lineage</h2>
 <p><strong><a href="https://arxiv.org/abs/2108.10869">DROID-SLAM (Teed &amp; Deng, NeurIPS 2021)</a></strong> is one idea executed with unusual thoroughness. A recurrent network (a conv-GRU, borrowed from the RAFT optical-flow architecture) looks at pairs of frames and repeatedly <em>revises</em> a dense correspondence field, along with a confidence weight per pixel. After each revision, a <strong>differentiable bundle adjustment (DBA) layer</strong> updates all camera poses and per-pixel depths to be consistent with those correspondences. The DBA layer is an actual Gauss-Newton solver embedded inside the network, with gradients flowing through the solve during training. Predict, solve, repeat.</p>
@@ -129,7 +129,7 @@ python demo.py \
   --imagedir euroc/MH_01/mav0/cam0/data \
   --calib calib/euroc.txt \
   --stride 2 --viz</code></pre>
-<p>Expected: a viewer with camera frustum and sparse patch cloud, pose updates at real-time rate on a mid-range GPU, and a final trajectory you can save with <code>--save_trajectory</code> (score it against ground truth with the Chapter 7 evo recipe; a healthy run lands in the few-cm ATE range on MH_01).</p>
+<p>Expected: a viewer with camera frustum and sparse patch cloud, pose updates at real-time rate on a mid-range GPU, and a final trajectory you can save with <code>--save_trajectory</code> (score it against ground truth with the Chapter 8 evo recipe; a healthy run lands in the few-cm ATE range on MH_01).</p>
 <p>Sanity checks: (1) VRAM overflow → lower <code>PATCHES_PER_FRAME</code> or <code>BUFFER_SIZE</code> in <code>config/default.yaml</code>, the knobs that trade memory for robustness; (2) trajectory in wrong scale → normal, this is monocular VO, align with scale correction in evo; (3) stutter at start → the first seconds initialize the patch graph, judge nothing before frame 100; (4) wrong calib file → poses go to soup immediately, check image resolution matches the calib line.</p>
 </div>
 
@@ -150,7 +150,7 @@ python demo.py \
   <li><strong><a href="https://arxiv.org/abs/2503.11651">VGGT (Wang et al., CVPR 2025)</a></strong>: one feed-forward transformer emits cameras, depths, and pointmaps for <em>many</em> views in seconds; VGGT-SLAM scales it with submap alignment. Streaming and causal variants: Spann3R, CUT3R, StreamVGGT. MegaSaM (2024-25) gets robust structure and motion from casual phone video.</li>
   <li>Supporting cast: monocular <em>metric depth</em> foundation models (<a href="https://arxiv.org/abs/2406.09414">Depth Anything v2 (2024)</a>, Metric3D v2, UniDepth) dropped into classical pipelines as priors that dissolve the scale ambiguity.</li>
 </ul>
-<p>Where the claims need scrutiny: "no bundle adjustment" usually means per-pair geometry is feed-forward, while multi-view consistency still comes from an alignment optimization over pointmaps. And metric scale, when advertised, is learned from training data, so it is as good as the training distribution's resemblance to your scene. Chapter 6 returns to both caveats.</p>
+<p>Where the claims need scrutiny: "no bundle adjustment" usually means per-pair geometry is feed-forward, while multi-view consistency still comes from an alignment optimization over pointmaps. And metric scale, when advertised, is learned from training data, so it is as good as the training distribution's resemblance to your scene. Chapter 7 returns to both caveats.</p>
 <div class="keypoint">The era-6 positioning line: <em>"Geometry is becoming a learned prior that you query, not something you re-derive per scene. SLAM's remaining job becomes alignment plus memory management on top of foundation-model outputs."</em> Say this and you sound like you read papers last month.</div>
 
 <h2><span class="sec-no">4.9</span>Choosing a Visual System in 2026</h2>
@@ -169,7 +169,7 @@ python demo.py \
 </div>
 
 <h2><span class="sec-no">4.10</span>Benchmarks, in One Paragraph</h2>
-<p>The vocabulary you need here is two acronyms deep: <strong>ATE</strong> for global consistency, <strong>RPE</strong> for drift rate, both measured after trajectory alignment, on datasets like EuRoC, TUM RGB-D, KITTI, and TartanAir. That is deliberately shallow because <a href="07-evaluation.html">Chapter 7</a> now owns evaluation end to end: the metrics' math, the evo toolchain, every dataset worth knowing, and how to benchmark your own robot without lying to yourself.</p>
+<p>The vocabulary you need here is two acronyms deep: <strong>ATE</strong> for global consistency, <strong>RPE</strong> for drift rate, both measured after trajectory alignment, on datasets like EuRoC, TUM RGB-D, KITTI, and TartanAir. That is deliberately shallow because <a href="08-evaluation.html">Chapter 8</a> now owns evaluation end to end: the metrics' math, the evo toolchain, every dataset worth knowing, and how to benchmark your own robot without lying to yourself.</p>
 
 <div class="setup">
 <p><strong>Goal:</strong> build ORB-SLAM3 and run stereo-inertial on EuRoC MH_01, the canonical first visual SLAM experiment. Prereqs: Ubuntu 22.04/24.04, 8 GB RAM, OpenCV ≥ 4.4, Eigen3, and Pangolin 0.6 built from source.</p>
@@ -190,7 +190,7 @@ mkdir -p ~/euroc/MH01 &amp;&amp; unzip MH_01_easy.zip -d ~/euroc/MH01</code></pr
   Examples/Stereo-Inertial/EuRoC.yaml \
   ~/euroc/MH01 \
   Examples/Stereo-Inertial/EuRoC_TimeStamps/MH01.txt</code></pre>
-<p>Expected: the Pangolin viewer shows green tracked features and a growing keyframe graph; console prints the IMU initialization stages during the first seconds of motion; trajectory files (<code>f_*.txt</code>, <code>kf_*.txt</code>, TUM format) land in the working directory when the sequence ends. Score them with evo per Chapter 7; healthy stereo-inertial MH_01 is a few centimeters ATE.</p>
+<p>Expected: the Pangolin viewer shows green tracked features and a growing keyframe graph; console prints the IMU initialization stages during the first seconds of motion; trajectory files (<code>f_*.txt</code>, <code>kf_*.txt</code>, TUM format) land in the working directory when the sequence ends. Score them with evo per Chapter 8; healthy stereo-inertial MH_01 is a few centimeters ATE.</p>
 <p>Classic failures: (1) segfault at startup → OpenCV version mismatch between build and runtime, rebuild both DBoW2/g2o thirdparty and the main tree; (2) build dies at 100% CPU → <code>./build.sh</code> uses all cores and runs out of RAM, edit it to <code>make -j2</code>; (3) "not enough acceleration" and no IMU init → the first 10 seconds of MH_01 are gentle, let it run, initialization completes once the drone excites the IMU; (4) viewer black over SSH → run local or set <code>--headless</code> style flags by disabling the viewer in the example's settings.</p>
 </div>
 
