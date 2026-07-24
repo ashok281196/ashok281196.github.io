@@ -79,6 +79,7 @@
 
   /* ---------- MAIN LAYOUT ---------- */
   .layout{ max-width: 1180px; margin: 0 auto; display:grid; grid-template-columns: 210px 1fr; gap: 0; }
+  .layout > *{ min-width: 0; width: 100%; }
   @media (max-width: 880px){ .layout{ grid-template-columns: 1fr; } }
 
   nav.rail{ position: sticky; top: 46px; align-self: start; padding: 40px 20px; }
