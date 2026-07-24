@@ -43,7 +43,8 @@
     padding: 12px 28px; display:flex; justify-content: space-between; align-items: baseline;
     font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
   }
-  .runhead span.book-title{ color: var(--ink); }
+  .runhead .book-title{ color: var(--ink); text-decoration: none; }
+  .runhead .book-title:hover, .runhead .book-title:focus-visible{ color: var(--accent); }
   .runhead span#currentChapter{ color: var(--accent); }
 
   /* ---------- COVER ---------- */
@@ -168,7 +169,7 @@
 <body>
 
   <div class="runhead">
-    <span class="book-title">The Interview Manual</span>
+    <a class="book-title" href="../../index.html">&larr; The Interview Manual</a>
     <span id="currentChapter">Cover</span>
   </div>
 
