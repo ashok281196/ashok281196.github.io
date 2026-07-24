@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 5 · Logging Framework · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">05</div>
+  <div class="chapter-kicker">Easy · 5 of 5</div>
+  <h1>Logging Framework: Pluggable Sinks via Strategy</h1>
+  <p class="chapter-sub">A logging library reduces to one filtering gate in front of a set of interchangeable output sinks, but the reference solution below stops at that gate — it stops short of the single global access point and the thread safety a logger actually needs once real threads start calling it.</p>
+</header>
+
+<h2><span class="sec-no">5.1</span>Problem Statement</h2>
+<p>Design a reusable logging library for application developers to embed in their own code — think a lightweight <code>log4j</code>. Call sites just say "log this," and everything about <em>where</em> the message ends up and <em>whether</em> it survives is configured once, elsewhere.</p>
+
+<div class="keypoint">A logger is a threshold gate (drop anything below the configured severity) sitting in front of a set of swappable output sinks, reached through exactly one shared instance, with a mutex making sure two threads never interleave a single line.</div>
+
+<p>Functional requirements:</p>
+<ul>
+<li>Log levels with a strict ordering: <code>DEBUG &lt; INFO &lt; WARN &lt; ERROR</code>. Any message below the configured threshold is <strong>dropped</strong>, silently.</li>
+<li><strong>Pluggable output sinks</strong> — console, file, and eventually network — switchable without touching a single call site.</li>
+<li>A <strong>single global access point</strong> for the logger, configured once at startup: level, sinks, format.</li>
+<li><strong>Thread-safe writes</strong> — multiple threads logging concurrently must never interleave the bytes of a single message.</li>
+</ul>
+
+<p>Non-functional constraints, which name the patterns outright:</p>
+<ul>
+<li>The logger is a <strong>Singleton</strong> — one shared instance, reached the same way from anywhere in the process.</li>
+<li>Sinks are a <strong>Strategy</strong> (an <code>Appender</code> interface) so output targets swap freely without changing the logger.</li>
+<li>Level filtering can be modeled as a <strong>Chain of Responsibility</strong> of level handlers, each answering "is this loud enough for me?"</li>
+<li>A <code>Formatter</code> abstraction controls the rendered layout of a message — a second, smaller Strategy, orthogonal to the sink.</li>
+</ul>
+
+<p>The expected public interface, given up front so the design effort goes into behavior, not signatures:</p>
+
+<pre><code class="language-cpp">enum class LogLevel { DEBUG, INFO, WARN, ERROR };
+
+struct LogMessage { LogLevel level; std::string text; /* timestamp, thread id ... */ };
+
+class Appender {                       // Strategy
+public:
+    virtual void append(const LogMessage&amp;) = 0;   // ConsoleAppender, FileAppender
+    virtual ~Appender() = default;
+};
+
+class Logger {
+public:
+    static Logger&amp; getInstance();      // Singleton
+    void log(LogLevel level, const std::string&amp; msg);
+    void setLevel(LogLevel level);
+    void addAppender(std::unique_ptr&lt;Appender&gt;);
+private:
+    Logger() = default;                // non-copyable, non-movable
+};</code></pre>
+
+<p>What the interviewer is really testing:</p>
+<ul>
+<li>Three patterns cooperating in one small surface — <strong>Singleton</strong>, <strong>Strategy</strong>, and <strong>Chain of Responsibility</strong> — without any of them entangling the others.</li>
+<li>That you mention <strong>thread safety</strong> explicitly: a mutex around the append path, or a producer-consumer queue feeding a background writer.</li>
+<li>A <code>Formatter</code> abstraction, separate from the sink, earns bonus points — it proves you keep "how it's rendered" and "where it goes" as two different axes of change.</li>
+</ul>
+
+<p>Follow-up questions to expect once the base design stands:</p>
+<ol>
+<li><strong>Async logging</strong> — hand messages to a background flush thread over a producer-consumer queue, so a slow sink doesn't block every caller.</li>
+<li><strong>Log rotation</strong> by file size or date.</li>
+<li><strong>Per-module loggers</strong> with independent levels and a parent/child fallback hierarchy, mirroring <code>log4j</code>.</li>
+</ol>
+
+<h2><span class="sec-no">5.2</span>How to Approach</h2>
+
+<h3>The Strategy Half: an <code>Appender</code> Interface</h3>
+<p>Start from the requirement that reads loudest: sinks must be "switchable without touching call sites." That sentence is the Strategy tell — one interface, N interchangeable implementations, and callers who never know which one is plugged in. The reference solution below gets exactly this piece right. <code>LogAppender</code> declares a single method, <code>append(const LogMessage&amp;)</code>; <code>ConsoleAppender</code> writes to <code>cout</code>, <code>FileAppender</code> writes to an <code>ofstream</code> opened in append mode, and <code>Logger</code> holds a <code>vector&lt;shared_ptr&lt;LogAppender&gt;&gt;</code> it iterates blindly. Adding a <code>NetworkAppender</code> later is one new subclass; nothing about <code>Logger::log</code> changes. That's the Strategy payoff, delivered.</p>
+
+<h3>Level Filtering, the Plain Version</h3>
+<p>The severity gate is a single guard clause: <code>if (!isEnabled(level)) return;</code>, where <code>isEnabled</code> compares the message's level against a stored <code>minLevel</code> using <code>static_cast&lt;int&gt;(level) &gt;= static_cast&lt;int&gt;(minLevel)</code>. This is the cheapest possible implementation of "messages below threshold are dropped" — no handler objects, no chain to walk, just one comparison before the fan-out to sinks. It works, and for a single flat threshold it's arguably the right amount of machinery. It just isn't the Chain of Responsibility the problem doc asks for, which matters the moment you want per-level routing (say, ERROR also pages someone) without touching <code>log()</code> again.</p>
+
+<div class="warfield">
+<p><strong>Singleton — asked for, not built.</strong> The expected interface names <code>static Logger&amp; getInstance()</code> with a private constructor. The actual <code>Logger</code> is a plain, publicly-constructible class instantiated directly in <code>main()</code> — <code>Logger logger("MyApp");</code>. Nothing stops a second instance from existing, so "single global access point" isn't enforced by the type, only by convention. Bolting it on is small and mechanical: make the constructor private, delete copy/move, and add a Meyers singleton accessor —
+<code>static Logger&amp; getInstance() { static Logger instance("app"); return instance; }</code>. The C++11 standard guarantees that function-local static initializes exactly once, even under concurrent first calls, so this is the fix and not a redesign.</p>
+<p><strong>Chain of Responsibility — asked for, not built.</strong> Level filtering here is one <code>if</code> inside <code>Logger::log</code>, not a chain of handler objects each owning a threshold and a <code>next</code> pointer. For a single flat cutoff the two are behaviorally identical. The gap shows up the moment a requirement wants per-level behavior — e.g. ERROR notifications on top of the normal sinks. A real <code>LevelHandler</code> node (threshold + <code>next</code>, <code>handle()</code> dispatches if the message clears its bar, else forwards down the chain) turns that into inserting one new link, rather than adding a second <code>if</code> to <code>log()</code>.</p>
+<p><strong>Thread safety — asked for, not built.</strong> There is no <code>std::mutex</code> anywhere in this file, and none of the containers (<code>vector&lt;shared_ptr&lt;LogAppender&gt;&gt;</code>, the <code>ofstream</code> inside <code>FileAppender</code>) are safe for concurrent writers. Two threads calling <code>log()</code> at once can genuinely interleave the bytes of two messages inside <code>ostream::operator&lt;&lt;</code>. The fix is one <code>std::mutex</code> guarding the fan-out loop in <code>log()</code> (a <code>std::lock_guard</code> taken right before the <code>for (appender : appenders)</code> pass), so "render + dispatch to every sink" for one message becomes atomic. Nothing else in the class needs to change.</p>
+<p><strong>Bonus finding, not a scope cut.</strong> Compiling and running this file turns up a real bug, not a missing feature: <code>enum class LogLevel { TRACE, ERROR, WARN, INFO, DEBUG }</code> assigns the underlying ints in declaration order — <code>TRACE=0, ERROR=1, WARN=2, INFO=3, DEBUG=4</code> — which is <em>not</em> the <code>DEBUG &lt; INFO &lt; WARN &lt; ERROR</code> severity order the problem statement asks for. Since <code>isEnabled</code> compares those raw ints against a default threshold of <code>INFO</code> (3), the actual run drops <strong>WARN</strong> (2 &lt; 3) and <strong>ERROR</strong> (1 &lt; 3) — the two most severe levels — while letting <strong>DEBUG</strong> (4 &gt;= 3) through despite the driver's own comment claiming it should be "filtered out, below INFO." Running the program confirms it: the console shows the DEBUG line and the INFO line, but "Low disk space" and "An error occurred" never print at all. The one-line fix is declaring the enum in actual severity order — <code>enum class LogLevel { DEBUG, INFO, WARN, ERROR }</code>, exactly as the problem doc's expected interface specifies.</p>
+</div>
+
+<p>None of this changes the shape of the design — it's the same three axes (who do I call, is it loud enough, where does it go) the reasoning always pointed at. What's missing is the layer of ceremony around that core: enforcing single-instance-ness at the type level, generalizing one <code>if</code> into a chain that scales to per-level routing, and a lock around the one place where concurrent callers actually touch shared state.</p>
+
+<h2><span class="sec-no">5.3</span>Whole Solution</h2>
+<p>The reference solution below is the working first pass described above: a <code>LogAppender</code> Strategy with console and file sinks, plus flat level-threshold filtering. It compiles and runs as shown — no <code>getInstance()</code>, no handler chain, no mutex, and the enum-ordering bug called out above is present exactly as written.</p>
+
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+
+enum class LogLevel {
+    TRACE,
+    ERROR,
+    WARN,
+    INFO,
+    DEBUG
+};
+
+string toString(LogLevel level){
+        switch(level){
+            case LogLevel :: TRACE : return "TRACE";
+            case LogLevel :: ERROR : return "ERROR";
+            case LogLevel :: WARN : return "WARN";
+            case LogLevel :: INFO : return "INFO";
+            case LogLevel :: DEBUG : return "DEBUG";
+            default: return "UNKNOWN";
+        }
+}
+
+class LogMessage{
+    private:
+        LogLevel level;
+        string message;
+        string source;
+        string timestamp;
+
+    public:
+        LogMessage(LogLevel level, const string&amp; message, const string&amp; source){
+            this-&gt;level = level;
+            this-&gt;message = message;
+            this-&gt;source = source;
+
+            time_t now = time(nullptr);
+            ostringstream oss;
+            oss &lt;&lt; put_time(localtime(&amp;now), "%Y-%-m%-d %H:%M:%S");
+            this-&gt;timestamp = oss.str();
+        }
+
+        string getFormattedMessage() const{
+            return "[" + timestamp + "] [" + toString(level) + "] [" + source + "] " + message;
+        }
+
+};
+
+class LogAppender{
+    public:
+        virtual ~LogAppender(){}
+        virtual void append(const LogMessage&amp; message) = 0;
+};
+
+class ConsoleAppender : public LogAppender{
+    public:
+        void append(const LogMessage&amp; message){
+            cout &lt;&lt; message.getFormattedMessage() &lt;&lt; endl;
+        }
+};
+
+class FileAppender : public LogAppender{
+    private:
+        ofstream file;
+    public:
+        FileAppender(const string&amp; filename){
+            file.open(filename, ios::app);
+        }
+        ~ FileAppender(){
+            if(file.is_open()){
+                file.close();
+            }
+        }
+        void append(const LogMessage&amp; message){
+            if(file.is_open()){
+                file &lt;&lt; message.getFormattedMessage() &lt;&lt; endl;
+            }
+        }
+};
+
+
+class Logger{
+    private:
+        string name;
+        LogLevel minLevel;
+        vector&lt;shared_ptr&lt;LogAppender&gt;&gt; appenders;
+
+        bool isEnabled(LogLevel level){
+            return static_cast&lt;int&gt;(level) &gt;= static_cast&lt;int&gt;(minLevel) ;
+        }
+
+    public:
+        Logger(const string&amp; name, LogLevel minLevel = LogLevel::INFO){
+            this-&gt;name = name;
+            this-&gt;minLevel = minLevel;
+        }
+
+        void addAppender(shared_ptr&lt;LogAppender&gt; appender){
+            appenders.push_back(appender);
+        }
+
+        void setMinLevel(LogLevel level){
+            minLevel = level;
+        }
+
+        void log(LogLevel level, const string&amp; message){
+            if(!isEnabled(level)){
+                return;
+            }
+
+            LogMessage record(level, message, name);
+            for(const auto&amp; appender: appenders){
+                appender-&gt;append(record);
+            }
+        }
+
+        void trace(const string&amp; message) { log(LogLevel::TRACE, message); }
+        void debug(const string&amp; message) { log(LogLevel::DEBUG, message); }
+        void info (const string&amp; message) { log(LogLevel::INFO,  message); }
+        void warn (const string&amp; message) { log(LogLevel::WARN,  message); }
+        void error(const string&amp; message) { log(LogLevel::ERROR, message); }
+    };
+
+
+
+int main(){
+
+    Logger logger("MyApp");
+    logger.addAppender(make_shared&lt;ConsoleAppender&gt;());
+    logger.addAppender(make_shared&lt;FileAppender&gt;("app.log"));
+
+    logger.debug("filtered out, below INFO");
+    logger.info ("Application started");
+    logger.warn ("Low disk space");
+    logger.error("An error occurred");
+
+    logger.setMinLevel(LogLevel::DEBUG);
+    logger.debug("Now visible");
+
+    return 0;
+}
+</code></pre>
+
+<details class="qa"><summary>How would you make this logger thread-safe without touching any call site?</summary><div class="a"><p>Add one <code>std::mutex</code> as a member of <code>Logger</code> and take a <code>std::lock_guard</code> at the top of <code>log()</code>, covering the level check, the <code>LogMessage</code> construction, and the whole fan-out loop over <code>appenders</code>. That makes "render this message and hand it to every sink" atomic per call, so two threads logging at once can never interleave the bytes of a single line. <code>addAppender</code> and <code>setMinLevel</code> should take the same lock, since a thread reconfiguring the logger while another is mid-log is exactly the same race. None of <code>ConsoleAppender</code>, <code>FileAppender</code>, or any call site needs to change — the fix is entirely inside <code>Logger</code>.</p></div></details>
+
+<details class="qa"><summary>How would you add a network sink without touching <code>Logger</code> at all?</summary><div class="a"><p>Write a new <code>NetworkAppender : public LogAppender</code> that implements <code>append(const LogMessage&amp;)</code> by shipping <code>message.getFormattedMessage()</code> over a socket or HTTP call, then wire it in at the call site with <code>logger.addAppender(make_shared&lt;NetworkAppender&gt;(host, port))</code>. That's the entire change. <code>Logger::log</code> only ever calls <code>appender-&gt;append(record)</code> through the base interface, so it has no idea whether it's talking to a console, a file, or a socket — which is exactly the "switchable without touching call sites" requirement the Strategy pattern exists to satisfy.</p></div></details>
+
+<details class="qa"><summary>This code has a level-filtering bug. Where is it, and how do you fix it?</summary><div class="a"><p>The enum <code>LogLevel { TRACE, ERROR, WARN, INFO, DEBUG }</code> assigns underlying ints in declaration order — TRACE=0, ERROR=1, WARN=2, INFO=3, DEBUG=4 — which does not match the intended severity order <code>DEBUG &lt; INFO &lt; WARN &lt; ERROR</code>. Since <code>isEnabled</code> filters by comparing those raw ints against a default threshold of INFO, running the program actually drops WARN and ERROR (the two levels that should never be silently dropped at an INFO threshold) while letting DEBUG through. The fix is purely in the enum declaration: list the levels in true ascending severity, <code>enum class LogLevel { DEBUG, INFO, WARN, ERROR }</code>, exactly as the problem statement's expected interface specifies. No other line of the class needs to change, because <code>isEnabled</code>'s comparison logic was correct all along — it was only ever as good as the ordering it was handed.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

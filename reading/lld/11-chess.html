@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 11 · Chess · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">11</div>
+  <div class="chapter-kicker">Hard · 1 of 5</div>
+  <h1>Chess: Piece Polymorphism and Undo via Command</h1>
+  <p class="chapter-sub">Each of the six piece types owns its own <code>canMove</code> geometry through a <code>Piece</code> base class, while every <code>Move</code> is a reversible Command whose <code>execute</code>/<code>undo</code> pair — reused to answer "does this leave my own king in check?" — turns self-check validation and undo/redo into the same trick played twice.</p>
+</header>
+
+<h2><span class="sec-no">11.1</span>Problem Statement</h2>
+<p>Design a two-player chess game engine: legal move generation for all six piece types, turn management, check / checkmate / stalemate detection, and undo/redo of moves.</p>
+<p><strong>Functional requirements.</strong> An 8×8 board with King, Queen, Rook, Bishop, Knight, and Pawn, each enforcing its <em>own</em> movement rules. Turn order alternates White then Black, and only legal moves are accepted. The engine detects check, checkmate, and stalemate. Special moves — castling, en passant, pawn promotion — are supported. Every move can be undone and redone.</p>
+<p><strong>Non-functional constraints, and they decide the whole design:</strong></p>
+<ul>
+  <li>Move rules must be <strong>polymorphic per piece</strong> — no giant <code>switch</code> on piece type.</li>
+  <li>Moves are modeled as <strong>Command</strong> objects that carry enough state to undo themselves, which is what enables undo/redo and a move-history list for free.</li>
+  <li>The board and move-validation logic must be <strong>testable in isolation</strong>, with no dependency on turns, clocks, or a running game.</li>
+</ul>
+<p>The interviewer typically hands you the shape of the public interface up front, deliberately naming the two patterns:</p>
+<pre><code class="language-cpp">class Piece {                          // polymorphic move rules
+public:
+    virtual bool canMove(const Board&amp;, const Cell&amp; from, const Cell&amp; to) const = 0;
+    virtual ~Piece() = default;
+protected:
+    Color color_;
+};
+
+class Move {                           // Command — supports undo
+public:
+    virtual void execute(Board&amp;) = 0;
+    virtual void undo(Board&amp;) = 0;
+    virtual ~Move() = default;
+};
+
+class Game {
+public:
+    MoveResult playMove(const Cell&amp; from, const Cell&amp; to);  // validates, applies, switches turn
+    void undo();
+    void redo();
+    GameStatus status() const;         // IN_PROGRESS / CHECK / CHECKMATE / STALEMATE / DRAW
+};</code></pre>
+<div class="keypoint">Chess LLD is a per-piece polymorphism problem (<code>canMove</code>) wrapped in a Command pattern (<code>Move::execute</code>/<code>undo</code>). Once every move is honestly reversible, "would this leave my king in check?" and "let the user undo" are the exact same mechanism, invoked twice for two different reasons.</div>
+<p><strong>What the interviewer is really testing:</strong> whether polymorphic piece rules come out clean (each <code>Piece</code> subclass owns its own <code>canMove</code>, nothing switches on type); whether the Command pattern is used correctly for undo/redo and history rather than bolted on after the fact; whether "would this move leave my own king in check?" is handled correctly, since it is the one rule that couples move validation back to game state; and whether special-case moves (castling, en passant, promotion) are handled without polluting the core pipeline with <code>if</code> chains.</p>
+<p><strong>Follow-up questions to expect:</strong> move history and PGN export with replay; a chess clock with time-out loss; a bot opponent plugged in behind a <code>MoveStrategy</code> interface (random first, minimax later — a Strategy-pattern seam); and networked two-client play, including how you'd serialize board state or stream moves.</p>
+
+<h2><span class="sec-no">11.2</span>How to Approach</h2>
+<p>Read the constraints like an interviewer wrote them, because they name the design. "Polymorphic per piece, no switch" is the headline: a <code>switch (pieceType)</code> answer fails on sight, so <code>Piece</code> must be abstract with one pure-virtual <code>canMove</code>, and every concrete piece answers only its own geometry. "Moves modeled as Command objects that carry enough state to undo" means undo/redo is not a bolt-on feature added at the end — it forces every move, from day one, to be a reversible object that remembers exactly what it overwrote: a captured piece, a moved-flag, an en-passant victim.</p>
+
+<h3>The Piece hierarchy: pure geometry, no rules</h3>
+<p><code>Piece::canMove(board, from, to)</code> answers one question only: "could this piece geometrically slide from <code>from</code> to <code>to</code> on <em>this</em> board?" It deliberately does not know about turns, whose move it is, or check. Rooks and Bishops and Queens are "sliders" that share a <code>pathClear</code> helper walking the straight or diagonal line between two squares and rejecting any occupied square in between; Knights are "jumpers" that skip that helper entirely, since nothing blocks an L-shaped hop. The King moves one square in any direction; the Pawn is the one piece whose rule genuinely branches three ways — a quiet single step, an opening two-step from its starting rank, and a diagonal capture — and still needs no <code>switch</code>, because all three branches live inside <em>one</em> subclass's <code>canMove</code>, not spread across a dispatcher.</p>
+<p>This pure-geometry answer is usually called <strong>pseudo-legal</strong>: legal by the piece's own shape, but not yet checked against the one global rule that couples back to game state.</p>
+
+<h3>Layering check, checkmate, and stalemate on top of move generation</h3>
+<p>"Would this move leave my own king in check?" cannot be answered by geometry alone — it requires actually making the move and asking whether any enemy piece now attacks the king's square. That single fact, <code>Board::isAttacked(kingSquare, enemyColor)</code>, is itself built from nothing more than a sweep that reuses <code>canMove</code>: a square is attacked if any enemy piece's pseudo-legal geometry reaches it. No piece needs a second, "attacking" rule — the same <code>canMove</code> answers both "can I move here" and "do I threaten this square."</p>
+<p>Check, checkmate, and stalemate then fall out of two yes/no facts, recomputed after every move: <em>is the side to move currently in check?</em> and <em>does that side have any legal move at all?</em> In check with no legal move is checkmate. Not in check with no legal move is stalemate. In check with at least one legal move is just check. Finding "any legal move at all" is brute force by design: try every pseudo-legal <code>from → to</code> for every piece of that color, apply it, test the king, and undo — the first one that survives proves a legal move exists.</p>
+<div class="keypoint">Thinking habit: decide up front what each method is allowed to know. <code>canMove</code> knowing about check would couple pure geometry to game state — exactly the coupling the problem statement's "testable in isolation" requirement forbids. Push that question one layer up, into <code>Game</code>.</div>
+
+<h3>Special-casing castling, en passant, and promotion</h3>
+<p>Naive designs let special moves leak into the core as <code>if (isCastle) …</code> scattered through move generation and application. The fix is the same lever as the piece hierarchy: a special move is <em>just another <code>Move</code> subclass</em>. <code>CastleMove</code> moves both the king and the rook in <code>execute</code> and restores both in <code>undo</code> — the core pipeline in <code>Game::playMove</code> never learns that two pieces moved instead of one; it only ever calls <code>execute</code>/<code>undo</code> through the <code>Move</code> interface. <code>Game</code> is responsible only for <em>recognizing castling intent</em> (a king sliding two squares along its own rank) and checking the castling preconditions — neither king nor rook has moved, the squares between them are empty, and the king is not currently in check — before it builds a <code>CastleMove</code> instead of a plain one.</p>
+<p>En passant and promotion follow the identical trick in sol.md's own telling: each would be one more <code>Move</code> subclass capturing whatever extra state its own undo needs (the en-passant victim's square; the pawn's pre-promotion identity). This chapter's synthesized program implements castling in full, since that is the one special move the source walkthrough carries end to end, including the <code>Game</code>-level intent recognition and precondition check. It deliberately does <em>not</em> implement en passant or pawn promotion, and simplifies the castling precondition check by skipping the "king does not pass through an attacked square" rule — the walkthrough names that rule in prose but never codes it, so the honest thing is to leave it as a one-line comment pointing at the extra <code>isAttacked</code> call rather than inventing rules the source never actually specifies.</p>
+<div class="warfield">A reversible Command must capture <em>everything</em> its execution overwrote. The captured piece and the moved-flag are the two easiest things to forget, and forgetting either is exactly where undo bugs hide: skip the moved-flag and a rolled-back rook can wrongly forfeit castling rights forever; skip the captured piece and undo resurrects an empty square instead of the piece that stood there.</div>
+
+<h3>Move as Command: execute/undo for free undo, redo, and self-check</h3>
+<p><code>Move</code> is a two-method interface — <code>execute(Board&amp;)</code> and <code>undo(Board&amp;)</code> — and every concrete move is a small, self-contained record of what it did. A <code>NormalMove</code> stashes the piece that moved, whatever piece (if any) it captured, and whether this was that piece's first move; <code>execute</code> relocates the piece and marks it moved, and <code>undo</code> reverses every one of those three writes exactly. Note that <code>Board</code> never deletes a captured piece on <code>execute</code> — ownership lives in a vector the <code>Board</code> holds independently of the grid, so the grid square simply stops pointing at the captured piece, and <code>undo</code> can point it right back.</p>
+<p><code>Game</code> keeps two stacks of these Commands, <code>undoStack_</code> and <code>redoStack_</code>. A played move pushes onto the undo stack and clears the redo stack; user-facing <code>undo()</code> pops one, calls its <code>undo</code>, and pushes it onto the redo stack; <code>redo()</code> does the mirror image with <code>execute</code>. None of that is chess-specific — it is the standard Command-pattern history mechanism, and it is also exactly what powers self-check validation: <code>playMove</code> builds the Command, calls <code>execute</code> immediately, checks whether the mover's own king is now attacked, and if so calls <code>undo</code> on the very same object and reports the move illegal. The "try it, test it, roll it back if wrong" idiom is not a separate code path from user-facing undo — it is the same method, called for a different reason.</p>
+<div class="keypoint">Thinking habit: once your Move objects are honestly reversible, "does this move leave my king in check?" is nearly free — it's apply, test, and maybe roll back, using machinery you already had to build for undo. Two patterns paying for each other is a sign the design is right, not a coincidence.</div>
+<dl class="jargon">
+  <dt>Pseudo-legal move</dt><dd>A move that satisfies a piece's own geometry (<code>canMove</code>) but has not yet been checked against the one rule that depends on game state: does it leave the mover's own king in check?</dd>
+  <dt>Self-check validation</dt><dd>The rule that a move is only fully legal if, after being applied, it does not leave the mover's own king attacked. Implemented as apply → test → roll back, reusing <code>Move::undo</code>.</dd>
+  <dt>Command pattern</dt><dd>Encapsulating an action (here, a chess move) as an object with <code>execute</code>/<code>undo</code>, so the action's history can be stored, replayed, and reversed without the caller knowing what kind of action it was.</dd>
+</dl>
+
+<h2><span class="sec-no">11.3</span>Whole Solution</h2>
+<p>The program below merges every incremental fragment from the walkthrough into one internally consistent file: <code>Piece</code> and its six concrete subclasses, the shared <code>pathClear</code> slider helper, <code>Board</code> with ownership of every piece and a cached king square per color, the <code>Move</code>/<code>NormalMove</code>/<code>CastleMove</code> Command hierarchy, and <code>Game</code> orchestrating turn order, self-check validation, status, and undo/redo. It compiles clean under <code>g++ -std=c++17 -Wall -Wextra</code> and the driver's five printed lines — a legal opening push, an out-of-turn rejection, a second legal move, a capture, and an undo followed by a replay of that same capture — all report exactly what they claim to.</p>
+<pre><code class="language-cpp">#include &lt;cstdlib&gt;
+#include &lt;iostream&gt;
+#include &lt;memory&gt;
+#include &lt;utility&gt;
+#include &lt;vector&gt;
+
+// ---------------------------------------------------------------------------
+// Enums: identity, the outcome of a move request, and overall game status.
+// ---------------------------------------------------------------------------
+enum class Color      { WHITE, BLACK };
+enum class GameStatus { IN_PROGRESS, CHECK, CHECKMATE, STALEMATE, DRAW };
+enum class MoveResult { OK, ILLEGAL, NOT_YOUR_TURN, GAME_OVER };
+
+class Piece;   // Cell needs a raw pointer to it
+class Board;   // Piece::canMove takes a Board by const reference
+
+// One square of the 8x8 grid. Board owns every Piece's lifetime; a Cell only
+// borrows a raw, non-owning pointer to whichever Piece (if any) stands here.
+struct Cell {
+    int row = 0, col = 0;
+    Piece* piece = nullptr;
+    bool isEmpty() const { return piece == nullptr; }
+};
+
+// ---------------------------------------------------------------------------
+// Piece: the polymorphic move-rule hierarchy. canMove is pure geometry only —
+// it knows nothing about turns or check, which is exactly what keeps it
+// testable in isolation with nothing but a bare Board.
+// ---------------------------------------------------------------------------
+class Piece {
+public:
+    explicit Piece(Color c) : color_(c) {}
+    virtual ~Piece() = default;
+
+    // "Could I legally slide from -&gt; to on THIS board?" Pure geometry only.
+    virtual bool canMove(const Board&amp;, const Cell&amp; from, const Cell&amp; to) const = 0;
+    virtual bool isKing() const { return false; }
+    virtual char symbol() const = 0;   // 'K','Q','R','B','N','P' -- handy for debug/PGN
+
+    Color color() const { return color_; }
+    bool  hasMoved() const { return moved_; }
+    void  setMoved(bool m) { moved_ = m; }
+
+protected:
+    // Shared helper: you can never land on your own piece.
+    bool destOk(const Cell&amp; to) const {
+        return to.isEmpty() || to.piece-&gt;color() != color_;
+    }
+    Color color_;
+    bool  moved_ = false;   // needed for castling rights and the pawn's first 2-step
+};
+
+// ---------------------------------------------------------------------------
+// Board: the 8x8 grid plus geometry questions (isAttacked, pieceAt, ...).
+// Owns every Piece via pieces_; grid_ only holds non-owning raw pointers, so a
+// captured piece that leaves the grid stays alive until an undo puts it back.
+// ---------------------------------------------------------------------------
+class Board {
+public:
+    Board() {
+        grid_.assign(8, std::vector&lt;Cell&gt;(8));
+        initCoords();
+        initializeStandardPosition();
+    }
+
+    bool inBounds(int r, int c) const { return r &gt;= 0 &amp;&amp; r &lt; 8 &amp;&amp; c &gt;= 0 &amp;&amp; c &lt; 8; }
+    Cell&amp;       at(int r, int c)       { return grid_[r][c]; }
+    const Cell&amp; at(int r, int c) const { return grid_[r][c]; }
+
+    // Raw board mutation used by Move::execute/undo. No rule-checking here --
+    // legality is decided before a Move is ever built.
+    void setPiece(int r, int c, Piece* p) {
+        grid_[r][c].piece = p;
+        if (p &amp;&amp; p-&gt;isKing()) kingCell_[colorIdx(p-&gt;color())] = &amp;grid_[r][c];
+    }
+    Piece* pieceAt(int r, int c) const { return grid_[r][c].piece; }
+    const Cell&amp; kingCell(Color c) const { return *kingCell_[colorIdx(c)]; }
+
+    // Is `target` attacked by ANY piece of `byColor`? Pure geometry sweep --
+    // reuses canMove, so "check" needs no rules of its own.
+    bool isAttacked(const Cell&amp; target, Color byColor) const {
+        for (int r = 0; r &lt; 8; ++r)
+            for (int c = 0; c &lt; 8; ++c) {
+                Piece* p = grid_[r][c].piece;
+                if (p &amp;&amp; p-&gt;color() == byColor &amp;&amp; p-&gt;canMove(*this, grid_[r][c], target))
+                    return true;
+            }
+        return false;
+    }
+
+private:
+    static int colorIdx(Color c) { return c == Color::WHITE ? 0 : 1; }
+    void initCoords() {
+        for (int r = 0; r &lt; 8; ++r)
+            for (int c = 0; c &lt; 8; ++c) { grid_[r][c].row = r; grid_[r][c].col = c; }
+    }
+    void initializeStandardPosition();  // defined below, once every Piece subclass exists
+
+    std::vector&lt;std::vector&lt;Cell&gt;&gt; grid_;
+    Cell* kingCell_[2] = {nullptr, nullptr};
+    std::vector&lt;std::unique_ptr&lt;Piece&gt;&gt; pieces_;   // ownership lives here, not in grid_
+};
+
+// Walks the straight or diagonal line strictly between from and to (both
+// endpoints excluded) and confirms every square on it is empty. Sliding
+// pieces (Rook, Bishop, Queen) call this; jumpers (Knight) never do.
+bool pathClear(const Board&amp; b, const Cell&amp; from, const Cell&amp; to) {
+    int dr = (to.row &gt; from.row) - (to.row &lt; from.row);   // -1, 0, or +1
+    int dc = (to.col &gt; from.col) - (to.col &lt; from.col);
+    int r = from.row + dr, c = from.col + dc;
+    while (r != to.row || c != to.col) {
+        if (!b.at(r, c).isEmpty()) return false;
+        r += dr; c += dc;
+    }
+    return true;
+}
+
+// ---------------------------------------------------------------------------
+// Concrete pieces. Each owns only its own geometry -- adding a new piece
+// means adding a subclass, never touching a switch statement.
+// ---------------------------------------------------------------------------
+class Rook : public Piece {
+public:
+    using Piece::Piece;
+    char symbol() const override { return 'R'; }
+    bool canMove(const Board&amp; b, const Cell&amp; from, const Cell&amp; to) const override {
+        if (from.row != to.row &amp;&amp; from.col != to.col) return false;  // straight lines only
+        if (!destOk(to)) return false;
+        return pathClear(b, from, to);
+    }
+};
+
+class Knight : public Piece {
+public:
+    using Piece::Piece;
+    char symbol() const override { return 'N'; }
+    bool canMove(const Board&amp;, const Cell&amp; from, const Cell&amp; to) const override {
+        int dr = std::abs(from.row - to.row), dc = std::abs(from.col - to.col);
+        return ((dr == 2 &amp;&amp; dc == 1) || (dr == 1 &amp;&amp; dc == 2)) &amp;&amp; destOk(to);  // L-shape, jumps
+    }
+};
+
+class Bishop : public Piece {
+public:
+    using Piece::Piece;
+    char symbol() const override { return 'B'; }
+    bool canMove(const Board&amp; b, const Cell&amp; from, const Cell&amp; to) const override {
+        if (std::abs(from.row - to.row) != std::abs(from.col - to.col)) return false;
+        if (!destOk(to)) return false;
+        return pathClear(b, from, to);
+    }
+};
+
+class Queen : public Piece {
+public:
+    using Piece::Piece;
+    char symbol() const override { return 'Q'; }
+    bool canMove(const Board&amp; b, const Cell&amp; from, const Cell&amp; to) const override {
+        bool straight = (from.row == to.row || from.col == to.col);
+        bool diagonal = std::abs(from.row - to.row) == std::abs(from.col - to.col);
+        if (!straight &amp;&amp; !diagonal) return false;
+        if (!destOk(to)) return false;
+        return pathClear(b, from, to);
+    }
+};
+
+class King : public Piece {
+public:
+    using Piece::Piece;
+    bool isKing() const override { return true; }
+    char symbol() const override { return 'K'; }
+    bool canMove(const Board&amp;, const Cell&amp; from, const Cell&amp; to) const override {
+        int dr = std::abs(from.row - to.row), dc = std::abs(from.col - to.col);
+        // One step in any direction. Castling is NOT modeled here -- it is a
+        // two-square king move recognized and built by Game, one layer up.
+        return dr &lt;= 1 &amp;&amp; dc &lt;= 1 &amp;&amp; (dr + dc &gt; 0) &amp;&amp; destOk(to);
+    }
+};
+
+class Pawn : public Piece {
+public:
+    using Piece::Piece;
+    char symbol() const override { return 'P'; }
+    bool canMove(const Board&amp; b, const Cell&amp; from, const Cell&amp; to) const override {
+        int dir      = (color_ == Color::WHITE) ? -1 : 1;   // White advances toward row 0
+        int startRow = (color_ == Color::WHITE) ?  6 : 1;
+        int dr = to.row - from.row, dc = to.col - from.col;
+
+        if (dc == 0 &amp;&amp; dr == dir &amp;&amp; to.isEmpty()) return true;                 // one square
+
+        if (dc == 0 &amp;&amp; dr == 2 * dir &amp;&amp; from.row == startRow &amp;&amp;                // opening 2-step
+            to.isEmpty() &amp;&amp; b.at(from.row + dir, from.col).isEmpty())
+            return true;
+
+        if (std::abs(dc) == 1 &amp;&amp; dr == dir &amp;&amp;                                  // diagonal capture
+            !to.isEmpty() &amp;&amp; to.piece-&gt;color() != color_)
+            return true;
+
+        // En passant and promotion are deliberately not modeled here -- see
+        // "How to Approach" for why they are new Move subclasses, not new
+        // branches inside this method.
+        return false;
+    }
+};
+
+// Board's standard setup needs concrete pieces, so it is defined only now
+// that Rook..Pawn all exist. Declared inside the class above; wired here.
+void Board::initializeStandardPosition() {
+    auto place = [&amp;](int r, int c, std::unique_ptr&lt;Piece&gt; p) {
+        Piece* raw = p.get();
+        pieces_.push_back(std::move(p));
+        setPiece(r, c, raw);
+    };
+    auto backRank = [&amp;](int r, Color color) {
+        place(r, 0, std::make_unique&lt;Rook&gt;(color));
+        place(r, 1, std::make_unique&lt;Knight&gt;(color));
+        place(r, 2, std::make_unique&lt;Bishop&gt;(color));
+        place(r, 3, std::make_unique&lt;Queen&gt;(color));
+        place(r, 4, std::make_unique&lt;King&gt;(color));
+        place(r, 5, std::make_unique&lt;Bishop&gt;(color));
+        place(r, 6, std::make_unique&lt;Knight&gt;(color));
+        place(r, 7, std::make_unique&lt;Rook&gt;(color));
+    };
+    backRank(0, Color::BLACK);   // rank 8
+    backRank(7, Color::WHITE);   // rank 1
+    for (int c = 0; c &lt; 8; ++c) {
+        place(1, c, std::make_unique&lt;Pawn&gt;(Color::BLACK));   // rank 7
+        place(6, c, std::make_unique&lt;Pawn&gt;(Color::WHITE));   // rank 2
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Move: the Command hierarchy. Every move remembers exactly what it
+// overwrote, which is what makes undo lossless and redo trivial.
+// ---------------------------------------------------------------------------
+class Move {
+public:
+    virtual ~Move() = default;
+    virtual void execute(Board&amp;) = 0;
+    virtual void undo(Board&amp;) = 0;
+};
+
+class NormalMove : public Move {
+public:
+    NormalMove(Cell from, Cell to) : from_(from), to_(to) {}
+
+    void execute(Board&amp; b) override {
+        moved_        = b.pieceAt(from_.row, from_.col);
+        captured_     = b.pieceAt(to_.row,   to_.col);   // may be nullptr; remembered for undo
+        wasFirstMove_ = !moved_-&gt;hasMoved();
+
+        b.setPiece(to_.row,   to_.col,   moved_);         // move the piece
+        b.setPiece(from_.row, from_.col, nullptr);         // vacate the origin
+        moved_-&gt;setMoved(true);
+    }
+
+    void undo(Board&amp; b) override {
+        b.setPiece(from_.row, from_.col, moved_);          // put it back
+        b.setPiece(to_.row,   to_.col,   captured_);       // restore whatever was captured (or null)
+        if (wasFirstMove_) moved_-&gt;setMoved(false);
+    }
+
+private:
+    Cell from_, to_;
+    Piece* moved_        = nullptr;
+    Piece* captured_     = nullptr;   // THE crucial bit of state for undo
+    bool   wasFirstMove_ = false;     // restore hasMoved() exactly (matters for castling)
+};
+
+// Castling: not a special-cased `if` sprinkled through the core, just another
+// Move subclass that moves two pieces and restores both on undo.
+class CastleMove : public Move {
+public:
+    CastleMove(Cell kingFrom, Cell kingTo, Cell rookFrom, Cell rookTo)
+        : kf_(kingFrom), kt_(kingTo), rf_(rookFrom), rt_(rookTo) {}
+
+    void execute(Board&amp; b) override {
+        king_ = b.pieceAt(kf_.row, kf_.col);
+        rook_ = b.pieceAt(rf_.row, rf_.col);
+        b.setPiece(kt_.row, kt_.col, king_); b.setPiece(kf_.row, kf_.col, nullptr);
+        b.setPiece(rt_.row, rt_.col, rook_); b.setPiece(rf_.row, rf_.col, nullptr);
+        king_-&gt;setMoved(true);
+        rook_-&gt;setMoved(true);
+    }
+    void undo(Board&amp; b) override {
+        b.setPiece(kf_.row, kf_.col, king_); b.setPiece(kt_.row, kt_.col, nullptr);
+        b.setPiece(rf_.row, rf_.col, rook_); b.setPiece(rt_.row, rt_.col, nullptr);
+        king_-&gt;setMoved(false);
+        rook_-&gt;setMoved(false);   // castling requires neither piece had moved before
+    }
+
+private:
+    Cell kf_, kt_, rf_, rt_;
+    Piece* king_ = nullptr;
+    Piece* rook_ = nullptr;
+};
+
+// ---------------------------------------------------------------------------
+// Game: the rule engine. playMove runs a fixed pipeline -- geometry check,
+// try-as-Command, self-check test, commit-or-rollback, switch turn, then
+// recompute status by asking "am I in check?" and "do I have any legal move?"
+// ---------------------------------------------------------------------------
+class Game {
+public:
+    MoveResult playMove(const Cell&amp; from, const Cell&amp; to) {
+        if (status_ == GameStatus::CHECKMATE || status_ == GameStatus::STALEMATE)
+            return MoveResult::GAME_OVER;
+
+        Piece* p = board_.pieceAt(from.row, from.col);
+        if (!p || p-&gt;color() != turn_) return MoveResult::NOT_YOUR_TURN;
+
+        std::unique_ptr&lt;Move&gt; move = buildMove(from, to, p);
+        if (!move) return MoveResult::ILLEGAL;
+
+        // Try it. Self-check validation is just apply-test-rollback, reusing
+        // the exact same undo() a user-facing Undo button calls.
+        move-&gt;execute(board_);
+        if (board_.isAttacked(board_.kingCell(turn_), opponent(turn_))) {
+            move-&gt;undo(board_);
+            return MoveResult::ILLEGAL;
+        }
+
+        undoStack_.push_back(std::move(move));
+        redoStack_.clear();
+        turn_ = opponent(turn_);
+        recomputeStatus();
+        return MoveResult::OK;
+    }
+
+    void undo() {
+        if (undoStack_.empty()) return;
+        auto m = std::move(undoStack_.back()); undoStack_.pop_back();
+        m-&gt;undo(board_);
+        redoStack_.push_back(std::move(m));
+        turn_ = opponent(turn_);
+        recomputeStatus();
+    }
+
+    void redo() {
+        if (redoStack_.empty()) return;
+        auto m = std::move(redoStack_.back()); redoStack_.pop_back();
+        m-&gt;execute(board_);
+        undoStack_.push_back(std::move(m));
+        turn_ = opponent(turn_);
+        recomputeStatus();
+    }
+
+    GameStatus status() const { return status_; }
+
+private:
+    static Color opponent(Color c) { return c == Color::WHITE ? Color::BLACK : Color::WHITE; }
+
+    // Decide which kind of Move (if any) from-&gt;to represents. Castling intent
+    // (king sliding two squares along its rank) is recognized here, one layer
+    // above Piece::canMove, so the piece hierarchy never learns about it.
+    std::unique_ptr&lt;Move&gt; buildMove(const Cell&amp; from, const Cell&amp; to, Piece* p) const {
+        if (p-&gt;isKing() &amp;&amp; from.row == to.row &amp;&amp; std::abs(to.col - from.col) == 2) {
+            if (!canCastle(from, to)) return nullptr;
+            int rookFromCol = (to.col &gt; from.col) ? 7 : 0;
+            int rookToCol   = (to.col &gt; from.col) ? to.col - 1 : to.col + 1;
+            return std::make_unique&lt;CastleMove&gt;(
+                board_.at(from.row, from.col), board_.at(to.row, to.col),
+                board_.at(from.row, rookFromCol), board_.at(from.row, rookToCol));
+        }
+        if (!p-&gt;canMove(board_, board_.at(from.row, from.col), board_.at(to.row, to.col)))
+            return nullptr;
+        return std::make_unique&lt;NormalMove&gt;(from, to);
+    }
+
+    // Simplified castling pre-check: neither king nor rook has moved, and the
+    // squares between them are empty. A fully rigorous engine also forbids
+    // the king passing through an attacked square; sol.md names that rule in
+    // prose but does not code it, so it is left as the natural next line here
+    // (one more board_.isAttacked call per transit square).
+    bool canCastle(const Cell&amp; from, const Cell&amp; to) const {
+        Piece* king = board_.pieceAt(from.row, from.col);
+        if (!king || king-&gt;hasMoved()) return false;
+        int rookCol = (to.col &gt; from.col) ? 7 : 0;
+        Piece* rook = board_.pieceAt(from.row, rookCol);
+        if (!rook || rook-&gt;hasMoved()) return false;
+        int step = (rookCol &gt; from.col) ? 1 : -1;
+        for (int c = from.col + step; c != rookCol; c += step)
+            if (!board_.at(from.row, c).isEmpty()) return false;
+        return !board_.isAttacked(from, opponent(turn_));   // can't castle out of check
+    }
+
+    // Checkmate = in check AND no legal move escapes it.
+    // Stalemate = not in check AND no legal move at all.
+    void recomputeStatus() {
+        bool inCheck  = board_.isAttacked(board_.kingCell(turn_), opponent(turn_));
+        bool anyLegal = hasAnyLegalMove(turn_);
+        if (inCheck &amp;&amp; !anyLegal)       status_ = GameStatus::CHECKMATE;
+        else if (!inCheck &amp;&amp; !anyLegal) status_ = GameStatus::STALEMATE;
+        else if (inCheck)               status_ = GameStatus::CHECK;
+        else                            status_ = GameStatus::IN_PROGRESS;
+    }
+
+    // Brute-force: every from-&gt;to for `side`'s pieces, try it, test the king,
+    // undo. The same apply-test-rollback trick used inside playMove.
+    bool hasAnyLegalMove(Color side) {
+        for (int r = 0; r &lt; 8; ++r) {
+            for (int c = 0; c &lt; 8; ++c) {
+                Piece* p = board_.pieceAt(r, c);
+                if (!p || p-&gt;color() != side) continue;
+                for (int tr = 0; tr &lt; 8; ++tr) {
+                    for (int tc = 0; tc &lt; 8; ++tc) {
+                        if (tr == r &amp;&amp; tc == c) continue;
+                        const Cell&amp; from = board_.at(r, c);
+                        const Cell&amp; to   = board_.at(tr, tc);
+                        if (!p-&gt;canMove(board_, from, to)) continue;
+                        NormalMove trial(from, to);
+                        trial.execute(board_);
+                        bool stillInCheck =
+                            board_.isAttacked(board_.kingCell(side), opponent(side));
+                        trial.undo(board_);
+                        if (!stillInCheck) return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    Board board_;                       // constructs to the standard starting position
+    Color turn_ = Color::WHITE;         // White moves first
+    GameStatus status_ = GameStatus::IN_PROGRESS;
+    std::vector&lt;std::unique_ptr&lt;Move&gt;&gt; undoStack_, redoStack_;
+};
+
+// ---------------------------------------------------------------------------
+// Driver: one legal move, one illegal (out-of-turn) rejection, a capture, and
+// an undo/replay -- enough to exercise all three pillars without playing out
+// a full game.
+// ---------------------------------------------------------------------------
+int main() {
+    Game game;   // standard 8x8 starting position, White to move
+
+    auto r1 = game.playMove({6, 4}, {4, 4});   // e2 -&gt; e4 (White pawn, legal)
+    std::cout &lt;&lt; "e4: " &lt;&lt; (r1 == MoveResult::OK ? "OK" : "rejected") &lt;&lt; "\n";
+
+    auto r2 = game.playMove({6, 3}, {4, 3});   // White piece again, but it's Black's turn
+    std::cout &lt;&lt; "out-of-turn: "
+              &lt;&lt; (r2 == MoveResult::NOT_YOUR_TURN ? "rejected (as expected)" : "OK") &lt;&lt; "\n";
+
+    auto r3 = game.playMove({1, 3}, {3, 3});   // d7 -&gt; d5, Black pawn
+    std::cout &lt;&lt; "d5: " &lt;&lt; (r3 == MoveResult::OK ? "OK" : "rejected") &lt;&lt; "\n";
+
+    auto r4 = game.playMove({4, 4}, {3, 3});   // White pawn captures on d5 (exd5)
+    std::cout &lt;&lt; "exd5 (capture): " &lt;&lt; (r4 == MoveResult::OK ? "OK" : "rejected") &lt;&lt; "\n";
+
+    game.undo();                               // undo the capture
+    auto r5 = game.playMove({4, 4}, {3, 3});   // legal again after undo; same capture replayed
+    std::cout &lt;&lt; "replay after undo: " &lt;&lt; (r5 == MoveResult::OK ? "OK" : "rejected") &lt;&lt; "\n";
+
+    std::cout &lt;&lt; "status code: " &lt;&lt; static_cast&lt;int&gt;(game.status()) &lt;&lt; "\n";
+    return 0;
+}</code></pre>
+<p>Running it prints five confirmations followed by a status code of <code>0</code> (<code>IN_PROGRESS</code>): <code>e4: OK</code>, <code>out-of-turn: rejected (as expected)</code>, <code>d5: OK</code>, <code>exd5 (capture): OK</code>, <code>replay after undo: OK</code>.</p>
+
+<details class="qa"><summary>How would you add move history and PGN export without touching Piece or Move?</summary><div class="a"><p>The <code>undoStack_</code> already <em>is</em> the history — it's an ordered list of every Command actually played. Give each <code>Move</code> a <code>notation()</code> method; it already has everything it needs (the from/to cells and, via the moved piece, its <code>symbol()</code>) to render itself as algebraic notation. Walking the stack front-to-back emits a PGN string. Replay is just clearing the board and calling <code>execute</code> on the list in order. None of this touches <code>Piece</code>'s geometry or changes what a <code>Move</code> subclass has to store — it's a new method on an interface that already carries all the needed state.</p></div></details>
+<details class="qa"><summary>Where would a chess clock and time-out loss plug in?</summary><div class="a"><p>Orthogonal to move legality, so it lives entirely in <code>Game</code>, not in <code>Piece</code> or <code>Move</code>. Add a per-color <code>Clock</code> member; <code>playMove</code> debits the mover's clock at the start (or commit) of the call, and a flag-fall sets <code>status_</code> to a loss for whoever's clock hit zero. The piece and move hierarchies are completely untouched — timing is a concern one layer above them, the same way turn order already is.</p></div></details>
+<details class="qa"><summary>How do you add a bot opponent without hard-wiring an algorithm into Game?</summary><div class="a"><p>Name the seam explicitly: a <code>MoveStrategy</code> interface with one method, <code>chooseMove(const Game&amp;, Color side)</code>, returning the <code>{from, to}</code> it picks. <code>RandomStrategy</code> and <code>MinimaxStrategy</code> both implement it; the driver (or <code>Game</code> itself) depends on the interface, never on a specific algorithm. Swapping random play for minimax becomes a one-class substitution — textbook Strategy pattern, and precisely the "pattern focus" the problem statement names alongside Command and polymorphism.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

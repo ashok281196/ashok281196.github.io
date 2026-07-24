@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 1 · Tic-Tac-Toe · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">01</div>
+  <div class="chapter-kicker">Easy · 1 of 5</div>
+  <h1>Tic-Tac-Toe: O(1) Win Detection Without a Full Board Scan</h1>
+  <p class="chapter-sub">A two-player board game that must generalize cleanly from 3&times;3 to any N&times;N grid, where the real interview signal is detecting a win in O(1) per move with running row, column, and diagonal sums instead of rescanning the board.</p>
+</header>
+
+<h2><span class="sec-no">1.1</span>Problem Statement</h2>
+<p><strong>Difficulty:</strong> Easy &middot; <strong>Language:</strong> C++ &middot; <strong>Pattern focus:</strong> Strategy (pluggable win rule), clean board modeling.</p>
+<p><strong>Context.</strong> Design a 2-player Tic-Tac-Toe game playable on an N&times;N board (default 3&times;3).</p>
+<div class="keypoint">Two players alternate placing X/O on an empty cell; the board must detect a win or draw, reject illegal moves without crashing, and generalize to any N without hardcoding the number 3 anywhere &mdash; and it must do all of this by checking for a win in O(1) per move, not by rescanning the board.</div>
+
+<h3>Functional Requirements</h3>
+<ul>
+  <li>Two players take alternating turns placing their mark (X / O) on an empty cell.</li>
+  <li>The game detects a <strong>win</strong> (a full row, column, or either diagonal of the same mark) or a <strong>draw</strong> (board full, no winner).</li>
+  <li>Reject invalid moves (occupied cell, out-of-bounds, wrong player's turn) gracefully &mdash; no crash, no silent corruption of state.</li>
+  <li>Generalize cleanly to N&times;N &mdash; the win condition must <strong>not</strong> be hardcoded to 3.</li>
+</ul>
+
+<h3>Non-Functional Requirements &amp; Constraints</h3>
+<ul>
+  <li>Win-check should be efficient: do <strong>not</strong> rescan the entire board after every move. Maintain per-row, per-column, and per-diagonal counters and check in O(1) per move.</li>
+  <li>Single-threaded is fine for the base version.</li>
+</ul>
+
+<h3>Expected Public Interface</h3>
+<pre><code class="language-cpp">enum class GameStatus { IN_PROGRESS, WIN, DRAW };
+
+class Game {
+public:
+    Game(int boardSize, std::vector&lt;Player&gt; players);
+    void makeMove(int playerId, int row, int col);   // throws/returns error on invalid move
+    GameStatus getStatus() const;
+    const Player* getWinner() const;                  // nullptr if no winner yet
+};</code></pre>
+
+<h3>What the Interviewer Is Really Testing</h3>
+<ul>
+  <li>Clean separation of <code>Board</code>, <code>Cell</code>, <code>Player</code>, <code>Game</code>.</li>
+  <li>The O(1) win-check via counters (this is the differentiator from a naive answer).</li>
+  <li>Whether your abstractions survive the generalization to N&times;N.</li>
+</ul>
+
+<h3>Follow-Up Questions to Expect</h3>
+<ol>
+  <li>Support <strong>more than 2 players</strong> on a larger board.</li>
+  <li>Make the win rule <strong>pluggable</strong> (e.g. Connect-Four style "K marks in a row" via a <code>WinningStrategy</code> interface).</li>
+  <li>Add <strong>undo / replay</strong> of the move history.</li>
+</ol>
+<p>The task, in order: spend the first 2&ndash;3 minutes writing assumptions and the public interface above, implement the entities and the O(1) win-check, then evolve toward at least one follow-up.</p>
+
+<h2><span class="sec-no">1.2</span>How to Approach</h2>
+
+<h3>Mine the Constraints First</h3>
+<p>Before writing a line of code, read the statement the way an interviewer wrote it and extract the constraints that secretly decide your design. Three phrases matter here: "generalize cleanly to N&times;N" means board size is a parameter and no magic <code>3</code> appears anywhere; "do not rescan the entire board&nbsp;&hellip; maintain counters, check in O(1)" is the actual differentiator &mdash; a naive O(N&sup2;) rescan answer is a fail even though it "works"; and "reject invalid moves gracefully" makes validation a first-class responsibility rather than an afterthought. The follow-ups (pluggable win rule, more players, undo) don't need to be built yet, but they tell you where to leave seams.</p>
+<div class="analogy">Non-functional constraints usually pick your data structures for you. "Must be O(1)" is never decoration &mdash; it's an instruction to find an incremental summary you can update on every move instead of a recomputation you'd run from scratch. Mine constraints like this first, every time, on every LLD problem.</div>
+
+<h3>Nouns Become Classes</h3>
+<p>Read the prose again and circle the nouns: game, board, cell, player, mark, move, win, draw. Group them by responsibility rather than by vocabulary, and four classes fall out. <code>Player</code> holds an id, name, and mark &mdash; pure identity. <code>Cell</code> holds whichever mark sits in one square, the smallest unit of board state. <code>Board</code> owns the grid <em>and</em> the O(1) win-counters &mdash; it knows geometry and win-math and nothing about turns. <code>Game</code> owns players, turn order, and status &mdash; it orchestrates rules and validates moves, but never touches the grid directly. The split matters because each class now changes for exactly one reason: <code>Board</code> changes if win-detection logic changes, <code>Game</code> changes if turn rules change, and the two never step on each other.</p>
+
+<h3>Lock the Public Interface Before Any Internals</h3>
+<p>The problem statement already hands you the shape of the contract in the "Expected Public Interface" block above. Pin it down before writing any internals &mdash; it forces a decision about what the outside world sees and keeps the rest of the design honest. Two decisions are already baked into that interface: an invalid move throws (<code>std::invalid_argument</code> or similar) rather than silently corrupting state or crashing, and <code>getWinner()</code> returns a pointer so "no winner yet" is naturally <code>nullptr</code> rather than a sentinel value. Once the interface is locked, everything behind it is free to change.</p>
+
+<h3>Build the Leaves First: Player and Cell</h3>
+<p>Start with the types that have no dependencies on anything else. A mark is naturally a small enum, and "empty" is a real state that belongs in that enum rather than being modeled as a magic value. <code>Player</code> is a plain bundle of id, name, and mark. <code>Cell</code> is almost trivial &mdash; for a 3&times;3 board you could arguably skip the class entirely &mdash; but keeping it makes "what's in a square" explicit and gives a home for future per-cell data such as who played a move and when. Building bottom-up like this means the leaf types are already solid by the time you write the layer that depends on them.</p>
+
+<h3>The Key Insight: O(1) Win Detection via Signed Running Sums</h3>
+<p>This is the heart of the problem, and it's worth spending real thought on. The naive instinct after any move is to rescan the move's row, its column, and the two diagonals for four-in-a-row-of-the-same-mark &mdash; that's O(N) per move, and while it's correct, the statement explicitly asks for better, and producing it unprompted is exactly what separates a strong answer from an average one.</p>
+<p>The trick: a player wins a line the instant all N cells in that line hold the same mark. Instead of recounting a line every time, keep a running <em>signed</em> tally per line. Map each mark to a delta &mdash; X&nbsp;&rarr;&nbsp;+1, O&nbsp;&rarr;&nbsp;&minus;1 &mdash; and maintain <code>rowSum[N]</code>, <code>colSum[N]</code>, plus two scalars <code>diagSum</code> and <code>antiDiagSum</code>. On a move at <code>(r, c)</code> by a player whose delta is <code>d</code>, update at most four tallies:</p>
+<pre><code class="language-cpp">rowSum_[r] += d;
+colSum_[c] += d;
+if (r == c)             diagSum_     += d;  // main diagonal
+if (r + c == size_ - 1) antiDiagSum_ += d;  // anti-diagonal
+
+return rowSum_[r] == target
+    || colSum_[c] == target
+    || (r == c             &amp;&amp; diagSum_     == target)
+    || (r + c == size_ - 1 &amp;&amp; antiDiagSum_ == target);</code></pre>
+<p>where <code>target</code> is <code>+size_</code> for X or <code>-size_</code> for O. A line of N identical X's sums to exactly +N; N identical O's sums to exactly &minus;N; any mixed line can never reach &plusmn;N. Each move touches at most four lines, and each update-and-check is constant time &mdash; O(1) per move, full stop, regardless of how large the board grows.</p>
+<div class="warfield">The signed-sum trick is a 2-player (X/O) shortcut and does <strong>not</strong> extend to 3+ players &mdash; you can't assign one delta per player and keep a single &plusmn;N threshold meaningful once there are three or more marks in play. For the "more than 2 players" follow-up, swap the signed sums for <strong>per-line, per-player count arrays</strong> (<code>rowCount[r][markIdx]</code>, and so on): increment the mover's count on the touched lines, and declare a win the instant any touched line's count for that mark hits N. Still O(1) per move &mdash; just one data-structure swap, with the rest of the design untouched. Saying this limitation out loud, unprompted, is the kind of thing interviewers remember.</div>
+
+<h3>Orchestrate with Game: Validate, Mutate, Transition</h3>
+<p><code>Game::makeMove</code> is the rule engine, and it must, in strict order: reject if the game is already over, reject if it isn't this player's turn, reject an out-of-bounds or already-occupied cell, only <em>then</em> delegate the placement to <code>Board</code>, and finally update status &mdash; win if <code>Board</code> reports one, else draw if the board is now full, else advance to the next player. Doing every check <em>before</em> mutating any state is what makes "no silent corruption" true rather than aspirational. Two details are worth calling out explicitly in an interview: the round-robin turn advance (<code>turnIdx_ = (turnIdx_ + 1) % players_.size()</code>) already generalizes to N players without hardcoding "2" anywhere, and status transitions live in exactly one place, so nothing outside <code>Game</code> can ever set <code>WIN</code> or <code>DRAW</code> and let the state drift.</p>
+
+<h3>Prove It, Then Name the Follow-Up Seams</h3>
+<p>A short <code>main()</code> that exercises a win and a rejected move afterward is worth more than a paragraph of explanation, and it doubles as your test. Once that's on the board, close by pointing at the seams rather than building them out fully: more players is a data-structure swap inside <code>Board</code> (per-player count arrays, described above) with the turn logic already generalized; a pluggable win rule is a <code>WinningStrategy</code> interface that <code>Game</code> depends on instead of a hardcoded &plusmn;N check, turning the current logic into one concrete <code>FullLineStrategy</code> among others (Connect-Four's K-in-a-row becomes a second); and undo/replay falls out almost for free because the counters are reversible &mdash; push each move onto a history list, and undo pops it, clears the cell, and <em>subtracts</em> the same deltas that were added. Ending on the pattern name you'd reach for is what proves the abstractions weren't accidental.</p>
+
+<h2><span class="sec-no">1.3</span>Whole Solution</h2>
+<p>The complete, self-contained, compilable file &mdash; entities, the O(1) win-check, the rule engine, and a driver <code>main()</code> that plays out a win and then a rejected move.</p>
+<pre><code class="language-cpp">#include &lt;iostream&gt;
+#include &lt;vector&gt;
+#include &lt;string&gt;
+#include &lt;stdexcept&gt;
+
+using namespace std;
+
+enum class Mark { EMPTY, X, O };
+enum class GameStatus { IN_PROGRESS, WIN, DRAW };
+
+struct Player {
+    int id;
+    string name;
+    Mark mark;
+};
+
+struct Cell {
+    Mark mark = Mark::EMPTY;
+    bool isEmpty() const { return mark == Mark::EMPTY; }
+};
+
+class Board {
+public:
+    Board(int n) {
+        size_        = n;
+        filled_      = 0;
+        diagSum_     = 0;
+        antiDiagSum_ = 0;
+        grid_.assign(n, vector&lt;Cell&gt;(n));  // n x n empty grid
+        rowSum_.assign(n, 0);                    // one running tally per row
+        colSum_.assign(n, 0);                    // one running tally per column
+    }
+
+    int  size() const { return size_; }
+    bool inBounds(int r, int c) const {
+        return r &gt;= 0 &amp;&amp; r &lt; size_ &amp;&amp; c &gt;= 0 &amp;&amp; c &lt; size_;
+    }
+    bool isEmpty(int r, int c) const { return grid_[r][c].isEmpty(); }
+    bool isFull()  const { return filled_ == size_ * size_; }
+
+    // Place mark, return true if THIS move completed a line. O(1).
+    bool place(int r, int c, Mark mark) {
+        grid_[r][c].mark = mark;
+        ++filled_;
+
+        int d      = (mark == Mark::X) ?  1     : -1;      // signed delta
+        int target = (mark == Mark::X) ?  size_ : -size_;  // full line value
+
+        rowSum_[r] += d;
+        colSum_[c] += d;
+        if (r == c)             diagSum_     += d;  // main diagonal
+        if (r + c == size_ - 1) antiDiagSum_ += d;  // anti-diagonal
+
+        return rowSum_[r] == target
+            || colSum_[c] == target
+            || (r == c             &amp;&amp; diagSum_     == target)
+            || (r + c == size_ - 1 &amp;&amp; antiDiagSum_ == target);
+    }
+
+private:
+    int size_;
+    vector&lt;vector&lt;Cell&gt;&gt; grid_;
+    vector&lt;int&gt; rowSum_, colSum_;
+    int diagSum_, antiDiagSum_;
+    int filled_;
+};
+
+// ---------------------------------------------------------------------------
+// Game: rule engine. validate -&gt; mutate -&gt; transition.
+// ---------------------------------------------------------------------------
+class Game {
+public:
+    // board_(boardSize) stays in the init list: Board has no default ctor.
+    Game(int boardSize, vector&lt;Player&gt; players) : board_(boardSize) {
+        if (players.size() &lt; 2)
+            throw invalid_argument("need at least 2 players");
+        players_ = players;
+        turnIdx_ = 0;
+        status_  = GameStatus::IN_PROGRESS;
+        winner_  = nullptr;
+    }
+
+    void makeMove(int playerId, int row, int col) {
+        if (status_ != GameStatus::IN_PROGRESS)
+            throw logic_error("game is already over");
+
+        Player&amp; current = players_[turnIdx_];
+        if (current.id != playerId)
+            throw invalid_argument("not this player's turn");
+        if (!board_.inBounds(row, col))
+            throw invalid_argument("move out of bounds");
+        if (!board_.isEmpty(row, col))
+            throw invalid_argument("cell already occupied");
+
+        bool won = board_.place(row, col, current.mark);
+
+        if (won) {
+            status_ = GameStatus::WIN;
+            winner_ = &amp;current;
+        } else if (board_.isFull()) {
+            status_ = GameStatus::DRAW;
+        } else {
+            turnIdx_ = (turnIdx_ + 1) % players_.size();  // round-robin
+        }
+    }
+
+    GameStatus    getStatus() const { return status_; }
+    const Player* getWinner() const { return winner_; }
+
+private:
+    Board board_;
+    vector&lt;Player&gt; players_;
+    int turnIdx_;
+    GameStatus status_;
+    Player* winner_;
+};
+
+// ---------------------------------------------------------------------------
+// Driver: happy path (win) + an illegal move.
+// ---------------------------------------------------------------------------
+int main() {
+    vector&lt;Player&gt; players = {
+        {1, "Alice", Mark::X},
+        {2, "Bob",   Mark::O},
+    };
+    Game game(3, players);
+
+    // X takes the top row -&gt; X wins.
+    game.makeMove(1, 0, 0);
+    game.makeMove(2, 1, 0);
+    game.makeMove(1, 0, 1);
+    game.makeMove(2, 1, 1);
+    game.makeMove(1, 0, 2);   // top row complete
+
+    if (game.getStatus() == GameStatus::WIN)
+        cout &lt;&lt; "Winner: " &lt;&lt; game.getWinner()-&gt;name &lt;&lt; "\n";  // Alice
+
+    // Game over -&gt; next move is rejected, not crashed.
+    try {
+        game.makeMove(2, 2, 2);
+    } catch (const exception&amp; e) {
+        cout &lt;&lt; "Rejected: " &lt;&lt; e.what() &lt;&lt; "\n";  // game is already over
+    }
+    return 0;
+}</code></pre>
+
+<details class="qa"><summary>How would you extend this to support more than two players?</summary><div class="a"><p>The turn logic already generalizes &mdash; <code>turnIdx_ = (turnIdx_ + 1) % players_.size()</code> round-robins over however many players were passed in, no code change needed. The part that doesn't survive is the signed &plusmn;N win-counter, because you can't map three or more distinct marks onto one signed delta and still have a single threshold mean "this player filled the line." Swap <code>rowSum_</code>/<code>colSum_</code>/<code>diagSum_</code>/<code>antiDiagSum_</code> for per-line, per-player count arrays instead: increment the mover's count on every touched line, and declare a win the moment any touched line's count for that player's mark reaches N. Still O(1) per move &mdash; it's a data-structure swap inside <code>Board</code>, and <code>Game</code>'s interface doesn't change at all.</p></div></details>
+<details class="qa"><summary>How would you make the win rule pluggable, e.g. Connect-Four's "K marks in a row"?</summary><div class="a"><p>Extract a <code>WinningStrategy</code> interface with a virtual <code>checkWin(board, row, col, mark)</code> and inject it into <code>Game</code> at construction. The counter logic in this chapter's <code>Board::place</code> becomes the concrete <code>FullLineStrategy</code> (win means filling an entire N-length line); a Connect-Four variant becomes a <code>KInARowStrategy</code> that checks for K consecutive marks in any direction without requiring the whole line. <code>Game</code> depends only on the interface, never on a concrete rule, which is exactly the Strategy pattern the problem statement calls out as its pattern focus.</p></div></details>
+<details class="qa"><summary>How would you add undo and replay of the move history?</summary><div class="a"><p>Push every applied move as a small <code>(player, row, col)</code> record onto a <code>std::vector&lt;Move&gt;</code> as it happens. Replay is just walking that list forward and re-applying each move through the existing <code>makeMove</code> path. Undo is the interesting direction, and it falls out almost free because the win-counters are incremental: pop the last move, clear the cell back to <code>Mark::EMPTY</code>, decrement <code>filled_</code>, and <em>subtract</em> the same delta from whichever row/column/diagonal sums it had been added to. Because every counter update in this design is a simple addition, reversing it is a subtraction &mdash; one more payoff of choosing incremental state over a recompute-from-scratch scan.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

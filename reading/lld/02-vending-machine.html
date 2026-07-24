@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 2 · Vending Machine · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">02</div>
+  <div class="chapter-kicker">Easy · 2 of 5</div>
+  <h1>Vending Machine: the Canonical State Pattern</h1>
+  <p class="chapter-sub">The machine's entire behavior swings on one axis &mdash; has it been paid enough yet &mdash; and modeling that axis as three state objects, Idle, HasMoney and Dispensing, instead of a switch on an enum, is the textbook first lesson in the State pattern.</p>
+</header>
+
+<h2><span class="sec-no">2.1</span>Problem Statement</h2>
+<p>Design the controller for a vending machine that holds products in slots and accepts coins or notes. It sounds trivial &mdash; a box that trades money for snacks &mdash; but the phrasing interviewers use is deliberately loaded, and mining it correctly is most of the exercise.</p>
+<p><strong>Functional requirements:</strong></p>
+<ul>
+  <li>The machine moves through states: <code>Idle &rarr; HasMoney &rarr; Dispensing &rarr; Idle</code>.</li>
+  <li>A user <strong>selects a product</strong>, <strong>inserts money incrementally</strong>, and the machine <strong>dispenses</strong> the product and <strong>returns change</strong> &mdash; or <strong>refunds</strong> if the user cancels.</li>
+  <li>Reject a selection if the product is <strong>out of stock</strong>, or reject dispensing if inserted money is <strong>insufficient</strong>.</li>
+  <li>An <strong>admin</strong> can refill inventory and collect the accumulated cash.</li>
+</ul>
+<p><strong>Non-functional requirements / constraints:</strong></p>
+<ul>
+  <li>Behaviour must be driven by <strong>state objects</strong>, not a giant <code>if</code>/<code>switch</code> on an enum.</li>
+  <li>Each state defines its own response to <code>insertCoin</code>, <code>selectProduct</code>, <code>dispense</code>, and <code>cancel</code>.</li>
+</ul>
+<p><strong>Expected public interface</strong>, as an interviewer might hand it to you:</p>
+<pre><code class="language-cpp">enum class Coin { ONE, FIVE, TEN, TWENTY };
+
+class VendingMachine {
+public:
+    void selectProduct(const std::string&amp; code);
+    void insertCoin(Coin c);
+    Product dispense();        // valid only in Dispensing state
+    void cancel();             // refund all inserted money, return to Idle
+
+    // admin
+    void refill(const std::string&amp; code, int qty);
+    int  collectCash();
+};
+
+class State {  // base class for IdleState, HasMoneyState, DispensingState
+public:
+    virtual void selectProduct(VendingMachine&amp;, const std::string&amp;) = 0;
+    virtual void insertCoin(VendingMachine&amp;, Coin) = 0;
+    virtual Product dispense(VendingMachine&amp;) = 0;
+    virtual void cancel(VendingMachine&amp;) = 0;
+    virtual ~State() = default;
+};</code></pre>
+<p><strong>What the interviewer is really testing:</strong></p>
+<ul>
+  <li>A proper <strong>State pattern</strong>: concrete state classes, with transitions owned by the states themselves rather than by the machine.</li>
+  <li>That illegal operations in a given state are handled <em>by that state</em> &mdash; for example, calling <code>dispense()</code> while still <code>Idle</code> must be rejected cleanly, not crash or silently no-op.</li>
+</ul>
+<p><strong>Follow-up questions to expect:</strong></p>
+<ul>
+  <li><strong>Change-making:</strong> return optimal change from the available denominations. This sneaks in a small greedy/DP algorithm, and an interviewer will push on "what if you can't make exact change?"</li>
+  <li><strong>Concurrent users</strong> competing for the same slot &mdash; two people buying the last unit at once.</li>
+  <li><strong>Multiple payment methods</strong> (card, UPI) behind a payment abstraction, instead of coins only.</li>
+</ul>
+<div class="keypoint">A vending machine is a finite state machine wearing a cash register. Model the three modes &mdash; Idle, HasMoney, Dispensing &mdash; as objects, let each object own what happens next, and the "illegal operation" requirement solves itself for free.</div>
+
+<h2><span class="sec-no">2.2</span>How to Approach</h2>
+<p>Read the problem the way an interviewer wrote it, and mine the hard constraints first &mdash; they decide the design before you write a single class.</p>
+<p><em>"Behaviour must be driven by state objects, not a giant if/switch on an enum"</em> is not a style preference, it is the answer key. A <code>switch (currentState)</code> solution is a fail here even if it works, because the whole exercise <em>is</em> the State pattern. And <em>"each state defines its own response to insertCoin, selectProduct, dispense, cancel"</em> tells you the shape of the interface: every state implements the same four operations, and the difference between states is purely <em>how</em> each one reacts.</p>
+<div class="keypoint">When a prompt says "states&hellip; not if/switch," it is literally naming the pattern it wants. Build the pattern the prompt is pointing at &mdash; don't fight it by hiding a switch statement one layer down.</div>
+<p>Next, find the nouns in the problem and let them become your classes:</p>
+<table>
+  <tr><th>Class</th><th>Owns</th><th>Why it exists</th></tr>
+  <tr><td><strong>Coin</strong> (enum)</td><td>a denomination value</td><td>the unit of money</td></tr>
+  <tr><td><strong>Product</strong></td><td>name, price, quantity</td><td>what's for sale in a slot</td></tr>
+  <tr><td><strong>VendingState</strong> (interface)</td><td>the four operations</td><td>one reaction-set per machine mode</td></tr>
+  <tr><td><strong>IdleState / HasMoneyState / DispenseState</strong></td><td>transition rules for that mode</td><td>the actual behaviour, one class per mode</td></tr>
+  <tr><td><strong>VendingMachine</strong> (the Context)</td><td>current state, balance, inventory</td><td>delegates every call to its current state</td></tr>
+</table>
+<p>That table is the whole State pattern in miniature: one <strong>Context</strong> (the machine), one <strong>State interface</strong>, and N <strong>concrete states</strong>. Once you can point at those three roles in any "machine with modes" problem, the class list writes itself.</p>
+<p><strong>Why State beats a switch on an enum.</strong> A switch-based version needs one case per (state &times; operation) pair living together in one function, repeated across four functions &mdash; twelve branches for three states and four operations, all coupled in the same file. Add a fourth state (say, <code>OutOfService</code>) and you must find and edit every one of those four switches correctly, in every place, or risk a silent gap. The State pattern inverts this: each state class owns its own row of the truth table in one place, so adding a state means writing one new class and touching zero existing code. That's the open/closed principle earning its keep, not just a buzzword.</p>
+<p><strong>Identify the states.</strong> The problem already names them: <strong>Idle</strong> (nothing selected, no money in), <strong>HasMoney</strong> (a product is chosen and the machine is accepting coins toward its price), and <strong>Dispensing</strong> (paid in full, ready to hand over the product and any change). Each is a class implementing the same abstract interface:</p>
+<pre><code class="language-cpp">class VendingState{
+  public:
+    virtual void insertMoney(VendingMachine* m , int amount) = 0;
+    virtual void selectProduct(VendingMachine* m, int code) = 0;
+    virtual void dispenseProduct(VendingMachine* m) = 0;
+    virtual void refund(VendingMachine* m) = 0;
+    virtual ~VendingState() = default;
+};</code></pre>
+<p>The <strong>Context</strong>, <code>VendingMachine</code>, holds the current state pointer plus all the real data (balance, inventory, selected code), and its public API is <em>pure delegation</em> &mdash; one-liners that forward to whichever state is current:</p>
+<pre><code class="language-cpp">void insertMoney(int amount){ currentState-&gt;insertMoney(this, amount); }</code></pre>
+<p>If you find yourself writing an <code>if</code> inside one of the machine's public methods, the logic has leaked out of the states and back into the context &mdash; that's the tell that something drifted from the pattern.</p>
+<dl class="jargon">
+  <dt>Context</dt><dd>The object that holds the current state and forwards every call to it. Here, <code>VendingMachine</code>. It owns the data; the states own the behaviour.</dd>
+  <dt>Delegation</dt><dd>A method whose entire body is "ask someone else to do this." The Context's public methods should be almost nothing but delegation.</dd>
+  <dt>Open/Closed Principle</dt><dd>Code should be open to extension, closed to modification. Adding <code>OutOfServiceState</code> as a new class satisfies this; adding a new case to an existing switch violates it.</dd>
+</dl>
+<div class="keypoint">Rule of thumb for "who owns the transition": the state you're leaving decides where you go next, by calling <code>setState(...)</code> on the machine. That keeps the machine dumb and each state cohesive &mdash; it knows its own exits without needing to know the whole map.</div>
+<p>Finally, treat each state's four methods as a truth table: for each operation, is it valid in this state? If yes, do the work and transition; if no, reject cleanly (the reference solution below prints a message and stays put, rather than throwing, to keep the demo simple &mdash; a production version might throw or return a status code instead). Fill every cell of that table and there is no undefined behaviour left to find.</p>
+
+<h2><span class="sec-no">2.3</span>Whole Solution</h2>
+<p>The complete, compiling reference implementation. Three concrete states (<code>IdleState</code>, <code>HasMoneyState</code>, <code>DispenseState</code>) implement the <code>VendingState</code> interface; <code>VendingMachine</code> is the context, owning the three state instances and delegating every public call to whichever one is current. <code>main()</code> runs one full happy-path cycle plus one rejected call, to prove both the transitions and the rejection logic.</p>
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+
+using namespace std;
+
+class VendingMachine;   // fundamental cycle: state &lt;-&gt; machine
+
+// ---------- Data ----------
+struct Product {
+    string name;
+    int price;
+    int qty;
+};
+
+// ---------- State interface ----------
+class VendingState{
+  public:
+    virtual void insertMoney(VendingMachine* m , int amount) = 0;
+    virtual void selectProduct(VendingMachine* m, int code) = 0;
+    virtual void dispenseProduct(VendingMachine* m) = 0;
+    virtual void refund(VendingMachine* m) = 0;
+    virtual ~VendingState() = default;
+};
+
+// ---------- Context ----------
+class VendingMachine{
+  private:
+    VendingState* currentState;
+    VendingState* idle;
+    VendingState* hasMoney;
+    VendingState* dispense;
+    int balance = 0;
+    int selectedCode = -1;
+    map&lt;int, Product&gt; inventory;   // code -&gt; product
+
+  public:
+    VendingMachine();    // body at bottom (needs concrete states)
+    ~VendingMachine();
+
+    void setState(VendingState* s){ currentState = s; }
+
+    VendingState* getIdle(){ return idle; }
+    VendingState* getHasMoney(){ return hasMoney; }
+    VendingState* getDispense(){ return dispense; }
+
+    // money
+    void addBalance(int amt){ balance += amt; }
+    int  getBalance(){ return balance; }
+    void resetBalance(){ balance = 0; }
+
+    // inventory
+    void addProduct(int code, const Product&amp; p){ inventory[code] = p; }
+    bool hasStock(int code){ return inventory.count(code) &amp;&amp; inventory[code].qty &gt; 0; }
+    int  getPrice(int code){ return inventory[code].price; }
+    string getName(int code){ return inventory[code].name; }
+    void reduceStock(int code){ inventory[code].qty--; }
+
+    // selection
+    void setSelected(int code){ selectedCode = code; }
+    int  getSelected(){ return selectedCode; }
+
+    // public API -&gt; delegates to current state
+    void insertMoney(int amount){ currentState-&gt;insertMoney(this, amount); }
+    void selectProduct(int code){ currentState-&gt;selectProduct(this, code); }
+    void dispenseProduct(){ currentState-&gt;dispenseProduct(this); }
+    void refund(){ currentState-&gt;refund(this); }
+};
+
+// ---------- Concrete states (all inline now: no sibling class ever named) ----------
+class IdleState : public VendingState{
+  public:
+    void insertMoney(VendingMachine* m, int amount) override {
+        m-&gt;addBalance(amount);
+        cout &lt;&lt; "Money in: " &lt;&lt; amount &lt;&lt; " | balance=" &lt;&lt; m-&gt;getBalance() &lt;&lt; endl;
+        m-&gt;setState(m-&gt;getHasMoney());
+    }
+    void selectProduct(VendingMachine* m, int code) override {
+        cout &lt;&lt; "Insert Money First" &lt;&lt; endl;
+    }
+    void dispenseProduct(VendingMachine* m) override {
+        cout &lt;&lt; "Insert Money First" &lt;&lt; endl;
+    }
+    void refund(VendingMachine* m) override {
+        cout &lt;&lt; "Nothing to refund" &lt;&lt; endl;
+    }
+};
+
+class HasMoneyState : public VendingState{
+  public:
+    void insertMoney(VendingMachine* m, int amount) override {
+        m-&gt;addBalance(amount);
+        cout &lt;&lt; "Money in: " &lt;&lt; amount &lt;&lt; " | balance=" &lt;&lt; m-&gt;getBalance() &lt;&lt; endl;
+    }
+    void selectProduct(VendingMachine* m, int code) override {
+        if(!m-&gt;hasStock(code)){
+            cout &lt;&lt; "Out of stock for code " &lt;&lt; code &lt;&lt; endl;
+            return;
+        }
+        if(m-&gt;getBalance() &lt; m-&gt;getPrice(code)){
+            cout &lt;&lt; "Insufficient money. Need " &lt;&lt; m-&gt;getPrice(code)
+                 &lt;&lt; ", have " &lt;&lt; m-&gt;getBalance() &lt;&lt; endl;
+            return;
+        }
+        m-&gt;setSelected(code);
+        cout &lt;&lt; "Selected: " &lt;&lt; m-&gt;getName(code) &lt;&lt; endl;
+        m-&gt;setState(m-&gt;getDispense());
+    }
+    void dispenseProduct(VendingMachine* m) override {
+        cout &lt;&lt; "Select a product first" &lt;&lt; endl;
+    }
+    void refund(VendingMachine* m) override {
+        cout &lt;&lt; "Refund: " &lt;&lt; m-&gt;getBalance() &lt;&lt; endl;
+        m-&gt;resetBalance();
+        m-&gt;setState(m-&gt;getIdle());
+    }
+};
+
+class DispenseState : public VendingState{
+  public:
+    void insertMoney(VendingMachine* m, int amount) override {
+        cout &lt;&lt; "Dispensing in progress, cannot add money" &lt;&lt; endl;
+    }
+    void selectProduct(VendingMachine* m, int code) override {
+        cout &lt;&lt; "Already dispensing" &lt;&lt; endl;
+    }
+    void dispenseProduct(VendingMachine* m) override {
+        int code = m-&gt;getSelected();
+        int change = m-&gt;getBalance() - m-&gt;getPrice(code);
+        m-&gt;reduceStock(code);
+        cout &lt;&lt; "Dispensed: " &lt;&lt; m-&gt;getName(code) &lt;&lt; endl;
+        if(change &gt; 0) cout &lt;&lt; "Change returned: " &lt;&lt; change &lt;&lt; endl;
+        m-&gt;resetBalance();
+        m-&gt;setSelected(-1);
+        m-&gt;setState(m-&gt;getIdle());
+    }
+    void refund(VendingMachine* m) override {   // changed mind before collecting
+        cout &lt;&lt; "Refund: " &lt;&lt; m-&gt;getBalance() &lt;&lt; endl;
+        m-&gt;resetBalance();
+        m-&gt;setSelected(-1);
+        m-&gt;setState(m-&gt;getIdle());
+    }
+};
+
+// ---------- ctor/dtor: only place that knows every concrete state ----------
+VendingMachine::VendingMachine(){
+    idle     = new IdleState();
+    hasMoney = new HasMoneyState();
+    dispense = new DispenseState();
+    currentState = idle;
+}
+VendingMachine::~VendingMachine(){
+    delete idle;
+    delete hasMoney;
+    delete dispense;
+}
+
+// ---------- demo ----------
+int main(){
+    VendingMachine m;
+    m.addProduct(1, {"Coke", 25, 2});
+    m.addProduct(2, {"Water", 15, 5});
+
+    m.selectProduct(1);    // reject: insert money first
+    m.insertMoney(10);     // idle -&gt; hasMoney
+    m.insertMoney(20);     // top up, balance=30
+    m.selectProduct(1);    // ok -&gt; dispense
+    m.dispenseProduct();   // dispense Coke, change 5, -&gt; idle
+
+    return 0;
+}</code></pre>
+
+<details class="qa"><summary>How would you make change from a limited set of denominations, and what if exact change isn't possible?</summary><div class="a"><p>With an unlimited canonical coin set like {1, 5, 10, 20}, greedy from the largest denomination down always works, and always terminates because a 1-unit coin exists: <code>for each coin large to small: take amount/coin of them, reduce amount</code>. The moment coins are limited in supply, greedy can fail even though a valid combination exists, so you track per-denomination counts remaining and fall back to a coin-change-style DP (minimum coins, or "is it even possible") when greedy runs dry. If no combination reaches the exact amount, the honest answer is to refuse the dispense and refund instead of shortchanging the customer &mdash; say that fallback out loud, because naming it is what separates a considered answer from a lucky one.</p></div></details>
+<details class="qa"><summary>Two users try to buy the last unit of the same product at the same time &mdash; how do you handle it?</summary><div class="a"><p>The State pattern itself doesn't change; concurrency is a property of the one shared mutation, <code>hasStock &rarr; reduceStock</code> on the inventory. Guard that check-then-act sequence with a mutex (or a compare-and-swap on the quantity) so the two requests can't both read "1 left" and both decrement. The loser of the race should see the same "out of stock" rejection an ordinary late buyer would get &mdash; it's a correctness bug, not a new code path, so it belongs in the inventory layer, not in the state classes.</p></div></details>
+<details class="qa"><summary>How do you add card or UPI payment without touching the State pattern?</summary><div class="a"><p>Introduce a <code>PaymentStrategy</code> interface with something like <code>authorize(amount)</code>, and inject one into the machine. Coin insertion becomes the "cash" implementation of that strategy; card and UPI become sibling implementations. This is the Strategy pattern sitting beside the State pattern: <em>how</em> money arrives is orthogonal to <em>what mode</em> the machine is in, so the state classes keep calling the same abstraction regardless of which concrete payment method is plugged in underneath. The same separation is why adding a fourth state, like <code>OutOfServiceState</code>, is just one more class and no edits to existing ones &mdash; the pattern was built to absorb exactly this kind of change.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

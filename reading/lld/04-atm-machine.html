@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 4 · ATM Machine · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">04</div>
+  <div class="chapter-kicker">Easy · 4 of 5</div>
+  <h1>ATM Machine: State Machine Meets Chain of Responsibility</h1>
+  <p class="chapter-sub">An ATM session walks a strict lifecycle — Idle → CardInserted → PinAuthenticated → SelectOperation → back to Idle — while every withdrawal is settled by a second, independent pattern: a chain of denomination handlers that dispense the largest notes first and pass whatever is left down the line.</p>
+</header>
+
+<h2><span class="sec-no">4.1</span>Problem Statement</h2>
+<p>Design the control flow of an ATM — from the moment a card slides into the slot to the moment cash lands in the tray. It reads like a UI-flow exercise, but the interesting part never touches a screen: it is the machine's internal life cycle, and the arithmetic of turning "please give me ₹2600" into an actual stack of notes.</p>
+
+<div class="keypoint">An ATM session is a five-state lifecycle (<strong>Idle → CardInserted → PinAuthenticated → SelectOperation → TransactionComplete → Idle</strong>) driving one shared context, and every withdrawal is settled by a chain of denomination handlers that each dispense what they can and forward the remainder down the line.</div>
+
+<p>Functional requirements:</p>
+<ul>
+<li>Session states: <code>Idle → CardInserted → PinAuthenticated → SelectOperation → TransactionComplete → Idle</code>.</li>
+<li>Three operations: <strong>check balance</strong>, <strong>withdraw cash</strong>, <strong>deposit</strong>. The user can eject the card / cancel at (almost) any point in the flow.</li>
+<li>A withdrawal must validate against <strong>both</strong> the account's logical balance <em>and</em> the machine's physical available cash.</li>
+<li>Dispense the requested amount using the available denominations, preferring <strong>fewer notes</strong> — e.g. hand out ₹2000 notes before ₹500 before ₹100.</li>
+</ul>
+
+<p>Non-functional constraints, which are the actual point of the exercise:</p>
+<ul>
+<li>The session flow should be a <strong>State pattern</strong>, not nested <code>if</code>s — a <code>switch</code> on session status is a fail.</li>
+<li>The dispenser should be a <strong>Chain of Responsibility</strong>: a ₹2000 handler → a ₹500 handler → a ₹100 handler, each dispensing what it can of the remaining amount and forwarding whatever is left to the next link.</li>
+</ul>
+
+<p>The expected public interface, given up front so the design effort goes into behavior, not signatures:</p>
+
+<pre><code class="language-cpp">enum class OpType { CHECK_BALANCE, WITHDRAW, DEPOSIT };
+
+class ATM {
+public:
+    void insertCard(const Card&amp; c);
+    void enterPin(const std::string&amp; pin);
+    void selectOperation(OpType op);
+    void withdraw(int amount);
+    void ejectCard();
+};
+
+class CashDispenseHandler {       // Chain of Responsibility node
+public:
+    void setNext(CashDispenseHandler* next);
+    virtual void dispense(int amount) = 0;   // Note2000Handler, Note500Handler, Note100Handler
+    virtual ~CashDispenseHandler() = default;
+protected:
+    CashDispenseHandler* next_ = nullptr;
+};</code></pre>
+
+<p>What the interviewer is really testing:</p>
+<ul>
+<li>A clean <strong>State pattern</strong> for the session — one context, one state interface, concrete states that each answer every operation by either doing the work and transitioning, or rejecting cleanly.</li>
+<li>The <strong>Chain of Responsibility</strong> dispenser. This is the detail that separates a strong answer from a basic one; folding dispensing into a loop inside the ATM class misses the ask.</li>
+<li>Correct handling of the case where the account balance is fine but the machine physically cannot make the amount from the notes it has left.</li>
+</ul>
+
+<p>Follow-up questions to expect once the base design stands:</p>
+<ul>
+<li>The amount cannot be made from the available denominations — reject the whole transaction, with no partial dispense.</li>
+<li>Concurrent access to a shared cash store (multiple ATMs against one account, or a thread-safe dispenser).</li>
+<li>Transaction logging and rollback if a dispense fails partway through.</li>
+</ul>
+
+<h2><span class="sec-no">4.2</span>How to Approach</h2>
+
+<h3>Finding the Nouns</h3>
+<p>Mine the problem statement for its hard constraints before drawing a single class. Two sentences do all the work: "the session flow should be a State pattern" turns the card→pin→operation→done lifecycle into one <strong>Context</strong> plus a <strong>State</strong> interface plus concrete states — the same shape as a vending machine. "The dispenser should be a Chain of Responsibility" names the second pattern outright, and tells you not to fold dispensing into the ATM with a loop.</p>
+<p>Circle the remaining nouns — <em>card, account, PIN, bank, cash, denomination, note, handler</em> — and they split cleanly along the seam the two named patterns already drew: <strong>session control</strong> (<code>Card</code>, <code>Account</code>, <code>Bank</code>, the <code>ATMState</code> family) versus <strong>cash mechanics</strong> (<code>CashInventory</code>, the <code>CashDispenseHandler</code> family). Each family only meets inside the <code>ATM</code> context.</p>
+
+<div class="analogy">When a prompt names <em>two</em> patterns, it's telling you the system splits along a seam. Find the seam — here, "session control" vs. "cash mechanics" — and let each pattern own one side.</div>
+
+<h3>Pinning the Interface</h3>
+<p>The public <code>ATM</code> methods are given, and the realization worth having early is that none of them should contain session logic — each one forwards to whatever state is current:</p>
+
+<pre><code class="language-cpp">void enterPin(const std::string&amp; pin) { state_-&gt;enterPin(*this, pin); }</code></pre>
+
+<p>The dispenser gets its own tiny contract: a chain node that only needs to know its successor and how to dispense. Two contracts, two responsibilities — the ATM's methods delegate session flow, <code>CashDispenseHandler::dispense</code> is recursive by composition, and neither should leak into the other.</p>
+
+<h3>Modeling the Leaf Classes</h3>
+<p>Build bottom-up: the dependency-free types first. <code>Card</code> is just a card number plus an account id; <code>Account</code> is an id, a PIN, and a balance. <code>Bank</code> hides the account map behind questions — <code>authenticate</code>, <code>balance</code>, <code>debit</code>, <code>credit</code> — so the ATM never touches an account directly, the same encapsulation discipline as an inventory class in a vending machine.</p>
+<p><code>CashInventory</code> tracks note counts per denomination:</p>
+
+<pre><code class="language-cpp">class CashInventory {
+public:
+    void load(int denom, int count) { notes_[denom] += count; }
+    int  count(int denom) const { /* 0 if absent */ }
+    void remove(int denom, int count) { notes_.at(denom) -= count; }
+private:
+    std::unordered_map&lt;int, int&gt; notes_;   // denomination -&gt; note count
+};</code></pre>
+
+<p>Keeping <code>CashInventory</code> (physical notes) separate from <code>Account::balance</code> (logical funds) is what makes "balance OK but no notes" expressible at all. Conflate the two and that whole failure mode becomes impossible to represent, let alone handle correctly.</p>
+
+<h3>The Key Insight: Chain of Responsibility for Denomination Dispensing</h3>
+<p>This is the differentiator, and it deserves real thought. The naive answer loops over denominations largest-first, subtracting notes until the amount hits zero — it works, but it bakes the denomination list and the greedy logic into one function. The problem explicitly asks for a <em>chain</em>, and the chain buys open/closed extensibility: adding a ₹200 note later means inserting one new link, and touching nothing else.</p>
+<p>Each handler owns exactly one denomination. On <code>dispense(amount)</code> it computes how many of its own notes it can use (<code>min(amount / myDenom, notesAvailable)</code>), hands those out, subtracts them from the amount, and passes whatever remains to <code>next_</code> — if there is a next, and if anything is actually left:</p>
+
+<pre><code class="language-cpp">void dispense(int amount) override {
+    int give = std::min(amount / denom, inv_.count(denom));
+    if (give &gt; 0) { inv_.remove(denom, give); amount -= give * denom; }
+    if (amount &gt; 0 &amp;&amp; next_) next_-&gt;dispense(amount);   // pass the remainder down
+}</code></pre>
+
+<p>The chain order <em>is</em> the greedy "fewest notes" rule: the largest denomination gets first pick of the amount, consuming as much as it can before the leftover is even offered to the next link. Wiring the chain is nothing more than a run of <code>setNext</code> calls, largest denomination first.</p>
+
+<div class="analogy">Chain of Responsibility = each link does its bit and forwards the rest. Reach for it when a request is satisfied by a <em>sequence of partial handlers</em> — dispensing, logging filters, approval tiers.</div>
+
+<h3>Feasibility Before Mutation</h3>
+<p>Dispense is destructive: a chain that hands out ₹2000 notes and only then discovers it cannot make the last ₹100 has already emptied real cash it cannot put back. So the chain never runs until feasibility has been proven on a <em>snapshot</em>. Simulate the same greedy pass over copies of the note counts; if the simulation cannot reach exactly zero, reject the whole withdrawal before anything moves:</p>
+
+<pre><code class="language-cpp">bool canDispense(const CashInventory&amp; inv, int amount) {
+    for (int d : {2000, 500, 100}) {
+        int give = std::min(amount / d, inv.count(d));
+        amount -= give * d;
+    }
+    return amount == 0;
+}</code></pre>
+
+<p>A withdrawal then runs three guards in order, and only after all three pass does anything mutate: the amount must be positive and a multiple of the smallest note, the account balance must cover it, and <code>canDispense</code> must say yes. Check, then mutate — never the other way around, for any operation that touches real money.</p>
+
+<h3>Wiring the ATM Context</h3>
+<p>The <code>ATM</code> context owns both class families through <code>unique_ptr</code> members — four state singletons and three chain handlers — and exposes only non-owning raw pointers for "who is current" and "where does dispensing start." Both families get built and wired in the constructor, so the chain head is the only entry point anyone outside ever needs:</p>
+
+<pre><code class="language-cpp">ATM::ATM(Bank&amp; bank, CashInventory&amp; cash) : bank_(bank), cash_(cash) {
+    idle_ = std::make_unique&lt;IdleState&gt;();
+    // ... other states ...
+    state_ = idle_.get();                        // start Idle
+
+    h2000_ = std::make_unique&lt;Note2000Handler&gt;(cash_);
+    h500_  = std::make_unique&lt;Note500Handler&gt;(cash_);
+    h100_  = std::make_unique&lt;Note100Handler&gt;(cash_);
+    h2000_-&gt;setNext(h500_.get());
+    h500_-&gt;setNext(h100_.get());
+    dispenserHead_ = h2000_.get();                // largest-first = fewest notes
+}</code></pre>
+
+<div class="analogy">Own long-lived objects once via <code>unique_ptr</code> members; pass raw, non-owning pointers for "who's current" / "chain head." Build <em>and wire</em> the chain in the constructor so the head is the only entry point.</div>
+
+<h3>Follow-Ups: Concurrency and Rollback</h3>
+<p>The base design already answers follow-up one — an unmakeable amount is rejected outright, because <code>canDispense</code> runs on a snapshot before any debit or <code>remove</code>. The other two follow-ups are where senior candidates separate themselves.</p>
+
+<div class="warfield">
+<p><strong>Concurrent access.</strong> <code>Bank</code> and <code>CashInventory</code> are held by reference inside <code>ATM</code> precisely because they are shared — which means two machines can race for the last ₹2000 note if check-then-dispense isn't atomic. The fix is a critical section, not a redesign: wrap <code>canDispense</code> plus the chain run (and the balance debit) under one mutex owned by the shared resource, or use a compare-and-swap per denomination. The State and Chain families stay untouched; a lock goes around the existing mutation.</p>
+<p><strong>Logging and rollback.</strong> Feasibility being checked first means a <em>correct</em> run can't fail mid-chain — but hardware jams happen anyway. Make the operation transactional: journal the debit and the intended notes before dispensing starts, and if the chain throws partway through, roll back by crediting the account back and restoring counts from the journal, then surface the error. Because both the debit and the note removals are reversible, rollback is just a replay in reverse.</p>
+</div>
+
+<p>Notice the shape of both answers: a lock around a resource, a journal beside a mutation. Every follow-up maps onto a seam that already exists in the design — never a rewrite. That is exactly what an interviewer is listening for.</p>
+
+<h2><span class="sec-no">4.3</span>Whole Solution</h2>
+<p>The reference solution below is scoped to the cash-dispensing chain — the piece of this problem most likely to separate a strong answer from a basic one — implemented as a standalone, self-contained program with its own <code>main()</code>. It uses ₹1000 / ₹500 / ₹200 / ₹100 handlers rather than the ₹2000 / ₹500 / ₹100 example used to explain the pattern above; same chain, different note values, same greedy largest-first rule.</p>
+
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+using namespace std;
+
+class MoneyHandler{
+    protected:
+        MoneyHandler* nextHandler;
+    public: 
+        MoneyHandler(){
+            this-&gt;nextHandler = nullptr;
+        }
+
+        void setNextHandler(MoneyHandler* next){
+            this-&gt;nextHandler = next;
+        }
+
+        virtual void dispense(int amount) = 0;
+};
+
+
+class ThousandHandler : public MoneyHandler{
+    private:
+        int numNotes;
+
+    public:
+        ThousandHandler(int numNotes){
+            this-&gt;numNotes = numNotes;
+        }
+
+        void dispense(int amount){
+            int notesNeeded= amount/1000;
+
+            if(notesNeeded &gt; numNotes){
+                notesNeeded = numNotes;
+                numNotes =0; 
+            }else{
+                numNotes-=notesNeeded;
+            }
+
+            if(notesNeeded&gt;0){
+                cout &lt;&lt; "Despensing " &lt;&lt; notesNeeded &lt;&lt; " x 1000 Notes" &lt;&lt; endl;
+            }
+            int remainingAmt =  amount - (notesNeeded*1000);
+
+            if(remainingAmt&gt;0){
+                if(nextHandler!= nullptr){
+                    nextHandler-&gt;dispense(remainingAmt);
+                }else{
+                    cout &lt;&lt; "Remaining amount " &lt;&lt; remainingAmt &lt;&lt; " can't be fullfilled" &lt;&lt; endl;
+                }
+            }
+        }
+};
+
+class FiveHundresHandler : public MoneyHandler{
+    private:
+        int numNotes;
+
+    public:
+        FiveHundresHandler(int numNotes){
+            this-&gt;numNotes = numNotes;
+        }
+
+        void dispense(int amount){
+            int notesNeeded= amount/500;
+
+            if(notesNeeded &gt; numNotes){
+                notesNeeded = numNotes;
+                numNotes =0; 
+            }else{
+                numNotes-=notesNeeded;
+            }
+
+            if(notesNeeded&gt;0){
+                cout &lt;&lt; "Despensing " &lt;&lt; notesNeeded &lt;&lt; " x 500 Notes" &lt;&lt; endl;
+            }
+            int remainingAmt =  amount - (notesNeeded*500);
+
+            if(remainingAmt&gt;0){
+                if(nextHandler!= nullptr){
+                    nextHandler-&gt;dispense(remainingAmt);
+                }else{
+                    cout &lt;&lt; "Remaining amount " &lt;&lt; remainingAmt &lt;&lt; " can't be fullfilled" &lt;&lt; endl;
+                }
+            }
+        }
+};
+
+
+
+class TwoHundresHandler : public MoneyHandler{
+    private:
+        int numNotes;
+
+    public:
+        TwoHundresHandler(int numNotes){
+            this-&gt;numNotes = numNotes;
+        }
+
+        void dispense(int amount){
+            int notesNeeded= amount/200;
+
+            if(notesNeeded &gt; numNotes){
+                notesNeeded = numNotes;
+                numNotes =0; 
+            }else{
+                numNotes-=notesNeeded;
+            }
+
+            if(notesNeeded&gt;0){
+                cout &lt;&lt; "Despensing " &lt;&lt; notesNeeded &lt;&lt; " x 200 Notes" &lt;&lt; endl;
+            }
+            int remainingAmt =  amount - (notesNeeded*200);
+
+            if(remainingAmt&gt;0){
+                if(nextHandler!= nullptr){
+                    nextHandler-&gt;dispense(remainingAmt);
+                }else{
+                    cout &lt;&lt; "Remaining amount " &lt;&lt; remainingAmt &lt;&lt; " can't be fullfilled" &lt;&lt; endl;
+                }
+            }
+        }
+};
+
+
+class HundresHandler : public MoneyHandler{
+    private:
+        int numNotes;
+
+    public:
+        HundresHandler(int numNotes){
+            this-&gt;numNotes = numNotes;
+        }
+
+        void dispense(int amount){
+            int notesNeeded= amount/100;
+
+            if(notesNeeded &gt; numNotes){
+                notesNeeded = numNotes;
+                numNotes =0; 
+            }else{
+                numNotes-=notesNeeded;
+            }
+
+            if(notesNeeded&gt;0){
+                cout &lt;&lt; "Despensing " &lt;&lt; notesNeeded &lt;&lt; " x 100 Notes" &lt;&lt; endl;
+            }
+            int remainingAmt =  amount - (notesNeeded*100);
+
+            if(remainingAmt&gt;0){
+                if(nextHandler!= nullptr){
+                    nextHandler-&gt;dispense(remainingAmt);
+                }else{
+                    cout &lt;&lt; "Remaining amount " &lt;&lt; remainingAmt &lt;&lt; " can't be fullfilled" &lt;&lt; endl;
+                }
+            }
+        }
+};
+
+int main(){
+
+    MoneyHandler* thousandHandler = new ThousandHandler(3);
+    MoneyHandler* fiveHundredHandler = new FiveHundresHandler(5);
+    MoneyHandler* twoHundredHandler = new TwoHundresHandler(10);
+    MoneyHandler* hundredHandler = new HundresHandler(20);
+
+    thousandHandler-&gt;setNextHandler(fiveHundredHandler);
+    fiveHundredHandler-&gt;setNextHandler(twoHundredHandler);
+    twoHundredHandler-&gt;setNextHandler(hundredHandler);
+
+    int amtToWithdraw =2800;
+
+    cout &lt;&lt; "Despensing Amount: " &lt;&lt;amtToWithdraw &lt;&lt; endl;
+    thousandHandler-&gt;dispense(amtToWithdraw);
+    return 0;
+
+}
+</code></pre>
+
+<details class="qa"><summary>Why build the dispenser as a Chain of Responsibility instead of one function that loops over denominations?</summary><div class="a"><p>A loop works for today's three or four denominations, but it bakes the note list and the greedy order into a single function. Chain of Responsibility gives the same behavior with open/closed extensibility: adding a new note value means writing one new handler and inserting it into the chain, not touching existing logic. It also matches the general shape of "a request satisfied by a sequence of partial handlers," which shows up again in logging filters and approval pipelines.</p></div></details>
+
+<details class="qa"><summary>The account has enough balance, but the ATM can't make the exact amount from its notes. What happens?</summary><div class="a"><p>The transaction is rejected in full, before any mutation. A feasibility check runs the same greedy algorithm on a snapshot of the note counts; if it can't reach exactly zero remaining, the withdrawal fails with no debit and no partial dispense. Only after that check (and the balance check) pass does the real chain run against the real inventory.</p></div></details>
+
+<details class="qa"><summary>How would you make withdrawals safe across multiple ATMs sharing one account and one cash store?</summary><div class="a"><p>Wrap the whole check-then-dispense sequence — the feasibility check, the balance debit, and the chain's dispense call — in one critical section guarded by a mutex owned by the shared <code>Bank</code> and <code>CashInventory</code>. The State and Chain class families don't change at all; the fix is a lock placed around the existing mutation path, which is the general pattern for hardening any correctly-designed system against concurrency once it's proven correct single-threaded.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

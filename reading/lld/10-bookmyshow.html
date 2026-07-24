@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 10 · BookMyShow · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">10</div>
+  <div class="chapter-kicker">Medium · 5 of 5</div>
+  <h1>BookMyShow: Seat Locking Under Concurrency</h1>
+  <p class="chapter-sub">A City contains Theatres, each Theatre its Screens, each Screen its Shows, each Show its Seat map — a five-level containment tree that is almost incidental to the real test: one atomic, timed lock that lets a user hold a set of seats just long enough to pay, while guaranteeing that two users can never walk away with the same seat.</p>
+</header>
+
+<h2><span class="sec-no">10.1</span>Problem Statement</h2>
+<p>Design the booking subsystem for a movie-ticketing platform: a user browses shows by city and movie, selects seats, and books them with payment. It reads like a straightforward CRUD-over-a-hierarchy exercise until the second sentence of the constraints: seat locking must be atomic, and a lock expires. That single requirement is the whole interview.</p>
+
+<div class="keypoint">Two users must never book the same seat. Everything else — the City→Theatre→Screen→Show hierarchy, the payment outcome, the notifications — is scaffolding around one atomic operation: claiming a set of seats, for a user, with a deadline.</div>
+
+<p>Functional requirements:</p>
+<ul>
+<li>A <strong>City</strong> has <strong>Theatres</strong>; each Theatre has <strong>Screens</strong>; each Screen runs <strong>Shows</strong> of <strong>Movies</strong> at given times.</li>
+<li>A Show has a <strong>seat map</strong>; each seat has a status: <code>AVAILABLE / LOCKED / BOOKED</code>.</li>
+<li>A user can <strong>search shows</strong> by city + movie, <strong>select seats</strong>, and <strong>book</strong> them.</li>
+<li>Booking flow: <strong>lock</strong> selected seats → take <strong>payment</strong> → <strong>confirm</strong> (mark BOOKED) or <strong>release</strong> on timeout/failure.</li>
+</ul>
+
+<p>Non-functional constraints, which are the actual point of the exercise:</p>
+<ul>
+<li><strong>Concurrency</strong>: seat locking must be atomic; a lock has a <strong>timeout</strong> after which seats auto-release.</li>
+<li><strong>Observer</strong> for notifications (booking confirmed, payment failed, seats released).</li>
+<li><strong>Payment as a small State machine</strong>: <code>PENDING → SUCCESS / FAILED</code>, with the booking reacting accordingly.</li>
+</ul>
+
+<p>The expected public interface, given up front so the design effort goes into the locking semantics, not the signatures:</p>
+
+<pre><code class="language-cpp">enum class SeatStatus { AVAILABLE, LOCKED, BOOKED };
+
+class SeatLockProvider {              // the concurrency core
+public:
+    bool lockSeats(const Show&amp; show, const std::vector&lt;Seat&gt;&amp; seats,
+                   const std::string&amp; userId);          // atomic; false if any taken
+    void unlockSeats(const Show&amp; show, const std::vector&lt;Seat&gt;&amp; seats,
+                     const std::string&amp; userId);
+    bool validateLock(const Show&amp;, const Seat&amp;, const std::string&amp; userId) const;
+};
+
+class BookingService {
+public:
+    std::vector&lt;Show&gt; searchShows(const std::string&amp; city, const std::string&amp; movie);
+    Booking createBooking(const std::string&amp; userId, const Show&amp; show,
+                          const std::vector&lt;Seat&gt;&amp; seats);   // locks seats
+    Booking confirmBooking(const Booking&amp; booking, const Payment&amp; payment);
+};</code></pre>
+
+<p>What the interviewer is really testing:</p>
+<ul>
+<li>The <strong>atomic seat-lock with timeout</strong> — this is the make-or-break detail. A solution where two threads can both succeed on the last seat is a fail, full stop.</li>
+<li>A clean <strong>entity hierarchy</strong> (City → Theatre → Screen → Show → Seat) kept separate from the two services that hold the actual behavior.</li>
+<li><strong>Observer</strong> wired for notifications, and the <strong>payment state</strong> handled explicitly rather than folded into a boolean.</li>
+</ul>
+
+<p>Follow-up questions to expect once the base design stands:</p>
+<ul>
+<li><strong>Distributed locking</strong> if the service is horizontally scaled — discuss it, even if you implement in-memory.</li>
+<li><strong>Dynamic / tiered pricing</strong> (recliner vs. regular, weekend surge) via a pricing strategy.</li>
+<li><strong>Waitlist</strong> and auto-allocation when seats release.</li>
+<li><strong>Idempotent booking</strong> under client retries.</li>
+</ul>
+
+<h2><span class="sec-no">10.2</span>How to Approach</h2>
+
+<h3>Finding the Nouns: Data vs. Behaviour</h3>
+<p>Mine the hard constraints before drawing a single class. "Two users must never book the same seat" names the one thing being tested — everything else is scaffolding around one atomic operation. "A lock has a timeout after which seats auto-release" tells you locking isn't a boolean flag; it's an all-or-nothing claim over multiple seats, owned by a user, that expires. That phrasing alone screams <em>one mutex-guarded provider plus a per-lock expiry timestamp</em>.</p>
+<p>Circle the remaining nouns — <em>city, theatre, screen, show, movie, seat, lock, booking, payment, user, notification</em> — and they split cleanly in two: a containment hierarchy (City → Theatre → Screen → Show → Seat, almost pure data) and three services that hold all the behavior (<code>SeatLockProvider</code>, <code>BookingService</code>, and the <code>BookingObserver</code> family).</p>
+
+<div class="keypoint">Find the one sentence the whole problem pivots on — here, "never book the same seat." Design that core airtight first; the rest is plumbing around it.</div>
+
+<h3>Pinning the Interface Before Internals</h3>
+<p>The statement hands us the shape; lock it before internals, because it forces the hard decision — what "atomic lock" actually returns — to the front. <code>lockSeats</code> is all-or-nothing: it returns <code>bool</code>, and on failure it must leave the world untouched, no partial locks. That single guarantee is what prevents double-booking. <code>createBooking</code> locks but does not confirm — locking and paying are separate phases, and a lock is a reservation with a deadline, not a sale. <code>validateLock</code> is the gate before confirming, because payment success means nothing if the lock already expired and someone else grabbed the seat.</p>
+
+<h3>Modeling the Leaves: Seat, Show, and the Timed Lock</h3>
+<p>Build bottom-up: dependency-free types first. <code>Movie</code>, <code>Seat</code>, and <code>Show</code> are almost pure data — a seat map is just a vector of seats hanging off a show. The interesting leaf is <code>SeatLock</code>, which carries the timeout the problem demanded: "these seats, held by this user, valid until this instant."</p>
+
+<div class="analogy">The moment a spec says "timeout / TTL / expires," store an <strong>absolute expiry instant</strong>, not a duration or a countdown. <code>now() &gt; expiry</code> is the simplest, race-free expiry check there is — no clock arithmetic, no drift between "how much time is left" and "is it still valid right now."</div>
+
+<h3>The Key Insight: Atomic Check-Then-Set Under One Mutex</h3>
+<p>This is the heart of the problem, and it deserves real thought. A naive design marks each seat <code>LOCKED</code> one at a time. Two threads booking seats <code>{A1, A2}</code> and <code>{A2, A3}</code> can interleave: thread 1 locks A1, thread 2 locks A2 and A3, thread 1 tries A2 and fails — but it already locked A1, so it must roll back. Worse, without a lock around the whole check-then-set, both threads can read "A2 available" before either writes.</p>
+
+<div class="warfield">A naive per-seat locking loop lets two threads both pass the "is it free?" check for the same seat before either one writes its claim — the classic <strong>double-booking race</strong>. The fix is not a smarter data structure; it's making "check every requested seat, then claim every requested seat" one indivisible operation. Verify-all-then-claim-all inside a single critical section. Mutate before you've verified the whole set, and you've created a partial-failure rollback problem by design — avoid it instead of handling it.</div>
+
+<p>The fix is three rules: <strong>(1)</strong> one owner of all locks — <code>SeatLockProvider</code> holds the single source of truth, a map from <code>showId</code> to <code>seatId → SeatLock</code>; nobody else mutates seat-claim state. <strong>(2)</strong> guard check-then-set with a mutex — no window between checking and claiming. <strong>(3)</strong> all-or-nothing — inside the lock, first verify every requested seat is free (treating expired locks as free), then claim them all; if any check fails, claim nothing. A locked seat is free again the instant its lock expires, so the timeout is enforced lazily, right inside the availability check — no background sweeper is required for correctness, only to reclaim memory eventually.</p>
+
+<h3>Payment and Booking: Match Modeling Weight to the Requirement</h3>
+<p>The problem says payment is a small state machine, <code>PENDING → SUCCESS / FAILED</code>. That doesn't need a full polymorphic State pattern — three enum values plus the booking's reaction to them is the right altitude. A <code>SUCCESS</code> confirms (seats become permanently booked); a <code>FAILED</code>, or a lock that turned out to have expired, cancels and releases. Reserve heavyweight State classes for genuinely behaviour-rich modes, like a vending machine's multi-step session — a three-outcome payment is honestly served by an enum and a switch.</p>
+
+<h3>Observer for Notifications, and Orchestrating the Whole Flow</h3>
+<p>Booking events — confirmed, payment failed, seats released — need to fan out to subscribers (email, SMS, a waitlist trigger) without the service knowing who's listening. Observer earns its keep exactly here: the list of reactions grows independently of the action, so the service publishes one event and stays oblivious to who reacts.</p>
+<p><code>BookingService</code> is the conductor, and it follows a validate → mutate → transition rhythm with the dangerous part delegated entirely to the lock provider. <code>createBooking</code> locks the seats and records a <code>CREATED</code> booking, or throws if the lock fails. <code>confirmBooking</code> re-validates the lock is still ours for every seat — because payment success is necessary but not sufficient if the hold already expired — then branches on the payment outcome to confirm or release, publishing the matching event either way. The lock provider is the only class that needs to be thread-safe; the service stays a thin, boring coordinator, which is exactly where you want the complexity to <em>not</em> be.</p>
+<p>A correct driver for this problem doesn't just show the happy path — it attempts the race. Spin up two threads booking the same seats and assert exactly one wins. That assertion, not a green checkmark on a single-threaded run, is the proof an interviewer is looking for.</p>
+
+<h3>Follow-Ups: Naming the Seams</h3>
+<p>A strong finish names the extension points instead of coding all of them. <strong>Distributed locking</strong>: the in-memory mutex only protects one process; swap the provider's internals for a shared atomic store — Redis <code>SET seat:&lt;show&gt;:&lt;id&gt; &lt;user&gt; NX EX &lt;ttl&gt;</code> gives all-or-nothing via <code>NX</code> and the timeout for free via <code>EX</code>. The interface doesn't change, only the backend behind it. <strong>Tiered pricing</strong>: extract a <code>PricingStrategy</code> interface and inject it — recliner vs. regular, weekend surge, each a strategy implementation, orthogonal to the lock logic. <strong>Waitlist</strong>: already an Observer payoff — a <code>WaitlistObserver</code> reacts to <code>SEATS_RELEASED</code> by offering the freed seats to the next queued user. <strong>Idempotent retries</strong>: have the client pass an idempotency key, and have the service keep a <code>key → Booking</code> map so a retried request returns the existing booking instead of creating a second one.</p>
+
+<h2><span class="sec-no">10.3</span>Whole Solution</h2>
+<p>The reference solution below is a single, self-contained program with its own <code>main()</code>. It merges every incremental fragment from the walkthrough into one internally consistent design: the entity hierarchy, the mutex-guarded <code>SeatLockProvider</code> with lazy timeout expiry, the enum-driven payment/booking lifecycle, the <code>BookingObserver</code> fan-out, and a <code>BookingService</code> that orchestrates all of it. The driver proves the design with the same race an interviewer would ask for — two threads booking the same seats, exactly one winner — followed by a successful-payment path and a failed-payment path.</p>
+
+<pre><code class="language-cpp">#include &lt;iostream&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+#include &lt;unordered_map&gt;
+#include &lt;mutex&gt;
+#include &lt;chrono&gt;
+#include &lt;thread&gt;
+#include &lt;atomic&gt;
+#include &lt;stdexcept&gt;
+
+// ---------------------------------------------------------------------
+// Seat status as seen from outside. In this single-process demo a seat's
+// AVAILABLE / LOCKED state is derived lazily from SeatLockProvider's lock
+// table rather than stored per seat -- a seat becomes AVAILABLE again the
+// instant its lock expires, with no background sweeper required for
+// correctness (see SeatLockProvider below). BOOKED is recorded on the
+// Booking, not mutated back onto the Seat, to keep this demo's data model
+// small; a production system would flip a stored SeatStatus too.
+// ---------------------------------------------------------------------
+enum class SeatStatus { AVAILABLE, LOCKED, BOOKED };
+
+// ---------------------------------------------------------------------
+// Data hierarchy: dumb structs, no behaviour. City -&gt; Theatre -&gt; Screen
+// -&gt; Show -&gt; Seat is a containment tree used for browsing; a Show is also
+// addressable directly by id, which is all BookingService needs.
+// ---------------------------------------------------------------------
+struct Movie {
+    std::string id;
+    std::string title;
+};
+
+enum class SeatType { REGULAR, PREMIUM, RECLINER };
+
+struct Seat {
+    std::string id;        // e.g. "A12" -- unique within a show's seat map
+    int row = 0, col = 0;
+    SeatType type = SeatType::REGULAR;
+    int price = 0;         // base price; tiering is a follow-up (Strategy)
+};
+
+struct Show {
+    std::string id;
+    Movie movie;
+    std::string screenId;
+    std::string city;
+    long long startTime = 0;   // epoch seconds
+    std::vector&lt;Seat&gt; seatMap;
+};
+
+struct Screen {
+    std::string id;
+    std::string name;
+    std::vector&lt;std::string&gt; showIds;      // shows scheduled on this screen
+};
+
+struct Theatre {
+    std::string id;
+    std::string name;
+    std::vector&lt;Screen&gt; screens;
+};
+
+struct City {
+    std::string name;
+    std::vector&lt;Theatre&gt; theatres;
+};
+
+// ---------------------------------------------------------------------
+// SeatLock: one timed, user-owned claim over a set of seats. The moment a
+// spec says "timeout / TTL / expires", store an absolute expiry instant --
+// now() &gt; expiry is the simplest, race-free expiry check.
+// ---------------------------------------------------------------------
+class SeatLock {
+public:
+    SeatLock(std::vector&lt;std::string&gt; seatIds, std::string userId,
+             std::chrono::seconds ttl)
+        : seatIds_(std::move(seatIds)), userId_(std::move(userId)),
+          expiry_(std::chrono::steady_clock::now() + ttl) {}
+
+    bool isExpired() const { return std::chrono::steady_clock::now() &gt; expiry_; }
+    const std::string&amp; userId() const { return userId_; }
+    const std::vector&lt;std::string&gt;&amp; seatIds() const { return seatIds_; }
+
+private:
+    std::vector&lt;std::string&gt; seatIds_;
+    std::string userId_;
+    std::chrono::steady_clock::time_point expiry_;
+};
+
+// ---------------------------------------------------------------------
+// SeatLockProvider: the concurrency core, and the only class in this whole
+// program that needs to be thread-safe. One mutex-guarded map is the
+// single source of truth for every seat claim.
+// ---------------------------------------------------------------------
+class SeatLockProvider {
+public:
+    explicit SeatLockProvider(std::chrono::seconds ttl) : ttl_(ttl) {}
+
+    // Atomic: locks ALL requested seats or NONE. Returns false if any seat
+    // is already held by a non-expired lock -- and on false, nothing is
+    // mutated (no partial locks, no rollback needed).
+    bool lockSeats(const Show&amp; show, const std::vector&lt;Seat&gt;&amp; seats,
+                   const std::string&amp; userId) {
+        std::lock_guard&lt;std::mutex&gt; guard(mutex_);      // ONE critical section
+        auto&amp; showLocks = locks_[show.id];
+
+        // Phase 1: verify EVERY seat is free (or held by an expired lock).
+        for (const Seat&amp; s : seats) {
+            auto it = showLocks.find(s.id);
+            if (it != showLocks.end() &amp;&amp; !it-&gt;second.isExpired())
+                return false;                            // taken -&gt; claim nothing
+        }
+
+        // Phase 2: claim them all. Still holding the mutex, so no other
+        // thread could have slipped in between phase 1 and phase 2.
+        for (const Seat&amp; s : seats)
+            showLocks.insert_or_assign(s.id, SeatLock({s.id}, userId, ttl_));
+        return true;
+    }
+
+    void unlockSeats(const Show&amp; show, const std::vector&lt;Seat&gt;&amp; seats,
+                      const std::string&amp; userId) {
+        std::lock_guard&lt;std::mutex&gt; guard(mutex_);
+        auto&amp; showLocks = locks_[show.id];
+        for (const Seat&amp; s : seats) {
+            auto it = showLocks.find(s.id);
+            if (it != showLocks.end() &amp;&amp; it-&gt;second.userId() == userId)
+                showLocks.erase(it);                      // only the owner may unlock
+        }
+    }
+
+    bool validateLock(const Show&amp; show, const Seat&amp; seat,
+                       const std::string&amp; userId) const {
+        std::lock_guard&lt;std::mutex&gt; guard(mutex_);
+        auto showIt = locks_.find(show.id);
+        if (showIt == locks_.end()) return false;
+        auto it = showIt-&gt;second.find(seat.id);
+        return it != showIt-&gt;second.end()
+            &amp;&amp; !it-&gt;second.isExpired()
+            &amp;&amp; it-&gt;second.userId() == userId;              // still mine, still valid
+    }
+
+private:
+    mutable std::mutex mutex_;                              // mutable: const validateLock locks too
+    std::chrono::seconds ttl_;
+    std::unordered_map&lt;std::string,
+        std::unordered_map&lt;std::string, SeatLock&gt;&gt; locks_;  // showId -&gt; seatId -&gt; lock
+};
+
+// ---------------------------------------------------------------------
+// Payment: an enum plus a switch in BookingService, not a polymorphic
+// State hierarchy -- a three-outcome state machine doesn't earn one.
+// ---------------------------------------------------------------------
+enum class PaymentStatus { PENDING, SUCCESS, FAILED };
+
+struct Payment {
+    std::string id;
+    int amount = 0;
+    PaymentStatus status = PaymentStatus::PENDING;
+};
+
+enum class BookingStatus { CREATED, CONFIRMED, CANCELLED };
+
+struct Booking {
+    std::string id;
+    std::string userId;
+    Show show;
+    std::vector&lt;Seat&gt; seats;
+    BookingStatus status = BookingStatus::CREATED;
+};
+
+// ---------------------------------------------------------------------
+// Observer: booking events fan out to subscribers without BookingService
+// knowing who is listening. Email today; SMS and a waitlist trigger
+// tomorrow, with zero changes to the publisher.
+// ---------------------------------------------------------------------
+enum class BookingEvent { CONFIRMED, PAYMENT_FAILED, SEATS_RELEASED };
+
+class BookingObserver {
+public:
+    virtual ~BookingObserver() = default;
+    virtual void onEvent(BookingEvent event, const Booking&amp; booking) = 0;
+};
+
+class EmailNotifier : public BookingObserver {
+public:
+    void onEvent(BookingEvent event, const Booking&amp; booking) override {
+        std::cout &lt;&lt; "[email] " &lt;&lt; booking.userId
+                  &lt;&lt; " event=" &lt;&lt; static_cast&lt;int&gt;(event)
+                  &lt;&lt; " booking=" &lt;&lt; booking.id &lt;&lt; "\n";
+    }
+};
+
+// ---------------------------------------------------------------------
+// BookingService: the conductor. It orchestrates lock -&gt; pay -&gt; confirm
+// or release, and stays deliberately boring -- the one tricky invariant
+// (no double-booking) is entirely inside SeatLockProvider.
+// ---------------------------------------------------------------------
+class BookingService {
+public:
+    BookingService(SeatLockProvider&amp; lockProvider,
+                   std::vector&lt;BookingObserver*&gt; observers)
+        : lockProvider_(lockProvider), observers_(std::move(observers)) {}
+
+    void addShow(const Show&amp; s) { shows_.push_back(s); }
+
+    std::vector&lt;Show&gt; searchShows(const std::string&amp; city,
+                                   const std::string&amp; movie) {
+        std::vector&lt;Show&gt; out;
+        for (const Show&amp; s : shows_)
+            if (s.city == city &amp;&amp; s.movie.title == movie)
+                out.push_back(s);
+        return out;
+    }
+
+    // Locks the seats (atomic); does NOT charge or confirm. A lock is a
+    // reservation with a deadline, not a sale. Throws if someone else
+    // already holds at least one of the requested seats.
+    Booking createBooking(const std::string&amp; userId, const Show&amp; show,
+                           const std::vector&lt;Seat&gt;&amp; seats) {
+        if (!lockProvider_.lockSeats(show, seats, userId))
+            throw std::runtime_error("seats unavailable");
+
+        Booking b;
+        b.id     = nextBookingId();
+        b.userId = userId;
+        b.show   = show;
+        b.seats  = seats;
+        b.status = BookingStatus::CREATED;      // locked, awaiting payment
+        return b;
+    }
+
+    // Re-validates the lock (payment success means nothing if the hold
+    // already expired and someone else grabbed the seat), then branches
+    // on the payment outcome.
+    Booking confirmBooking(const Booking&amp; booking, const Payment&amp; payment) {
+        Booking b = booking;
+
+        for (const Seat&amp; s : b.seats) {
+            if (!lockProvider_.validateLock(b.show, s, b.userId)) {
+                b.status = BookingStatus::CANCELLED;
+                notify(BookingEvent::SEATS_RELEASED, b);    // lock expired under us
+                return b;
+            }
+        }
+
+        if (payment.status == PaymentStatus::SUCCESS) {
+            b.status = BookingStatus::CONFIRMED;            // seats become BOOKED
+            notify(BookingEvent::CONFIRMED, b);
+        } else {                                             // FAILED or still PENDING
+            lockProvider_.unlockSeats(b.show, b.seats, b.userId);
+            b.status = BookingStatus::CANCELLED;
+            notify(BookingEvent::PAYMENT_FAILED, b);
+        }
+        return b;
+    }
+
+private:
+    void notify(BookingEvent event, const Booking&amp; booking) {
+        for (BookingObserver* obs : observers_)
+            obs-&gt;onEvent(event, booking);
+    }
+    std::string nextBookingId() { return "BK" + std::to_string(++counter_); }
+
+    SeatLockProvider&amp; lockProvider_;
+    std::vector&lt;BookingObserver*&gt; observers_;
+    std::vector&lt;Show&gt; shows_;
+    int counter_ = 0;
+};
+
+// ---------------------------------------------------------------------
+// Driver: happy path, failed-payment path, and -- the point of this
+// chapter -- two threads racing for the same seats, asserting exactly
+// one winner. That assertion is the proof the design actually works.
+// ---------------------------------------------------------------------
+int main() {
+    SeatLockProvider lockProvider(std::chrono::seconds(5));   // 5s hold
+    EmailNotifier email;
+    BookingService service(lockProvider, {&amp;email});
+
+    Show show;
+    show.id = "S1";
+    show.city = "NYC";
+    show.movie = {"M1", "Inception"};
+    show.seatMap = { {"A1"}, {"A2"}, {"A3"}, {"B1"} };
+    service.addShow(show);
+
+    std::vector&lt;Seat&gt; wanted = { {"A1"}, {"A2"} };
+
+    // Two users race for the SAME seats. The mutex inside SeatLockProvider
+    // serializes their check-then-claim, so exactly one can win.
+    std::atomic&lt;int&gt; wins{0};
+    auto attempt = [&amp;](const std::string&amp; user) {
+        try { service.createBooking(user, show, wanted); ++wins; }
+        catch (const std::exception&amp;) { /* lost the race, expected */ }
+    };
+    std::thread t1(attempt, "alice");
+    std::thread t2(attempt, "bob");
+    t1.join(); t2.join();
+    std::cout &lt;&lt; "winners: " &lt;&lt; wins.load() &lt;&lt; "\n";           // exactly 1
+
+    // Successful payment path: lock -&gt; pay -&gt; confirm.
+    Booking b = service.createBooking("carol", show, { {"A3"} });
+    Payment ok{"P1", 250, PaymentStatus::SUCCESS};
+    Booking done = service.confirmBooking(b, ok);
+    std::cout &lt;&lt; "carol booking confirmed="
+              &lt;&lt; (done.status == BookingStatus::CONFIRMED) &lt;&lt; "\n";
+
+    // Failed payment path: lock -&gt; pay fails -&gt; seats released, event fired.
+    Booking b2 = service.createBooking("dave", show, { {"B1"} });
+    Payment bad{"P2", 250, PaymentStatus::FAILED};
+    Booking done2 = service.confirmBooking(b2, bad);
+    std::cout &lt;&lt; "dave booking cancelled="
+              &lt;&lt; (done2.status == BookingStatus::CANCELLED) &lt;&lt; "\n";
+
+    return 0;
+}
+</code></pre>
+
+<details class="qa"><summary>How would you make seat locking work across multiple horizontally-scaled service instances?</summary><div class="a"><p>The in-memory <code>std::mutex</code> only protects one process, so it can't be the answer once there's more than one instance of the booking service. Swap <code>SeatLockProvider</code>'s internals for a shared atomic store — Redis's <code>SET seat:&lt;show&gt;:&lt;id&gt; &lt;user&gt; NX EX &lt;ttl&gt;</code> is the textbook move: <code>NX</code> ("set if not exists") gives the all-or-nothing claim, and <code>EX</code> gives the timeout for free, enforced by Redis itself instead of a lazy check. The important part of the answer is that the <em>interface</em> — <code>lockSeats</code> / <code>unlockSeats</code> / <code>validateLock</code> — doesn't change at all; only the implementation behind it moves from a hashmap to a shared store. That's the general shape every distributed-locking follow-up wants to hear: same contract, new backend.</p></div></details>
+
+<details class="qa"><summary>The interviewer asks for tiered pricing — recliner vs. regular, weekend surge. How do you extend the design without touching the lock?</summary><div class="a"><p>Extract a <code>PricingStrategy</code> interface with one method, something like <code>int priceFor(const Show&amp;, const Seat&amp;)</code>, and inject it into <code>BookingService</code>. Recliner-vs-regular, weekend surge, demand-based pricing — each becomes a strategy implementation, swapped in without touching <code>SeatLockProvider</code> or the booking lifecycle at all. This is the Strategy pattern doing exactly what it's for: pricing is orthogonal to concurrency, so the two should never share a class.</p></div></details>
+
+<details class="qa"><summary>A client's network drops right after they click "pay," and their app retries the booking call. How do you avoid a duplicate booking?</summary><div class="a"><p>Have the client attach an idempotency key to the request, and have <code>BookingService</code> keep a <code>key → Booking</code> map. On a retry with the same key, return the existing booking instead of creating a second one and locking the seats twice. Notice the lock provider is already close to idempotent for the same user re-locking their own seats — <code>insert_or_assign</code> with the same owner is a no-op in effect — but the idempotency key is still needed at the service layer so a retried <code>createBooking</code> doesn't mint a second <code>Booking</code> record with a new id.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 6 · Parking Lot · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">06</div>
+  <div class="chapter-kicker">Medium · 1 of 5</div>
+  <h1>Parking Lot: the Most-Asked LLD Question</h1>
+  <p class="chapter-sub">A multi-floor lot with several spot sizes, entry/exit gates, and tickets, where the two decisions that must stay pluggable are how a spot gets picked and how the exit fee gets computed, safely, even when two cars arrive at once.</p>
+</header>
+
+<h2><span class="sec-no">6.1</span>Problem Statement</h2>
+<p>Design a multi-floor parking lot system that issues tickets, allocates spots, and charges on exit. It is, by a wide margin, <strong>the single most-asked LLD question</strong> in the industry &mdash; precisely because it looks trivial in the first two minutes and then the interviewer keeps adding requirements to see whether your class boundaries survive the pressure.</p>
+
+<div class="keypoint">A parking lot is floors of spots that fit different vehicle sizes; the two decisions that must stay swappable are <strong>which spot a vehicle gets</strong> and <strong>what it gets charged</strong>. Everything else &mdash; floors, tickets, gates &mdash; is bookkeeping around those two decisions.</div>
+
+<h3>Functional Requirements</h3>
+<ul>
+<li>The lot has <strong>multiple floors</strong>, each with <strong>spots of several types</strong>: Motorcycle, Compact (car), Large (truck/bus).</li>
+<li>On <strong>entry</strong>, a vehicle is allocated a compatible spot; the system issues a <strong>ticket</strong> (entry time, spot, vehicle).</li>
+<li>On <strong>exit</strong>, the ticket is closed, the <strong>fee is computed</strong> (time-based, possibly per vehicle type), payment is taken, and the spot is freed.</li>
+<li>Entry is <strong>rejected</strong> when no compatible spot is available (the lot is full for that vehicle type).</li>
+<li>The lot supports <strong>multiple entry/exit gates</strong> operating at the same time.</li>
+</ul>
+
+<h3>Non-Functional Requirements</h3>
+<ul>
+<li><strong>Spot-allocation strategy must be pluggable</strong>: nearest-to-entrance, first-available, per-floor load balancing.</li>
+<li><strong>Pricing strategy must be pluggable</strong>: flat hourly, per-vehicle-type, day/night rates, free first 15 minutes.</li>
+<li><strong>Thread safety</strong>: concurrent entries at different gates must never be handed the same spot.</li>
+</ul>
+
+<p>The interface an interviewer often sketches up front looks like this &mdash; notice that the two strategies are named in the contract before a single line of them exists:</p>
+<pre><code class="language-cpp">enum class VehicleType { MOTORCYCLE, CAR, TRUCK };
+
+class SpotAllocationStrategy {        // Strategy
+public:
+    virtual ParkingSpot* findSpot(VehicleType, const ParkingLot&amp;) = 0;
+    virtual ~SpotAllocationStrategy() = default;
+};
+
+class PricingStrategy {               // Strategy
+public:
+    virtual double calculate(const Ticket&amp;) const = 0;
+    virtual ~PricingStrategy() = default;
+};
+
+class ParkingLot {
+public:
+    Ticket parkVehicle(const Vehicle&amp; v);          // throws if full
+    Receipt unparkVehicle(const Ticket&amp; t);        // computes fee, frees spot
+    bool isFull(VehicleType) const;
+};</code></pre>
+
+<h3>What the Interviewer Is Really Testing</h3>
+<ul>
+<li>Clean modeling of <code>ParkingLot &rarr; Floor &rarr; ParkingSpot</code>, the <code>Vehicle</code> hierarchy, and <code>Ticket</code>.</li>
+<li>Whether allocation and pricing are <strong>actually</strong> pluggable &mdash; they will swap the rule mid-interview and watch what you have to touch to satisfy it.</li>
+<li>Your answer for the <strong>concurrency</strong> question: a lock per floor, an atomic claim, or something worse that lets two gates double-book a bay.</li>
+</ul>
+
+<h3>Follow-Up Questions to Expect</h3>
+<ul>
+<li>EV spots with charging, handicapped-reserved spots.</li>
+<li>Reservation / pre-booking ahead of arrival.</li>
+<li>Find-my-car and real-time per-floor availability display.</li>
+<li>Lost-ticket handling and a flat penalty fee.</li>
+</ul>
+
+<h2><span class="sec-no">6.2</span>How to Approach</h2>
+<p>Eight minutes of clarifying questions before any class gets written buys you the rest of the hour. Lock down: one lot, multiple floors; three vehicle types against three spot sizes with a fit rule (a bike fits any bay, a car needs Medium or larger, a truck needs Large); hourly pricing by vehicle type, minimum one hour, rounded up; nearest-first assignment (the first free compatible bay, floor by floor, in order). Say that scope back to the interviewer before touching the keyboard &mdash; it becomes the contract for the rest of the hour.</p>
+
+<p>The entity model falls out of that scope almost mechanically:</p>
+<pre><code class="language-text">ParkingLot            the front door; the only thing the outside world calls
+ &#9500;&#9472;&#9472; has many  ParkingFloor        one level
+ &#9474;                &#9492;&#9472;&#9472; has many ParkingSpot   one bay (owns its size + who's in it)
+ &#9474;                                   &#9492;&#9472;&#9472; points to a Vehicle while occupied
+ &#9500;&#9472;&#9472; keeps a list of Ticket        one per parked vehicle
+ &#9492;&#9472;&#9472; fee logic                     an internal detail, not a caller's business
+
+Vehicle  &#9472;&#9472; is the base of &#9472;&#9472;&#9656;  Motorcycle | Car | Truck</code></pre>
+
+<p>Two modeling habits are worth stating out loud in the interview, because they are what &ldquo;properly encapsulated&rdquo; actually means here, not just a compliment word:</p>
+<ul>
+<li><strong>Put each rule on the object that owns the data it needs.</strong> <code>canFit</code> lives on <code>ParkingSpot</code> because only the spot knows its own size; a floor never reaches into a spot's internals to decide, it just asks the spot.</li>
+<li><strong>Nobody flips state directly.</strong> A spot's occupied flag only changes inside <code>park()</code> / <code>leave()</code>. <code>ParkingLot</code> is the only front door the outside world calls &mdash; nothing outside ever reaches into a <code>ParkingFloor</code> or <code>ParkingSpot</code> to poke at its fields.</li>
+</ul>
+
+<div class="analogy">Think of <code>ParkingLot</code> as a hotel concierge, not a hotel. The concierge does not personally check every room; they ask the floor, the floor asks the room. The moment you catch yourself writing a loop inside <code>ParkingLot</code> that reaches past <code>ParkingFloor</code> into a spot's internals, you have broken the chain of command the whole design depends on.</div>
+
+<p>The extensibility insight interviewers are fishing for: two things in this design change constantly across follow-ups &mdash; <em>how a spot is picked</em> and <em>how a fee is computed</em> &mdash; and neither should require editing <code>ParkingLot</code> itself. That is exactly what <code>SpotAllocationStrategy</code> and <code>PricingStrategy</code> are for: two narrow interfaces, one method each, handed to the lot at construction time by a small factory that knows which concrete policy a given deployment wants.</p>
+<pre><code class="language-cpp">class SpotAllocationStrategy {
+public:
+    virtual ParkingSpot* findSpot(VehicleType type, ParkingLot&amp; lot) = 0;
+    virtual ~SpotAllocationStrategy() = default;
+};
+class NearestFirstAllocation : public SpotAllocationStrategy { /* today's linear scan, promoted */ };
+class LoadBalancedAllocation : public SpotAllocationStrategy { /* picks the least-full floor */ };
+
+class PricingStrategy {
+public:
+    virtual double price(const Ticket&amp; t, double hours) const = 0;
+    virtual ~PricingStrategy() = default;
+};
+class HourlyByVehicleType : public PricingStrategy { /* today's calculateFee, promoted */ };
+class DayNightSurge       : public PricingStrategy { /* new rule, new class, ParkingLot untouched */ };
+
+class StrategyFactory {
+public:
+    static unique_ptr&lt;SpotAllocationStrategy&gt; makeAllocation(AllocationPolicy p);
+    static unique_ptr&lt;PricingStrategy&gt;        makePricing(PricingPolicy p);
+};</code></pre>
+
+<dl class="jargon">
+<dt>Strategy pattern</dt><dd>Pull an algorithm that varies (how to pick a spot, how to price a stay) behind a one-method interface, and hand the object that needs it a pointer to whichever implementation applies. New policy = new class; the caller's code never changes.</dd>
+<dt>Factory</dt><dd>A small piece of code whose only job is constructing the right concrete strategy for a given configuration, so the wiring decision lives in one place instead of being scattered through the codebase.</dd>
+<dt>Race condition</dt><dd>Two threads read the same &ldquo;is this spot free?&rdquo; answer before either has written its claim, so both proceed to occupy the same bay. The bug does not show up in a single-threaded demo; it shows up in production at the two busiest gates.</dd>
+<dt>Critical section</dt><dd>The sequence &ldquo;find a free compatible spot, then mark it occupied&rdquo; has to happen as one indivisible unit. Anything less &mdash; checking free-ness and claiming it as two separate unguarded steps &mdash; is where the race lives.</dd>
+</dl>
+
+<div class="warfield">
+<p>Be honest about the gap between this design and the file in the next section, because an interviewer who reads code will notice it before you finish talking. <code>parking-lot.cpp</code> does <strong>not</strong> implement <code>SpotAllocationStrategy</code> or <code>PricingStrategy</code>. <code>ParkingFloor::findFreeSpot</code> is a hardcoded linear scan calling <code>ParkingSpot::canFit</code>; <code>ParkingLot::calculateFee</code> is a hardcoded set of <code>if</code> conditionals living directly inside <code>ParkingLot</code>. There is no <code>mutex</code> anywhere and no atomic claim &mdash; two gates calling <code>parkVehicle</code> at the same instant against the same floor can both walk the vector, both see the same free spot, and both call <code>park()</code> on it.</p>
+<p>Say this straight in the interview rather than let the code speak for itself: &ldquo;here is the working OOP skeleton &mdash; the <code>Vehicle</code> hierarchy, <code>ParkingSpot</code>/<code>Floor</code>/<code>Ticket</code>/<code>Lot</code>, everything correctly encapsulated. Today <code>findFreeSpot</code> and <code>calculateFee</code> are hardcoded; here is exactly how I'd lift each behind its own interface, and here is where a <code>std::mutex</code> &mdash; one per floor for less contention, or one guarding the whole <code>parkVehicle</code>/<code>unparkVehicle</code> call for simplicity &mdash; has to go before two gates can safely run concurrently.&rdquo; Naming the gap and the fix out loud is worth more than code that quietly pretends the gap does not exist.</p>
+</div>
+
+<h2><span class="sec-no">6.3</span>Whole Solution</h2>
+<p>The complete, compiling file below is the skeleton described above: enums, the <code>Vehicle</code> hierarchy, <code>ParkingSpot</code> with its <code>canFit</code> rule, <code>ParkingFloor</code>, <code>Ticket</code>, and <code>ParkingLot</code> as the single front door, plus a <code>main</code> that parks three vehicles, exits one, and reuses its freed bay. As flagged above, allocation and pricing are hardcoded here rather than pulled behind the <code>Strategy</code> interfaces, and there is no locking &mdash; both are the honest next step, not a hidden defect.</p>
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+
+using namespace std;
+
+enum class VehicleType{
+    MOTORCYCLE,
+    CAR,
+    TRUCK
+};
+
+enum class SpotType{
+    SMALL,
+    MEDIUM,
+    LARGE
+};
+
+string toString(VehicleType type) {
+    if (type == VehicleType::MOTORCYCLE) return "Motorcycle";
+    if (type == VehicleType::CAR)        return "Car";
+    if (type == VehicleType::TRUCK)      return "Truck";
+    return "Unknown";
+}
+
+
+
+class Vehicle{
+    private:
+        string licencePlate_;
+        VehicleType type_;
+
+    public:
+        Vehicle(string plate, VehicleType type){
+            licencePlate_ = plate;
+            type_ = type;
+        }
+
+        string getLicencePlate() const {
+            return licencePlate_;
+        }
+
+        VehicleType getVehicleType() const {
+            return type_;
+        }
+};
+
+
+class Motorcycle : public Vehicle {
+    public:
+        Motorcycle(string plate) : Vehicle(plate, VehicleType::MOTORCYCLE) {}
+};
+
+class Car : public Vehicle {
+    public:
+        Car(string plate) : Vehicle(plate, VehicleType::CAR) {}
+};
+
+class Truck : public Vehicle {
+    public:
+        Truck(string plate) : Vehicle(plate, VehicleType::TRUCK) {}
+};
+
+
+class ParkingSpot{
+    private:
+        string id_;
+        SpotType type_;
+        bool occupied_;
+        Vehicle* parkedVehicle_;
+
+    public:
+        ParkingSpot(string id, SpotType type){
+            id_ = id;
+            type_ = type;
+            occupied_ = false;
+            parkedVehicle_ = nullptr;
+        }
+
+        string getId() const { return id_; }
+
+        bool isFree() const { return !occupied_; }
+
+        bool canFit(VehicleType vehicle) const {
+            if(vehicle == VehicleType::MOTORCYCLE){ return true; }
+            if(vehicle == VehicleType::CAR){
+                return type_ == SpotType::MEDIUM || type_ == SpotType::LARGE;
+            }
+            if(vehicle == VehicleType::TRUCK){
+                return type_ == SpotType::LARGE;
+            }
+            return false;
+        }
+
+        void park(Vehicle* vehicle){
+            parkedVehicle_ = vehicle;
+            occupied_ = true;
+        }
+
+        void leave(){
+            parkedVehicle_ = nullptr;
+            occupied_ = false;
+        }
+};
+
+class ParkingFloor{
+    private:
+       int number_;
+       vector&lt;ParkingSpot&gt; spots_;
+
+    public:
+        ParkingFloor(int number){
+            number_ = number;
+        }
+
+        int getNumber(){
+            return number_;
+        }
+
+        void addSpot(string id, SpotType type){
+            spots_.push_back(ParkingSpot(id, type));
+        }
+
+        ParkingSpot* findFreeSpot(VehicleType vt){
+            for(ParkingSpot&amp; spot : spots_){
+                if(spot.isFree() &amp;&amp; spot.canFit(vt)){
+                    return &amp;spot;
+                }
+            }
+            return nullptr;
+        }
+
+        ParkingSpot* findSpotById(string id){
+            for(ParkingSpot&amp; spot : spots_){
+                if(spot.getId() == id){
+                    return &amp;spot;
+                }
+            }
+            return nullptr;
+        }
+
+        int countFree(){
+            int count = 0;
+            for(ParkingSpot&amp; spot : spots_){
+                if(spot.isFree()){
+                    count++;
+                }
+            }
+            return count;
+        }
+};
+
+
+class Ticket{
+    private:
+        string id_;
+        string spotId_;
+        string plate_;
+        VehicleType vehicleType_;
+
+    public:
+        Ticket(string id, string spotId, string plate, VehicleType type){
+            id_ = id;
+            spotId_ = spotId;
+            plate_ = plate;
+            vehicleType_ = type;
+        }
+
+        string getId(){
+            return id_;
+        }
+        string getSpotId(){
+            return spotId_;
+        }
+        VehicleType getVehicleType(){
+            return vehicleType_;
+        }
+};
+
+class ParkingLot{
+    private:
+        vector&lt;ParkingFloor&gt; floors_;
+        vector&lt;Ticket&gt; tickets_;
+        int ticketCounter_ = 0;
+
+        double calculateFee(VehicleType type, double hours){
+            double billableHours = ceil(hours);
+            if(billableHours &lt; 1) billableHours = 1;
+            double rate = 0;
+            if(type == VehicleType::MOTORCYCLE) rate = 10;
+            if(type == VehicleType::CAR) rate = 20;
+            if(type == VehicleType::TRUCK) rate = 40;
+
+            return rate * billableHours;
+        }
+
+    public:
+        void addFloor(int number){
+            floors_.push_back(ParkingFloor(number));
+        }
+        void addSpot(string id, SpotType type){
+            floors_.back().addSpot(id, type);
+        }
+
+        void parkVehicle(Vehicle* vehicle){
+            for(ParkingFloor&amp; floor : floors_){
+                ParkingSpot* spot = floor.findFreeSpot(vehicle-&gt;getVehicleType());
+                if(spot != nullptr){
+                    spot-&gt;park(vehicle);
+                    ticketCounter_++;
+                    string ticketId = "T" + to_string(ticketCounter_);
+                    tickets_.push_back(Ticket(ticketId, spot-&gt;getId(), vehicle-&gt;getLicencePlate(), vehicle-&gt;getVehicleType()));
+                    cout &lt;&lt; "[Park] " &lt;&lt; toString(vehicle-&gt;getVehicleType()) &lt;&lt; " " &lt;&lt; vehicle-&gt;getLicencePlate()
+                    &lt;&lt; " -&gt; spot " &lt;&lt; spot-&gt;getId() &lt;&lt; "  (ticket " &lt;&lt; ticketId &lt;&lt; ")" &lt;&lt; endl;
+                    return;
+                }
+            }
+            cout &lt;&lt; "[FULL]  no spot for " &lt;&lt; toString(vehicle-&gt;getVehicleType())
+             &lt;&lt; " " &lt;&lt; vehicle-&gt;getLicencePlate() &lt;&lt; "\n";
+        }
+
+        double unparkVehicle(string ticketId, double hours){
+            for(int i = 0; i &lt; (int)tickets_.size(); i++){
+                if(tickets_[i].getId() == ticketId){
+                    Ticket ticket = tickets_[i];
+
+                    for(ParkingFloor&amp; floor : floors_){
+                        ParkingSpot* spot = floor.findSpotById(ticket.getSpotId());
+                        if(spot != nullptr) spot-&gt;leave();
+                    }
+
+                    double fee = calculateFee(ticket.getVehicleType(), hours);
+
+                    cout &lt;&lt; "[EXIT]  ticket " &lt;&lt; ticketId &lt;&lt; " from spot "
+                     &lt;&lt; ticket.getSpotId() &lt;&lt; "  | " &lt;&lt; hours &lt;&lt; "h -&gt; fee $" &lt;&lt; fee &lt;&lt; "\n";
+
+                    tickets_.erase(tickets_.begin() + i);
+
+                    return fee;
+                }
+            }
+
+            cout &lt;&lt; "[ERROR] invalid ticket " &lt;&lt; ticketId &lt;&lt; "\n";
+            return -1;
+        }
+
+
+        void printAvailability() {
+            cout &lt;&lt; "--- availability ---\n";
+            for (ParkingFloor&amp; floor : floors_) {
+                cout &lt;&lt; "  floor " &lt;&lt; floor.getNumber() &lt;&lt; ": "
+                    &lt;&lt; floor.countFree() &lt;&lt; " free\n";
+            }
+        }
+
+};
+
+
+int main(){
+    ParkingLot lot;
+    lot.addFloor(1);
+    lot.addSpot("F1-S1", SpotType::SMALL);
+    lot.addSpot("F1-M1", SpotType::MEDIUM);
+    lot.addSpot("F1-L1", SpotType::LARGE);
+
+    lot.addFloor(2);
+    lot.addSpot("F2-M1", SpotType::MEDIUM);
+    lot.addSpot("F2-L1", SpotType::LARGE);
+
+    lot.printAvailability();
+
+    Motorcycle bike("KA01-1111");
+    Car        car("KA02-2222");
+    Truck      truck("KA03-3333");
+
+    lot.parkVehicle(&amp;bike);
+    lot.parkVehicle(&amp;car);
+    lot.parkVehicle(&amp;truck);
+    lot.printAvailability();
+
+    lot.unparkVehicle("T2", 2.5);   // car: ceil(2.5)=3, rate 20 -&gt; $60
+
+    lot.printAvailability();
+
+    Car car2("KA04-4444");          // reuses F1-M1 that the first car freed
+    lot.parkVehicle(&amp;car2);
+    lot.printAvailability();
+
+    return 0;
+}</code></pre>
+
+<details class="qa"><summary>Two cars enter through different gates at the same instant and both find the same free bay. How do you actually fix this?</summary><div class="a"><p>You have to guard the whole check-then-claim sequence, not just the scan. Reading &ldquo;is this spot free?&rdquo; and writing &ldquo;now it's occupied&rdquo; must happen as one atomic unit. The simplest fix is a <code>std::mutex</code> per floor around <code>findFreeSpot</code> + <code>park</code>, taken as a single critical section; that gives you concurrency across floors while serializing contention within one. A lock-free alternative is a per-spot atomic flag with compare-and-swap: try to flip <code>occupied_</code> from false to true, and if it fails, move to the next candidate spot instead of retrying the same one. Either answer is acceptable; naming the race and picking one is the point.</p></div></details>
+<details class="qa"><summary>How would you add EV charging spots or handicapped-reserved spots without rewriting ParkingLot?</summary><div class="a"><p>Extend <code>SpotType</code> with the new values and add an eligibility check next to <code>canFit</code>: not just &ldquo;does the vehicle fit the size&rdquo; but &ldquo;is this vehicle allowed in this spot&rdquo; (permit on file, EV flag on the vehicle). That check lives on <code>ParkingSpot</code> for the same reason <code>canFit</code> does &mdash; it depends on data the spot owns. The allocation strategy calls both checks before offering a bay. Nothing about <code>Vehicle</code>, <code>Ticket</code>, or <code>ParkingLot</code>'s public surface has to change.</p></div></details>
+<details class="qa"><summary>How do you support find-my-car and a live per-floor availability display without touching the core park/unpark flow?</summary><div class="a"><p><code>countFree()</code> already gives per-floor availability for free; a dashboard just polls it, or better, spots publish a state change on <code>park()</code>/<code>leave()</code> to a small event bus the display subscribes to, so nobody polls at all. Find-my-car is a lookup from license plate to ticket to spot id, which today means scanning <code>tickets_</code> linearly. The fix is the same one <code>sol.md</code> flags for O(1) exit: keep a <code>map&lt;string, ParkingSpot*&gt;</code> and a plate-to-ticket index alongside the vector, so both lookups become constant time instead of a scan.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

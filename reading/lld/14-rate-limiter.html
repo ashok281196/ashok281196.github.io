@@ -1,0 +1,472 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 14 · Rate Limiter · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">14</div>
+  <div class="chapter-kicker">Hard · 4 of 5</div>
+  <h1>Rate Limiter: Four Algorithms Behind One Strategy Interface</h1>
+  <p class="chapter-sub">Token Bucket, Leaky Bucket, Fixed Window, and Sliding Window are four different answers to the same one-line question &mdash; unified behind a single Strategy interface, a Factory that builds the right one, and per-client locking fine-grained enough that one busy client never slows down another.</p>
+</header>
+
+<h2><span class="sec-no">14.1</span>Problem Statement</h2>
+<p>Design a reusable rate limiter that caps how many requests a client may make in a time window &mdash; the kind of component you embed inside an API gateway or service middleware, sitting in front of every inbound call and answering exactly one question: let this one through, or not.</p>
+<div class="keypoint">A rate limiter answers one question &mdash; <code>allowRequest(clientId)</code>, permitted right now or not &mdash; but must answer it behind a swappable <strong>Strategy</strong> so Token Bucket, Fixed Window, or Sliding Window can be dropped in without touching a call site, and it must answer it correctly when thousands of clients are asking at once.</div>
+
+<p><strong>Functional requirements:</strong></p>
+<ul>
+  <li><code>allowRequest(clientId)</code> returns whether a request is permitted <strong>right now</strong>.</li>
+  <li>Support <strong>multiple algorithms</strong>, swappable per configuration: <strong>Token Bucket</strong> (tokens refill at a fixed rate, each request spends one), <strong>Leaky Bucket</strong> (requests queue and drain at a fixed rate), <strong>Fixed Window Counter</strong> (N requests per fixed time window), and <strong>Sliding Window Log / Counter</strong> (smooths the fixed-window boundary burst).</li>
+  <li><strong>Per-client</strong> limits &mdash; each <code>clientId</code> owns its own state, fully isolated from every other client's.</li>
+</ul>
+
+<p><strong>Non-functional requirements / constraints:</strong></p>
+<ul>
+  <li><strong>Thread-safe</strong>: high-concurrency <code>allowRequest</code> calls on the same client must be correct, and the prompt explicitly warns against the lazy answer &mdash; <strong>avoid one global lock</strong>.</li>
+  <li>The algorithm is a <strong>Strategy</strong> &mdash; it must swap without changing a single call site.</li>
+  <li>Config (limits per client or tier) lives behind a <strong>Singleton</strong> registry, and limiters are produced by a <strong>Factory</strong>.</li>
+  <li><strong>Efficient</strong>: O(1) per check, bounded memory per client &mdash; someone has to answer for stale clients eventually.</li>
+</ul>
+
+<p><strong>Expected public interface:</strong></p>
+<pre><code class="language-cpp">class RateLimitStrategy {              // Strategy
+public:
+    virtual bool allowRequest(const std::string&amp; clientId) = 0;
+    virtual ~RateLimitStrategy() = default;
+};
+
+// e.g. TokenBucketLimiter, FixedWindowLimiter, SlidingWindowLimiter
+
+class RateLimiterFactory {
+public:
+    static std::unique_ptr&lt;RateLimitStrategy&gt; create(AlgoType type, const RateLimitConfig&amp; cfg);
+};
+
+class RateLimiter {
+public:
+    explicit RateLimiter(std::unique_ptr&lt;RateLimitStrategy&gt; strategy);
+    bool allowRequest(const std::string&amp; clientId);   // thread-safe
+};</code></pre>
+
+<p><strong>What the interviewer is really testing:</strong></p>
+<ul>
+  <li>Correct, <strong>clearly-explained algorithms</strong> &mdash; token refill math, and why sliding window beats fixed window at the boundary.</li>
+  <li>The <strong>Strategy</strong> abstraction and a <strong>Factory</strong> that produces the right limiter without a <code>switch</code> leaking into every call site.</li>
+  <li>The <strong>thread-safety</strong> story per client &mdash; a per-key lock or atomic token count, never one mutex guarding every client at once.</li>
+  <li><strong>Bounded memory</strong>: how stale client state eventually gets evicted.</li>
+</ul>
+
+<p><strong>Follow-up questions to expect:</strong></p>
+<ol>
+  <li><strong>Distributed</strong> rate limiting across many service instances (a centralized store, Redis-style counters) &mdash; discuss it even if you implement in-memory.</li>
+  <li><strong>Tiered limits</strong> (free vs premium clients) and dynamic config reload.</li>
+  <li><strong>Burst allowance</strong> vs steady-rate trade-offs.</li>
+  <li>Returning <code>Retry-After</code> / time-until-allowed instead of a bare boolean.</li>
+</ol>
+
+<h2><span class="sec-no">14.2</span>How to Approach</h2>
+<p>Mine the hard constraints before designing anything, because they choose the shape of the answer outright. "Support multiple algorithms, swappable per configuration &hellip; the algorithm is a Strategy" names the pattern being tested by name &mdash; a single <code>allowRequest</code> with a <code>switch (algoType)</code> buried inside it is a fail, full stop. "Thread-safe &hellip; avoid one global lock" turns concurrency into a first-class requirement and tells you exactly which wrong answer it wants you to reject. "Efficient: O(1) per check, bounded memory" rules out any background refill thread and demands lazy, on-read math instead.</p>
+
+<div class="keypoint">When a prompt says "multiple algorithms, swappable&nbsp;&hellip; Strategy," it is naming the pattern outright. Build the pattern, don't fight it &mdash; then read the non-functional lines (thread-safe, O(1)) because those are the lines that actually pick your data structures.</div>
+
+<p>Circle the nouns &mdash; request, client, limiter, strategy, token, bucket, window, config, tier, factory &mdash; and the class list writes itself: a <code>RateLimitConfig</code> of knobs (capacity, refill rate, window size); a <code>RateLimitStrategy</code> interface holding the one swappable <code>allowRequest(clientId)</code> operation; concrete <code>TokenBucketLimiter</code> / <code>FixedWindowLimiter</code> / <code>SlidingWindowLimiter</code> strategies, each owning its own map of per-client state; a <code>RateLimiterFactory</code> that hides the enum-to-class mapping in exactly one place; and a <code>RateLimiter</code> facade that holds a strategy and never asks which one it was handed. That's the whole Strategy pattern &mdash; one interface, N concrete implementations, one context, one factory to build it &mdash; and the class list was sitting in the problem statement the whole time.</p>
+
+<p>The four algorithms all answer the same question, but they disagree on how much history they keep and how forgiving they are of bursts:</p>
+<table>
+  <tr><th>Algorithm</th><th>Burst tolerance</th><th>Memory per client</th><th>Boundary accuracy</th></tr>
+  <tr><td><strong>Token Bucket</strong></td><td>High &mdash; a quiet client can spend a full bucket instantly, then settles to the steady refill rate</td><td>O(1): a token count + one timestamp</td><td>N/A &mdash; no window boundary to violate</td></tr>
+  <tr><td><strong>Leaky Bucket</strong></td><td>Low &mdash; requests drain at a constant rate no matter how they arrived; bursts queue instead of passing through</td><td>O(1) counter, or O(queue&nbsp;depth) if requests are literally queued</td><td>N/A &mdash; output is smoothed by construction</td></tr>
+  <tr><td><strong>Fixed Window</strong></td><td>Worst case 2&times; capacity across a single window seam (the "boundary burst")</td><td>O(1): a counter + one window-start timestamp</td><td>Weak at boundaries, exact everywhere else</td></tr>
+  <tr><td><strong>Sliding Window (Counter)</strong></td><td>Close to the configured limit; the boundary burst is smoothed away</td><td>O(1): two counters + one timestamp (the Log variant is O(capacity) &mdash; one timestamp per request)</td><td>Strong &mdash; an interpolated estimate replaces the hard edge</td></tr>
+</table>
+
+<div class="analogy">A token bucket is a literal bucket: it holds up to <code>capacity</code> tokens and refills at <code>refillRate</code> tokens per second. A client who's been quiet finds it full and can spend the whole thing in one burst; a client hammering the endpoint drains it down to the steady drip of the refill rate. <code>capacity</code> is the burst you tolerate, <code>refillRate</code> is the sustained rate you enforce &mdash; the same two knobs answer the "burst vs steady" follow-up before anyone has to ask it. Leaky bucket is the same bucket turned upside down: instead of tokens accumulating for you to spend, requests pour in and drain out at a fixed rate regardless of how bunched-up their arrival was.</div>
+
+<p>The lazy-refill trick is the one idea worth memorizing from this problem: never run a background thread that adds tokens on a timer. Instead, compute the refill <em>on read</em>. Each client stores a token count and a last-refill timestamp; on every <code>allowRequest</code>, compute <code>elapsed = now - lastRefill</code>, add <code>elapsed &times; refillRate</code> tokens capped at <code>capacity</code>, and only then check whether a whole token is available to spend. No timer, one arithmetic step, O(1).</p>
+
+<p>The boundary burst is the sliding window's whole reason for existing:</p>
+<pre><code class="language-text">fixed window, capacity 3, window 1s
+
+  |---------- window A ----------|---------- window B ----------|
+                              3 requests here          3 requests here
+                              (just before the edge)   (just after the edge)
+
+  6 requests land inside a span far shorter than 1s -- the boundary burst.
+  sliding window blends window A's count into window B's estimate, weighted
+  by how much of window A is still "in view," so the estimate never spikes.</code></pre>
+
+<p>Thread safety is the other half of the grade. The requirement explicitly rules out one mutex guarding the whole limiter, which means the state has to be keyed per client and locked per client: a map from <code>clientId</code> to state, where the map itself is shared structure but each entry is independently lockable. The discipline that makes this safe is <strong>two-level locking</strong> &mdash; a brief lock on the map just to find or create an entry, released immediately, followed by the entry's <em>own</em> mutex held only while doing that one client's math. Holding the coarse map lock during the arithmetic is exactly how you'd accidentally rebuild the single global lock the problem told you to avoid.</p>
+
+<div class="warfield">A <code>std::mutex</code> is neither movable nor copyable, and an <code>unordered_map</code> can rehash its buckets on any insert, relocating every value it stores. Keep <code>State</code> objects <em>by value</em> inside the map and a rehash can invalidate a lock some other thread currently holds. Store them behind a <code>std::unique_ptr&lt;State&gt;</code> instead, and the address &mdash; and the live mutex inside it &mdash; never moves once a reference to it has been handed out. The other trap: holding the map's mutex for anything beyond the lookup/insert. The moment the per-client math runs under the map lock, every client is serialized behind it again, silently.</div>
+
+<p>The Factory is the one place allowed to know the <code>AlgoType</code> enum; every call site stays algorithm-blind and adding a fifth algorithm later is one new <code>case</code>, not an edit scattered across the codebase. For the config side, a <strong>Singleton</strong> <code>ConfigRegistry</code> maps tier name to <code>RateLimitConfig</code> &mdash; free gets a small bucket, premium gets a large one &mdash; and dynamic reload is just overwriting an entry under a lock; existing buckets pick up the new limit on their very next refill, no restart required. Resolve a request's tier, hand the resulting config to the Factory, and the tiering follow-up is already answered by machinery built for a different reason.</p>
+
+<h2><span class="sec-no">14.3</span>Whole Solution</h2>
+<p>One synthesized, internally-consistent program: the <code>RateLimitStrategy</code> Strategy interface; three concrete strategies &mdash; Token Bucket, Fixed Window, and Sliding Window Counter (Leaky Bucket is discussed above and left as a named extension point, exactly like the distributed follow-up below) &mdash; each with its own per-client state and two-level locking; the <code>RateLimiterFactory</code>; the lock-free <code>RateLimiter</code> facade; a <code>ConfigRegistry</code> singleton for tiered, reloadable config; and a driver that exercises a burst, a throttle, a refill recovery, a fixed-window boundary burst, its sliding-window smoothing, and a tiered client resolved through the Factory.</p>
+<pre><code class="language-cpp">// ============================================================
+// Rate Limiter -- Strategy interface with four pluggable
+// algorithms, a Factory that builds the right one, and per-client
+// fine-grained locking so no single mutex ever serializes every
+// client's traffic.
+// ============================================================
+#include &lt;algorithm&gt;
+#include &lt;chrono&gt;
+#include &lt;iostream&gt;
+#include &lt;memory&gt;
+#include &lt;mutex&gt;
+#include &lt;stdexcept&gt;
+#include &lt;string&gt;
+#include &lt;thread&gt;
+#include &lt;unordered_map&gt;
+
+// ============================================================
+// The pinned contract: one enum for the algorithm choice, one
+// config struct of knobs, one Strategy interface, one Factory
+// declaration (defined later, once the concrete strategies exist).
+// ============================================================
+enum class AlgoType { TOKEN_BUCKET, FIXED_WINDOW, SLIDING_WINDOW };
+
+struct RateLimitConfig {
+    int    capacity   = 10;    // max tokens / max requests per window
+    double refillRate = 5.0;   // tokens per second (token bucket only)
+    int    windowMs   = 1000;  // window length in ms (window algorithms only)
+};
+
+class RateLimitStrategy {                          // Strategy
+public:
+    virtual bool allowRequest(const std::string&amp; clientId) = 0;
+    virtual ~RateLimitStrategy() = default;
+};
+
+class RateLimiterFactory {                          // declared now, defined below
+public:
+    static std::unique_ptr&lt;RateLimitStrategy&gt; create(AlgoType type, const RateLimitConfig&amp; cfg);
+};
+
+// ============================================================
+// Leaves: a monotonic clock alias, and one state struct per
+// algorithm. Every state struct carries its OWN mutex -- that is
+// what makes "per-client locking" fall out for free later on.
+// ============================================================
+using Clock     = std::chrono::steady_clock;   // monotonic -- never jumps backward
+using TimePoint = Clock::time_point;
+
+struct TokenBucketState {
+    double     tokens;        // fractional tokens available right now
+    TimePoint  lastRefill;
+    std::mutex mtx;           // per-client lock -- NOT one global lock
+};
+
+struct FixedWindowState {
+    int        count;         // requests seen in the current window
+    TimePoint  windowStart;
+    std::mutex mtx;
+};
+
+struct SlidingWindowState {
+    TimePoint  windowStart;   // start of the window currently being counted
+    int        currCount = 0; // requests counted in the current window
+    int        prevCount = 0; // requests counted in the window right before it
+    std::mutex mtx;
+};
+
+// ============================================================
+// Concrete strategy #1: Token Bucket. Refill is computed lazily
+// on read from elapsed time -- no background timer, O(1) per call.
+// ============================================================
+class TokenBucketLimiter : public RateLimitStrategy {
+public:
+    explicit TokenBucketLimiter(const RateLimitConfig&amp; cfg) : cfg_(cfg) {}
+
+    bool allowRequest(const std::string&amp; clientId) override {
+        TokenBucketState&amp; st = stateFor(clientId);     // map lock held only inside stateFor
+        std::lock_guard&lt;std::mutex&gt; lock(st.mtx);       // per-CLIENT lock only
+
+        TimePoint now = Clock::now();
+        double elapsedSec =
+            std::chrono::duration&lt;double&gt;(now - st.lastRefill).count();
+
+        st.tokens     = std::min(static_cast&lt;double&gt;(cfg_.capacity),
+                                  st.tokens + elapsedSec * cfg_.refillRate);
+        st.lastRefill = now;
+
+        if (st.tokens &gt;= 1.0) { st.tokens -= 1.0; return true; }  // spend a token
+        return false;                                              // throttled
+    }
+
+private:
+    // Find-or-create the client's bucket. The MAP mutex protects only the
+    // lookup/insert; the per-client math below runs under st.mtx alone.
+    TokenBucketState&amp; stateFor(const std::string&amp; clientId) {
+        std::lock_guard&lt;std::mutex&gt; mapLock(mapMtx_);
+        auto it = states_.find(clientId);
+        if (it == states_.end()) {
+            auto st = std::make_unique&lt;TokenBucketState&gt;();
+            st-&gt;tokens     = cfg_.capacity;     // new clients start with a full bucket
+            st-&gt;lastRefill = Clock::now();
+            it = states_.emplace(clientId, std::move(st)).first;
+        }
+        return *it-&gt;second;
+    }
+
+    RateLimitConfig cfg_;
+    std::mutex      mapMtx_;
+    // unique_ptr so the stored State -- and its live mutex -- never moves
+    // in memory when the unordered_map rehashes.
+    std::unordered_map&lt;std::string, std::unique_ptr&lt;TokenBucketState&gt;&gt; states_;
+};
+
+// ============================================================
+// Concrete strategy #2: Fixed Window Counter. Simplest possible
+// shape -- a counter plus a window-start timestamp, hard reset when
+// the window has fully elapsed.
+// ============================================================
+class FixedWindowLimiter : public RateLimitStrategy {
+public:
+    explicit FixedWindowLimiter(const RateLimitConfig&amp; cfg) : cfg_(cfg) {}
+
+    bool allowRequest(const std::string&amp; clientId) override {
+        FixedWindowState&amp; st = stateFor(clientId);
+        std::lock_guard&lt;std::mutex&gt; lock(st.mtx);
+
+        TimePoint now = Clock::now();
+        auto window = std::chrono::milliseconds(cfg_.windowMs);
+        if (now - st.windowStart &gt;= window) {     // window expired -&gt; hard reset
+            st.count       = 0;
+            st.windowStart = now;
+        }
+        if (st.count &lt; cfg_.capacity) { ++st.count; return true; }
+        return false;
+    }
+
+private:
+    FixedWindowState&amp; stateFor(const std::string&amp; clientId) {
+        std::lock_guard&lt;std::mutex&gt; mapLock(mapMtx_);
+        auto it = states_.find(clientId);
+        if (it == states_.end()) {
+            auto st = std::make_unique&lt;FixedWindowState&gt;();
+            st-&gt;count       = 0;
+            st-&gt;windowStart = Clock::now();
+            it = states_.emplace(clientId, std::move(st)).first;
+        }
+        return *it-&gt;second;
+    }
+
+    RateLimitConfig cfg_;
+    std::mutex      mapMtx_;
+    std::unordered_map&lt;std::string, std::unique_ptr&lt;FixedWindowState&gt;&gt; states_;
+};
+
+// ============================================================
+// Concrete strategy #3: Sliding Window Counter. Same shape as Fixed
+// Window, but keeps one extra number -- the PREVIOUS window's count
+// -- and blends it in, weighted by how much of that window is still
+// "in view", to erase the boundary burst.
+//   estimated = prevCount * overlapFraction + currCount
+//   allow if estimated &lt; capacity
+// ============================================================
+class SlidingWindowLimiter : public RateLimitStrategy {
+public:
+    explicit SlidingWindowLimiter(const RateLimitConfig&amp; cfg) : cfg_(cfg) {}
+
+    bool allowRequest(const std::string&amp; clientId) override {
+        SlidingWindowState&amp; st = stateFor(clientId);
+        std::lock_guard&lt;std::mutex&gt; lock(st.mtx);
+
+        TimePoint now = Clock::now();
+        auto window = std::chrono::milliseconds(cfg_.windowMs);
+        auto elapsedSinceStart = now - st.windowStart;
+
+        if (elapsedSinceStart &gt;= window) {
+            auto windowsElapsed = elapsedSinceStart / window;   // whole windows that passed
+            // Only the window immediately adjacent to the one just closed
+            // still overlaps at all; anything older contributes nothing.
+            st.prevCount    = (windowsElapsed == 1) ? st.currCount : 0;
+            st.currCount    = 0;
+            st.windowStart += window * windowsElapsed;
+        }
+
+        double elapsedInWindow =
+            std::chrono::duration&lt;double, std::milli&gt;(now - st.windowStart).count();
+        double overlapFraction = 1.0 - (elapsedInWindow / cfg_.windowMs);
+        double estimated = st.prevCount * overlapFraction + st.currCount;
+
+        if (estimated &lt; cfg_.capacity) { ++st.currCount; return true; }
+        return false;
+    }
+
+private:
+    SlidingWindowState&amp; stateFor(const std::string&amp; clientId) {
+        std::lock_guard&lt;std::mutex&gt; mapLock(mapMtx_);
+        auto it = states_.find(clientId);
+        if (it == states_.end()) {
+            auto st = std::make_unique&lt;SlidingWindowState&gt;();
+            st-&gt;windowStart = Clock::now();
+            it = states_.emplace(clientId, std::move(st)).first;
+        }
+        return *it-&gt;second;
+    }
+
+    RateLimitConfig cfg_;
+    std::mutex      mapMtx_;
+    std::unordered_map&lt;std::string, std::unique_ptr&lt;SlidingWindowState&gt;&gt; states_;
+};
+
+// ============================================================
+// The Factory: the one place that knows the enum. Adding a new
+// algorithm later is a single new case here, no call site changes.
+// ============================================================
+std::unique_ptr&lt;RateLimitStrategy&gt;
+RateLimiterFactory::create(AlgoType type, const RateLimitConfig&amp; cfg) {
+    switch (type) {
+        case AlgoType::TOKEN_BUCKET:   return std::make_unique&lt;TokenBucketLimiter&gt;(cfg);
+        case AlgoType::FIXED_WINDOW:   return std::make_unique&lt;FixedWindowLimiter&gt;(cfg);
+        case AlgoType::SLIDING_WINDOW: return std::make_unique&lt;SlidingWindowLimiter&gt;(cfg);
+        default: throw std::invalid_argument("unknown algorithm");
+    }
+}
+
+// ============================================================
+// The facade: holds one strategy, adds NO lock of its own. Every
+// strategy already locks per client -- a second lock here would only
+// rebuild the single global bottleneck the problem told us to avoid.
+// ============================================================
+class RateLimiter {
+public:
+    explicit RateLimiter(std::unique_ptr&lt;RateLimitStrategy&gt; strategy)
+        : strategy_(std::move(strategy)) {}
+
+    bool allowRequest(const std::string&amp; clientId) {
+        return strategy_-&gt;allowRequest(clientId);
+    }
+
+private:
+    std::unique_ptr&lt;RateLimitStrategy&gt; strategy_;
+};
+
+// ============================================================
+// Singleton config registry: per-tier limits (free vs premium),
+// overwritable at runtime for dynamic reload. Whoever resolves a
+// client's tier hands the resulting config to the Factory.
+// ============================================================
+class ConfigRegistry {
+public:
+    static ConfigRegistry&amp; instance() {
+        static ConfigRegistry r;
+        return r;
+    }
+
+    RateLimitConfig configFor(const std::string&amp; tier) {
+        std::lock_guard&lt;std::mutex&gt; lock(mtx_);
+        return tiers_.count(tier) ? tiers_[tier] : tiers_["default"];
+    }
+
+    void set(const std::string&amp; tier, const RateLimitConfig&amp; c) {
+        std::lock_guard&lt;std::mutex&gt; lock(mtx_);
+        tiers_[tier] = c;               // dynamic reload = overwrite under the lock
+    }
+
+private:
+    ConfigRegistry() { tiers_["default"] = RateLimitConfig{}; }
+    std::mutex mtx_;
+    std::unordered_map&lt;std::string, RateLimitConfig&gt; tiers_;
+};
+
+// ============================================================
+// Driver: burst, throttle, refill recovery, and per-client
+// isolation under Token Bucket; the boundary burst under Fixed
+// Window and its smoothing under Sliding Window; then a tiered
+// config resolved through the Singleton and built by the Factory.
+// ============================================================
+int main() {
+    // ---- Token Bucket ----
+    RateLimitConfig tbCfg;
+    tbCfg.capacity = 3; tbCfg.refillRate = 2.0;     // burst of 3, then ~2/sec steady
+
+    RateLimiter tokenLimiter(RateLimiterFactory::create(AlgoType::TOKEN_BUCKET, tbCfg));
+
+    std::cout &lt;&lt; "== Token Bucket ==\n";
+    for (int i = 0; i &lt; 4; ++i)
+        std::cout &lt;&lt; "req " &lt;&lt; i &lt;&lt; ": "
+                  &lt;&lt; (tokenLimiter.allowRequest("alice") ? "OK" : "THROTTLED") &lt;&lt; "\n";
+    // OK, OK, OK, THROTTLED -- bucket of 3 drained
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(600));
+    std::cout &lt;&lt; "after 600ms wait: "
+              &lt;&lt; (tokenLimiter.allowRequest("alice") ? "OK" : "THROTTLED") &lt;&lt; "\n"; // OK, ~1.2 tokens refilled
+
+    std::cout &lt;&lt; "bob (different client): "
+              &lt;&lt; (tokenLimiter.allowRequest("bob") ? "OK" : "THROTTLED") &lt;&lt; "\n"; // OK -- independent bucket, independent lock
+
+    // ---- Fixed Window ----
+    RateLimitConfig fwCfg;
+    fwCfg.capacity = 2; fwCfg.windowMs = 500;
+
+    RateLimiter windowLimiter(RateLimiterFactory::create(AlgoType::FIXED_WINDOW, fwCfg));
+
+    std::cout &lt;&lt; "\n== Fixed Window ==\n";
+    for (int i = 0; i &lt; 3; ++i)
+        std::cout &lt;&lt; "req " &lt;&lt; i &lt;&lt; ": "
+                  &lt;&lt; (windowLimiter.allowRequest("carol") ? "OK" : "THROTTLED") &lt;&lt; "\n";
+    // OK, OK, THROTTLED -- 2 already spent this window
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(550));
+    std::cout &lt;&lt; "next window: "
+              &lt;&lt; (windowLimiter.allowRequest("carol") ? "OK" : "THROTTLED") &lt;&lt; "\n"; // OK -- window reset
+
+    // ---- Sliding Window: same shape, no boundary burst ----
+    RateLimitConfig swCfg;
+    swCfg.capacity = 2; swCfg.windowMs = 500;
+
+    RateLimiter slidingLimiter(RateLimiterFactory::create(AlgoType::SLIDING_WINDOW, swCfg));
+
+    std::cout &lt;&lt; "\n== Sliding Window ==\n";
+    slidingLimiter.allowRequest("dave");             // both requests spent right at
+    slidingLimiter.allowRequest("dave");              // the tail end of the window
+    std::this_thread::sleep_for(std::chrono::milliseconds(490));
+    std::cout &lt;&lt; "just after the boundary: "
+              &lt;&lt; (slidingLimiter.allowRequest("dave") ? "OK" : "THROTTLED")
+              &lt;&lt; "  (a fixed window would freely allow 2 more here)\n";
+
+    // ---- Tiered config via the Singleton, resolved through the Factory ----
+    ConfigRegistry::instance().set("premium", RateLimitConfig{100, 50.0, 1000});
+    RateLimiter premiumLimiter(
+        RateLimiterFactory::create(AlgoType::TOKEN_BUCKET,
+                                    ConfigRegistry::instance().configFor("premium")));
+
+    std::cout &lt;&lt; "\n== Tiered config (premium) ==\n";
+    std::cout &lt;&lt; "premium client: "
+              &lt;&lt; (premiumLimiter.allowRequest("premium-client-1") ? "OK" : "THROTTLED") &lt;&lt; "\n";
+
+    return 0;
+}</code></pre>
+
+<dl class="jargon">
+  <dt>Strategy pattern</dt><dd>One interface (<code>RateLimitStrategy</code>), several interchangeable concrete implementations (Token Bucket, Fixed Window, Sliding Window), and one context (<code>RateLimiter</code>) that holds a pointer to the interface and never branches on which concrete type it was handed.</dd>
+  <dt>Lazy (on-read) refill</dt><dd>Reconstructing state from elapsed time at the moment it's needed, instead of mutating it continuously on a background timer. Store a timestamp; compute what should have happened since it, on read. O(1), no thread, no drift.</dd>
+  <dt>steady_clock</dt><dd>A monotonic C++ clock that never jumps backward, unlike <code>system_clock</code>, which can be adjusted by NTP. Elapsed-time math for refills and windows must use it, or a wall-clock adjustment could retroactively grant or revoke tokens.</dd>
+  <dt>Two-level locking</dt><dd>A brief lock on the shared map to find-or-create an entry, released immediately, followed by that entry's own lock held only for the per-client read-modify-write. Keeps unrelated clients from ever blocking each other.</dd>
+</dl>
+
+<details class="qa"><summary>How would this become a distributed rate limiter across many service instances?</summary><div class="a"><p>In-memory per-client state can't be shared across N service instances, so it has to move to a centralized store &mdash; typically Redis. Token bucket becomes an atomic Lua script: read the token count, compute the refill from elapsed time, decrement, write back with a TTL, all as one atomic operation so two instances can't race on the same client's counter. The <code>RateLimitStrategy</code> interface doesn't change at all; <code>RedisTokenBucketLimiter</code> is just another concrete strategy behind the same <code>allowRequest(clientId)</code> signature. That every follow-up resolves to "write a new strategy class" rather than "redesign the interface" is the actual payoff of having built the abstraction in the first place.</p></div></details>
+<details class="qa"><summary>Why does <code>allowRequest</code> return a bare <code>bool</code> instead of something richer, like time-until-allowed?</summary><div class="a"><p>The pinned interface promises exactly one thing &mdash; permitted right now, or not &mdash; and locking that promise early is what lets every algorithm swap in behind it with zero blast radius. But the richer answer is a small, backward-compatible widening, not a redesign: replace the return type with a <code>struct Decision { bool allowed; std::chrono::milliseconds retryAfter; };</code>. Every algorithm already holds the exact values needed to compute it &mdash; token bucket knows <code>tokens</code> and <code>refillRate</code>, so on denial <code>retryAfter = ceil((1 - tokens) / refillRate)</code> is the time until the next whole token exists. The interface widens; nothing about the locking or the per-client state changes.</p></div></details>
+<details class="qa"><summary>Token bucket and leaky bucket are often described as "the same idea." What's the practical difference?</summary><div class="a"><p>Token bucket accumulates unused capacity: a quiet client's bucket fills up, and it can spend the whole thing in one burst the moment it comes back. Leaky bucket enforces a constant drain rate regardless of arrival pattern &mdash; a burst either gets queued and released slowly, or it's rejected outright, but it never passes through all at once. Pick token bucket when a client that's been idle deserves to catch up in a burst (typical for API quotas); pick leaky bucket when the downstream system genuinely cannot absorb a burst at any cost and a perfectly smoothed output rate matters more than fairness to a quiet client.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

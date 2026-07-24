@@ -36,6 +36,17 @@ const SITE = {
         { label: '9 chapters' },
         { label: 'updated Jul 2026' }
       ]
+    },
+    {
+      file: 'reading/lld/index.html',
+      title: 'LLD: Zero to Hero — A Field Book',
+      desc: 'Fifteen of the most-asked Low-Level Design interview problems, from problem statement to approach to a complete working C++ solution — Vending Machine to Parking Lot to Chess to Ride-Sharing.',
+      meta: [
+        { label: 'LIVE', hot: true },
+        { label: 'systems design' },
+        { label: '15 chapters' },
+        { label: 'updated Jul 2026' }
+      ]
     }
   ],
 

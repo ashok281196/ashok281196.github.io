@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 7 · Elevator System · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">07</div>
+  <div class="chapter-kicker">Medium · 2 of 5</div>
+  <h1>Elevator System: State Machines Meet SCAN Dispatch</h1>
+  <p class="chapter-sub">One state machine per car (IDLE, MOVING_UP, MOVING_DOWN, DOORS_OPEN, MAINTENANCE) governs how a single elevator behaves, while a separate, swappable Strategy decides which of several cars answers each hall call &mdash; two orthogonal decisions kept deliberately apart.</p>
+</header>
+
+<h2><span class="sec-no">7.1</span>Problem Statement</h2>
+<p>Design the control system for a building with multiple elevator cars serving many floors. Someone standing on a floor presses a hall button and states a direction; someone already inside a car presses a destination button. The system must route both kinds of requests to the right car, in the right order, without ever devolving into a pile of booleans.</p>
+<div class="keypoint">A fleet of elevator cars, each a small state machine (IDLE / MOVING_UP / MOVING_DOWN / DOORS_OPEN / MAINTENANCE) that services its stops via the SCAN algorithm rather than FIFO, dispatched by a pluggable Strategy that decides which car answers each hall call.</div>
+
+<p><strong>Functional requirements:</strong></p>
+<ul>
+  <li><strong>External (hall) requests</strong>: a button on a floor with a direction &mdash; UP or DOWN. The caller has no car yet; the system must find one.</li>
+  <li><strong>Internal (cabin) requests</strong>: a destination-floor button inside a car. The caller is already inside a specific car.</li>
+  <li>A central <strong>dispatcher</strong> assigns each hall request to the most suitable car.</li>
+  <li>Each <strong>car</strong> has a state: <code>IDLE / MOVING_UP / MOVING_DOWN / DOORS_OPEN / MAINTENANCE</code>.</li>
+  <li>A car services its pending stops in a sensible order &mdash; the SCAN / elevator algorithm: keep going one direction, servicing everything on the way, then reverse &mdash; not strictly FIFO.</li>
+</ul>
+
+<p><strong>Non-functional requirements / constraints:</strong></p>
+<ul>
+  <li>The <strong>dispatch/scheduling strategy must be pluggable</strong>: nearest-car, least-load, direction-aware SCAN-scoring all need to drop in without touching the dispatcher.</li>
+  <li>Car movement must be driven by <strong>state objects</strong> (the State pattern), never by a bag of booleans like <code>movingUp</code> / <code>doorsOpen</code>.</li>
+  <li><strong>Concurrency</strong>: many requests arrive simultaneously from different floors and must be handled safely.</li>
+</ul>
+
+<p><strong>Expected public interface:</strong></p>
+<pre><code class="language-cpp">enum class Direction { UP, DOWN, IDLE };
+
+class DispatchStrategy {              // Strategy
+public:
+    virtual int selectCar(const HallRequest&amp;, const std::vector&lt;Elevator&gt;&amp;) = 0;
+    virtual ~DispatchStrategy() = default;
+};
+
+class ElevatorController {
+public:
+    void requestElevator(int floor, Direction dir);   // external/hall call
+    void step();                                       // advance the simulation one tick
+};
+
+class Elevator {
+public:
+    void addStop(int floor);                           // internal/cabin call
+    void move();                                        // delegates to current state
+    int  currentFloor() const;
+    Direction direction() const;
+};</code></pre>
+
+<p><strong>What the interviewer is really testing:</strong></p>
+<ul>
+  <li>Whether you cleanly separate a <strong>hall request</strong> (needs dispatching to some car) from a <strong>cabin request</strong> (already bound to one car), and route each through a different entry point.</li>
+  <li>A genuine <strong>State pattern</strong> for the car's mode, paired with a genuine <strong>Strategy</strong> for "which car answers this call" &mdash; two separate seams, not one tangled <code>if</code>-ladder.</li>
+  <li>The request-ordering logic. Producing naive <strong>FIFO</strong> service is treated as a red flag at the SDE-3 level; SCAN is the expected answer.</li>
+</ul>
+
+<p><strong>Follow-up questions to expect:</strong></p>
+<ol>
+  <li><strong>Multiple cars</strong> with load balancing and a shared dispatcher.</li>
+  <li><strong>Express / VIP</strong> elevators and floor restrictions (e.g. service floors).</li>
+  <li><strong>Maintenance mode</strong> taking a car out of rotation safely.</li>
+  <li><strong>Capacity / weight limits</strong> and skipping full cars.</li>
+</ol>
+
+<h2><span class="sec-no">7.2</span>How to Approach</h2>
+
+<h3>Mine the constraints before naming a single class</h3>
+<p>The prompt hands you the architecture if you read it literally. "Car movement is driven by state objects" names the <strong>State pattern</strong> for one axis: which mode is this car in right now. "The dispatch strategy must be pluggable" names the <strong>Strategy pattern</strong> for a completely different axis: given a hall call, which car should answer it. "Services requests in a sensible order (SCAN), not strictly FIFO" is the algorithmic differentiator the problem statement explicitly warns you about. And "hall request" versus "cabin request" is telling you there are two distinct entry points into the system, not one queue.</p>
+<div class="keypoint">When a prompt names two patterns, it is handing you two axes. Here, axis one is <em>car mode</em> (State) and axis two is <em>which car</em> (Strategy). Keep them orthogonal &mdash; a car's state machine should never need to know how it was chosen, and the dispatcher should never need to know how a car moves once assigned.</div>
+
+<h3>Nouns become classes</h3>
+<p>Circle the nouns &mdash; building, car, floor, hall request, cabin request, direction, dispatcher, state, strategy &mdash; and the class list falls out almost mechanically: a <code>Direction</code> enum; a <code>HallRequest</code> holding a floor and a direction; an <code>ElevatorState</code> interface with five concrete states (<code>Idle</code>, <code>MovingUp</code>, <code>MovingDown</code>, <code>DoorsOpen</code>, <code>Maintenance</code>); an <code>Elevator</code> that is the State pattern's <strong>Context</strong> &mdash; current floor, direction, current state, and its pending stops; a <code>DispatchStrategy</code> interface with a concrete <code>NearestCarStrategy</code>; and an <code>ElevatorController</code> that owns the fleet plus the injected strategy and drives the simulation. Spotting the Context+State triangle (<code>Elevator</code> + <code>ElevatorState</code>) and the Strategy seam (<code>ElevatorController</code> + <code>DispatchStrategy</code>) side by side is what makes the rest of the design feel inevitable rather than memorized.</p>
+
+<h3>Pin the interface, then work bottom-up from the leaves</h3>
+<p>Lock the public contract before internals. <code>Elevator::move()</code> should contain no logic of its own &mdash; it forwards to whatever state is current: <code>state_-&gt;move(*this)</code>. <code>ElevatorController::requestElevator()</code> should be equally thin, forwarding to the injected strategy rather than deciding anything itself. If either of those hot methods grows an <code>if</code>, logic has leaked out of the abstraction it belongs in.</p>
+<p>Then build bottom-up, starting with things that depend on nothing else: <code>Direction</code> and <code>HallRequest</code>. A <strong>cabin</strong> request, notably, needs no class at all &mdash; it's just an <code>int</code> destination floor handed to a car you already hold a handle to, via <code>addStop(int)</code>. That asymmetry between "a hall request must be dispatched, a cabin request is already inside a car" <em>is</em> the hall-vs-cabin distinction the interviewer is probing. Not every noun in the problem statement deserves a class.</p>
+
+<h3>The load-bearing idea: SCAN via two sorted stop-sets</h3>
+<p>This is the heart of the problem. The naive approach &mdash; one FIFO queue of stops serviced in arrival order &mdash; is a trap the problem statement calls out directly: a car at floor 3 asked for stops <code>[10, 1, 9]</code> in that order would travel 3&rarr;10&rarr;1&rarr;9, bouncing the length of the shaft twice for no reason.</p>
+<p>The fix is two sorted sets of pending stops per car: <code>up_</code> holds stops at or above the current floor, served ascending; <code>down_</code> holds stops at or below, served descending. Whichever direction the car is already moving, "the next stop this way" is just the front of the relevant set:</p>
+<pre><code class="language-cpp">void add(int floor, int currentFloor) {
+    if (floor &gt; currentFloor)      up_.insert(floor);
+    else if (floor &lt; currentFloor) down_.insert(floor);
+}
+int nextUp()   const { return *up_.begin(); }     // lowest stop above
+int nextDown() const { return *down_.rbegin(); }  // highest stop below</code></pre>
+<p>Because the sets stay sorted, finding the next stop in the current direction is <code>O(log n)</code>, and the car only reverses once its current direction's set is empty &mdash; never mid-journey while work remains ahead. That's SCAN, and it falls out of the data structure rather than a hand-written ordering rule.</p>
+<div class="warfield">A single FIFO queue of stops is the most common wrong turn on this problem. It looks simpler, but it services requests in <em>arrival</em> order instead of <em>geographic</em> order, so a car can shoot past a close floor to serve a far one requested a moment earlier, then double back. The tell in an interview is exactly the scenario above: three stops requested slightly out of geographic order that a FIFO answer would visit in the wrong sequence.</div>
+
+<h3>Context and states: data lives in <code>Elevator</code>, behavior lives in the states</h3>
+<p><code>Elevator</code> (the Context) holds the current floor, direction, its <code>StopBook</code> of pending stops, and a non-owning pointer to whichever state is current &mdash; while owning all five state objects as <code>unique_ptr</code> members, since none of them carry per-car data and one instance of each is plenty. Each concrete state answers exactly one question every tick: <em>what do I do, and what do I become?</em> <code>Idle</code> does nothing. <code>MovingUp</code>/<code>MovingDown</code> step one floor toward the next stop in that direction, open the doors on arrival, and flip direction (or go idle) once their set empties. <code>DoorsOpen</code> is a one-tick pause that then resumes whichever direction still has work. <code>Maintenance</code> is frozen until explicitly taken out of rotation. Filling in every mode &mdash; including <code>Maintenance</code> doing nothing &mdash; is what "no flag soup" actually means: there is no reachable state left undefined.</p>
+
+<h3>The Strategy: pluggable dispatch, and where nearest-car alone breaks</h3>
+<p><code>NearestCarStrategy</code> scores every car that is either idle or already heading the caller's requested direction, and picks whichever is geographically closest to the hall call. It is a reasonable default, and it is also incomplete on its own: it only ever answers "who is closest to <em>this one</em> request," blind to how many stops a car is already carrying. Under real traffic &mdash; a lobby at 9&nbsp;a.m., say &mdash; nearest-car alone happily piles every nearby hall call onto one popular car while a car three floors farther away, but empty, sits idle. Distance is the wrong sole signal once load is uneven.</p>
+<p>That gap is exactly the seam the first follow-up exploits: swap in a <code>LeastLoadStrategy</code> that scores by pending-stop count (or a blend of distance and load), and <code>ElevatorController</code> does not change a single line, because dispatch was injected as an interface from the start rather than hardcoded as an <code>if</code>-chain inside the controller.</p>
+
+<h3>Concurrency and the remaining follow-ups: seams, not redesigns</h3>
+<p>Concurrency gets a small, contained answer: one mutex in <code>ElevatorController</code> guarding the shared fleet, held for the duration of <code>requestElevator</code>, <code>pressFloor</code>, and <code>step</code>. The State/Strategy design does not bend to accommodate it.</p>
+<div class="keypoint">Keep cross-cutting concerns like locking at the orchestrator boundary. If concurrency forced a redesign of the core abstractions &mdash; the states, the strategy interface &mdash; the abstractions were wrong to begin with.</div>
+<p>The remaining follow-ups all resolve onto existing seams rather than new logic paths: multi-car load balancing is a new <code>DispatchStrategy</code> subclass; express/VIP floor restrictions are a predicate the strategy filters candidates on; maintenance mode is already a first-class state, so taking a car out of rotation safely just means finishing its current door cycle and calling <code>setState(maintenance())</code>, while the strategy skips any car reporting that state; capacity limits are one new field on <code>Elevator</code> plus a strategy filter. If every follow-up lands as a new subclass and never a new <code>switch</code>, the abstractions were right.</p>
+
+<h2><span class="sec-no">7.3</span>Whole Solution</h2>
+<p>One synthesized, internally-consistent program: the <code>ElevatorState</code> interface with all five concrete car states, the <code>StopBook</code> SCAN bookkeeping (two sorted sets per car), the <code>Elevator</code> Context that owns and delegates to its states, the <code>DispatchStrategy</code> Strategy interface with a concrete <code>NearestCarStrategy</code>, an <code>ElevatorController</code> orchestrator wired with a mutex, and a driver whose whole point is to disprove FIFO: it requests floor 5, then a cabin stop at 2, then floor 8 &mdash; in that arrival order &mdash; and the ticked output must show the car stopping at 2, then 5, then 8, never 5 before 2.</p>
+<pre><code class="language-cpp">// Elevator System -- State pattern (per-car mode) + Strategy pattern (dispatch)
+// Two orthogonal axes: which MODE a car is in, and WHICH CAR serves a hall call.
+// Builds with any C++17 compiler: g++ -std=c++17 elevator.cpp -o elevator
+
+#include &lt;iostream&gt;
+#include &lt;vector&gt;
+#include &lt;set&gt;
+#include &lt;memory&gt;
+#include &lt;mutex&gt;
+#include &lt;string&gt;
+#include &lt;limits&gt;
+#include &lt;cstdlib&gt;
+
+// ---------- Direction &amp; requests ----------
+enum class Direction { UP, DOWN, IDLE };
+
+// External call: someone on `floor` wants to travel `dir`. Not yet bound to a car.
+struct HallRequest {
+    int       floor;
+    Direction dir;
+};
+// NOTE: a *cabin* request needs no class at all -- it is just a destination int
+// handed to one specific car via Elevator::addStop(). That asymmetry IS the
+// hall-vs-cabin distinction the interviewer is probing.
+
+class Elevator;   // forward declaration -- ElevatorState needs only a reference for now
+
+// ---------- SCAN bookkeeping: two sorted stop-sets per car ----------
+class StopBook {
+public:
+    void add(int floor, int currentFloor) {
+        if (floor &gt; currentFloor)      up_.insert(floor);
+        else if (floor &lt; currentFloor) down_.insert(floor);
+        // floor == currentFloor: caller handles "open here"
+    }
+    bool hasUp()   const { return !up_.empty(); }
+    bool hasDown() const { return !down_.empty(); }
+    bool empty()   const { return up_.empty() &amp;&amp; down_.empty(); }
+
+    int  nextUp()   const { return *up_.begin(); }     // lowest stop above
+    int  nextDown() const { return *down_.rbegin(); }  // highest stop below
+    void reachedUp(int f)   { up_.erase(f); }
+    void reachedDown(int f) { down_.erase(f); }
+
+private:
+    std::set&lt;int&gt; up_;
+    std::set&lt;int&gt; down_;
+};
+
+// ---------- State pattern: one interface, five car modes ----------
+class ElevatorState {
+public:
+    virtual ~ElevatorState() = default;
+    virtual void        move(Elevator&amp;) = 0;      // one simulation tick
+    virtual Direction   direction() const = 0;     // what this mode reports
+    virtual std::string name() const = 0;
+};
+
+// ---------- Context: the physical car ----------
+class Elevator {
+public:
+    Elevator(int id, int startFloor);              // starts IDLE
+
+    // ---- public API ----
+    void addStop(int floor) {
+        if (floor == floor_) { openDoorsHere(); return; }
+        stops_.add(floor, floor_);
+        wakeIfIdle();                               // an idle car must pick a direction
+    }
+    void      move() { state_-&gt;move(*this); }       // pure delegation -- one tick
+    int       currentFloor() const { return floor_; }
+    Direction direction()    const { return dir_; }
+
+    // ---- helpers the STATES use to drive the car ----
+    void setState(ElevatorState* s) { state_ = s; }
+    ElevatorState* idle();
+    ElevatorState* movingUp();
+    ElevatorState* movingDown();
+    ElevatorState* doorsOpen();
+    ElevatorState* maintenance();
+
+    StopBook&amp; stops()         { return stops_; }
+    int  floor() const        { return floor_; }
+    void stepFloor(int delta) { floor_ += delta; }   // physically move one floor
+    void setDirection(Direction d) { dir_ = d; }
+    void openDoorsHere();            // erase stop at floor_, go to DoorsOpen
+    void wakeIfIdle();               // if currently idle and stops exist, choose a direction
+
+    int  id() const { return id_; }
+
+private:
+    int id_;
+    int floor_;
+    Direction dir_ = Direction::IDLE;
+    StopBook stops_;
+    std::unique_ptr&lt;ElevatorState&gt; idle_, up_, down_, doors_, maint_;  // car OWNS its states
+    ElevatorState* state_ = nullptr;                                   // current (non-owning view)
+};
+
+// ---------- Concrete states: each answers "what do I do, and what do I become?" ----------
+
+class IdleState : public ElevatorState {
+public:
+    void move(Elevator&amp;) override { /* nothing pending; stay put */ }
+    Direction direction() const override { return Direction::IDLE; }
+    std::string name() const override { return "IDLE"; }
+};
+
+class MovingUpState : public ElevatorState {
+public:
+    void move(Elevator&amp; e) override {
+        if (!e.stops().hasUp()) {                  // nothing left above
+            if (e.stops().hasDown()) { e.setDirection(Direction::DOWN); e.setState(e.movingDown()); }
+            else                     { e.setDirection(Direction::IDLE); e.setState(e.idle()); }
+            return;
+        }
+        int target = e.stops().nextUp();
+        if (e.floor() == target) { e.openDoorsHere(); return; }   // arrived -&gt; doors
+        e.stepFloor(+1);                                          // climb one floor
+        if (e.floor() == target) e.openDoorsHere();
+    }
+    Direction direction() const override { return Direction::UP; }
+    std::string name() const override { return "MOVING_UP"; }
+};
+
+class MovingDownState : public ElevatorState {
+public:
+    void move(Elevator&amp; e) override {
+        if (!e.stops().hasDown()) {
+            if (e.stops().hasUp()) { e.setDirection(Direction::UP); e.setState(e.movingUp()); }
+            else                   { e.setDirection(Direction::IDLE); e.setState(e.idle()); }
+            return;
+        }
+        int target = e.stops().nextDown();
+        if (e.floor() == target) { e.openDoorsHere(); return; }
+        e.stepFloor(-1);
+        if (e.floor() == target) e.openDoorsHere();
+    }
+    Direction direction() const override { return Direction::DOWN; }
+    std::string name() const override { return "MOVING_DOWN"; }
+};
+
+class DoorsOpenState : public ElevatorState {
+public:
+    void move(Elevator&amp; e) override {
+        // doors were open this tick; close and resume whichever way still has work
+        if (e.stops().hasUp() &amp;&amp; e.direction() != Direction::DOWN) {
+            e.setDirection(Direction::UP);   e.setState(e.movingUp());
+        } else if (e.stops().hasDown()) {
+            e.setDirection(Direction::DOWN); e.setState(e.movingDown());
+        } else if (e.stops().hasUp()) {
+            e.setDirection(Direction::UP);   e.setState(e.movingUp());
+        } else {
+            e.setDirection(Direction::IDLE); e.setState(e.idle());
+        }
+    }
+    Direction direction() const override { return Direction::IDLE; } // physically stopped
+    std::string name() const override { return "DOORS_OPEN"; }
+};
+
+class MaintenanceState : public ElevatorState {
+public:
+    void move(Elevator&amp;) override { /* frozen until taken out of maintenance */ }
+    Direction direction() const override { return Direction::IDLE; }
+    std::string name() const override { return "MAINTENANCE"; }
+};
+
+// ---------- Wire the Context: constructor + accessors + shared transition helpers ----------
+
+Elevator::Elevator(int id, int startFloor) : id_(id), floor_(startFloor) {
+    idle_  = std::make_unique&lt;IdleState&gt;();
+    up_    = std::make_unique&lt;MovingUpState&gt;();
+    down_  = std::make_unique&lt;MovingDownState&gt;();
+    doors_ = std::make_unique&lt;DoorsOpenState&gt;();
+    maint_ = std::make_unique&lt;MaintenanceState&gt;();
+    state_ = idle_.get();           // start IDLE
+}
+ElevatorState* Elevator::idle()        { return idle_.get(); }
+ElevatorState* Elevator::movingUp()    { return up_.get(); }
+ElevatorState* Elevator::movingDown()  { return down_.get(); }
+ElevatorState* Elevator::doorsOpen()   { return doors_.get(); }
+ElevatorState* Elevator::maintenance() { return maint_.get(); }
+
+void Elevator::openDoorsHere() {
+    stops_.reachedUp(floor_);     // erase the stop here from whichever set held it
+    stops_.reachedDown(floor_);
+    setState(doorsOpen());
+}
+void Elevator::wakeIfIdle() {
+    if (state_ != idle_.get()) return;              // already moving / in doors
+    if (stops_.hasUp())        { dir_ = Direction::UP;   setState(movingUp()); }
+    else if (stops_.hasDown()) { dir_ = Direction::DOWN; setState(movingDown()); }
+}
+
+// ---------- Strategy pattern: pluggable "which car serves this hall call?" ----------
+class DispatchStrategy {
+public:
+    virtual ~DispatchStrategy() = default;
+    virtual int selectCar(const HallRequest&amp;, const std::vector&lt;Elevator&gt;&amp;) = 0;   // returns car index
+};
+
+class NearestCarStrategy : public DispatchStrategy {
+public:
+    int selectCar(const HallRequest&amp; req, const std::vector&lt;Elevator&gt;&amp; cars) override {
+        int best = -1, bestDist = std::numeric_limits&lt;int&gt;::max();
+        for (int i = 0; i &lt; static_cast&lt;int&gt;(cars.size()); ++i) {
+            const Elevator&amp; c = cars[i];
+            // prefer cars idle, or already moving toward the request in the same direction
+            bool suitable = c.direction() == Direction::IDLE
+                         || c.direction() == req.dir;
+            if (!suitable) continue;
+            int dist = std::abs(c.currentFloor() - req.floor);
+            if (dist &lt; bestDist) { bestDist = dist; best = i; }
+        }
+        if (best == -1) best = 0;   // fallback: everyone busy the wrong way -&gt; car 0
+        return best;
+    }
+};
+
+// ---------- Orchestrator: owns the cars + the strategy, routes calls, ticks the sim ----------
+class ElevatorController {
+public:
+    ElevatorController(int numCars, std::unique_ptr&lt;DispatchStrategy&gt; strategy)
+        : strategy_(std::move(strategy)) {
+        for (int i = 0; i &lt; numCars; ++i)
+            cars_.emplace_back(i, /*startFloor=*/0);
+    }
+
+    // external/hall call: pick a car via the strategy, then push the stop onto it
+    void requestElevator(int floor, Direction dir) {
+        std::lock_guard&lt;std::mutex&gt; lock(mtx_);
+        HallRequest req{floor, dir};
+        int idx = strategy_-&gt;selectCar(req, cars_);
+        cars_[idx].addStop(floor);          // assigned car will SCAN to it
+    }
+
+    // cabin call: passenger already inside car `carId`
+    void pressFloor(int carId, int dest) {
+        std::lock_guard&lt;std::mutex&gt; lock(mtx_);
+        cars_[carId].addStop(dest);
+    }
+
+    void step() {                            // advance every car one tick
+        std::lock_guard&lt;std::mutex&gt; lock(mtx_);
+        for (auto&amp; c : cars_) c.move();
+    }
+
+    const Elevator&amp; car(int i) const { return cars_[i]; }
+
+private:
+    std::vector&lt;Elevator&gt; cars_;
+    std::unique_ptr&lt;DispatchStrategy&gt; strategy_;
+    std::mutex mtx_;                         // guards cars_ against concurrent requests
+};
+
+// ---------- Driver: proves SCAN, not FIFO ----------
+int main() {
+    ElevatorController controller(/*numCars=*/1, std::make_unique&lt;NearestCarStrategy&gt;());
+
+    // Car starts at floor 0. Requests arrive "out of order": hall(5,UP), cabin(2), hall(8,UP).
+    controller.requestElevator(5, Direction::UP);
+    controller.pressFloor(0, 2);     // cabin request inside car 0
+    controller.requestElevator(8, Direction::UP);
+
+    // SCAN must serve them ascending: 2, then 5, then 8 -- never 5, 2, 8 (that would be FIFO).
+    for (int tick = 0; tick &lt; 12; ++tick) {
+        controller.step();
+        const Elevator&amp; c = controller.car(0);
+        std::cout &lt;&lt; "tick " &lt;&lt; tick &lt;&lt; ": floor " &lt;&lt; c.currentFloor() &lt;&lt; "\n";
+    }
+    return 0;
+}</code></pre>
+
+<dl class="jargon">
+  <dt>State pattern</dt><dd>One interface (<code>ElevatorState</code>), several concrete implementations (<code>Idle</code>, <code>MovingUp</code>, <code>MovingDown</code>, <code>DoorsOpen</code>, <code>Maintenance</code>), and one Context (<code>Elevator</code>) that holds a pointer to the current state and delegates its hot method to it. The car's own code never branches on "what mode am I in" &mdash; the current state object <em>is</em> the answer.</dd>
+  <dt>Strategy pattern</dt><dd>One interface (<code>DispatchStrategy</code>), one or more interchangeable policies (<code>NearestCarStrategy</code>, and later <code>LeastLoadStrategy</code>), and one context (<code>ElevatorController</code>) that asks the injected strategy "which car?" and never hardcodes the rule itself.</dd>
+  <dt>SCAN (elevator algorithm)</dt><dd>Keep serving stops in the current direction of travel until none remain ahead, then reverse. Implemented here as two sorted sets of pending stops (<code>up_</code>, <code>down_</code>) so "next stop this way" is an <code>O(log n)</code> lookup instead of an <code>O(n)</code> scan or a FIFO bounce.</dd>
+  <dt>lock_guard / RAII</dt><dd>A stack object that acquires a mutex on construction and releases it on destruction, including on an exception path. <code>ElevatorController</code> uses one around every method that touches the shared fleet, keeping the concurrency answer entirely at the orchestrator boundary.</dd>
+</dl>
+
+<details class="qa"><summary>Why can't the car just service requests in the order they arrived?</summary><div class="a"><p>FIFO order is arrival order, not geographic order. A car at floor 3 handed stops <code>[10, 1, 9]</code> in that sequence would travel 3&rarr;10&rarr;1&rarr;9, crossing the same stretch of shaft multiple times. SCAN fixes this by keeping two sorted sets of pending stops, one for floors at-or-above the car and one for at-or-below, and always serving the nearest stop in the current direction of travel before reversing. The interview tell is exactly this: give the candidate stops slightly out of geographic order and see whether the car bounces.</p></div></details>
+<details class="qa"><summary>How would you support multiple cars with load balancing, and what changes?</summary><div class="a"><p>Nothing about <code>Elevator</code> or its states changes. <code>ElevatorController</code> already holds a <code>std::vector&lt;Elevator&gt;</code> and asks an injected <code>DispatchStrategy</code> for the answer, so load balancing is a new concrete strategy &mdash; for example <code>LeastLoadStrategy</code>, scoring candidate cars by their pending-stop count instead of raw distance, or blending both. It plugs in at construction time as a different <code>unique_ptr&lt;DispatchStrategy&gt;</code>; the controller's <code>requestElevator</code> and <code>step</code> are untouched.</p></div></details>
+<details class="qa"><summary>How does maintenance mode take a car out of rotation safely?</summary><div class="a"><p><code>MAINTENANCE</code> is already a first-class state, not a bolt-on flag. To retire a car safely, let it finish its current <code>DoorsOpen</code> cycle so no passenger is stranded mid-transit, then call <code>setState(maintenance())</code>; the state's <code>move()</code> is a no-op, freezing the car in place. The dispatch strategy filters out any car reporting <code>MAINTENANCE</code> (via its state or direction) when scoring candidates for a new hall call, so the car simply stops receiving new assignments. Returning it to service is <code>setState(idle())</code>, with no other code path touched.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

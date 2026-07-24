@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 13 · Food Delivery · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">13</div>
+  <div class="chapter-kicker">Hard · 3 of 5</div>
+  <h1>Food Delivery: Multi-Actor Order Lifecycle</h1>
+  <p class="chapter-sub">An order walks one strict PLACED → ACCEPTED → PREPARING → READY → PICKED_UP → DELIVERED lifecycle that three independent actors — customer, restaurant, and delivery partner — all watch and act on, while a pluggable Strategy picks and atomically books the delivery partner the moment the food is ready.</p>
+</header>
+
+<h2><span class="sec-no">13.1</span>Problem Statement</h2>
+<p>Design the order-and-delivery core of a food-delivery platform in the shape of Swiggy or Zomato: customers browse restaurants, build a cart, and place an order; the restaurant accepts or rejects it and cooks; a delivery partner is assigned, picks the food up, and delivers it. The interesting part is not any single actor's flow — it's that <strong>three actors act independently on the same order</strong>, and the system has to keep all three views consistent while one shared pool of delivery partners gets fought over underneath.</p>
+
+<div class="keypoint">One <code>Order</code> walks a guarded state machine from <strong>PLACED</strong> to <strong>DELIVERED</strong> (or off a side exit to <strong>REJECTED</strong>/<strong>CANCELLED</strong>); a pluggable Strategy books the nearest free delivery partner the instant the order goes <strong>READY</strong>, and an Observer fans that change out to the customer, restaurant, and partner without any of them polling.</div>
+
+<p>Functional requirements:</p>
+<ul>
+<li><strong>Customers</strong> browse restaurants by location and cuisine, view a menu, build a cart, and place an order.</li>
+<li><strong>Restaurants</strong> accept or reject an incoming order, and mark the food ready.</li>
+<li><strong>Delivery partners</strong> get assigned to a ready order, then pick up and deliver it.</li>
+<li>Order lifecycle: <code>PLACED → ACCEPTED → PREPARING → READY → PICKED_UP → DELIVERED</code>, with <code>REJECTED</code> and <code>CANCELLED</code> as early exits.</li>
+<li>A suitable delivery partner near the restaurant is assigned automatically once the order is accepted / ready.</li>
+<li>All relevant actors are notified on every state change; a bill is computed from items, tax, and a delivery fee.</li>
+</ul>
+
+<p>Non-functional constraints — read these as the actual grading rubric:</p>
+<ul>
+<li>The order is modeled as a <strong>State machine</strong>; illegal transitions must be rejected, not silently applied.</li>
+<li>Delivery-partner assignment is a <strong>pluggable Strategy</strong> — nearest-partner today, batching multiple orders onto one partner tomorrow — swappable without touching the orchestrator.</li>
+<li>An <strong>Observer</strong> mechanism notifies customer, restaurant, and partner subscribers; the order never hardcodes who's listening.</li>
+<li>Three actors act independently on shared state, so <strong>partner assignment must be atomic</strong> — two orders racing for the same courier must never both win.</li>
+</ul>
+
+<p>The expected public interface, given up front so the design effort goes into behavior, not signatures:</p>
+
+<pre><code class="language-cpp">enum class OrderStatus { PLACED, ACCEPTED, PREPARING, READY, PICKED_UP, DELIVERED, REJECTED, CANCELLED };
+
+class PartnerAssignmentStrategy {     // Strategy
+public:
+    virtual DeliveryPartner* assign(const Order&amp;, const std::vector&lt;DeliveryPartner&gt;&amp;) = 0;
+    virtual ~PartnerAssignmentStrategy() = default;
+};
+
+class OrderService {
+public:
+    Order placeOrder(const std::string&amp; customerId, const std::string&amp; restaurantId, const Cart&amp; cart);
+    void  restaurantRespond(const std::string&amp; orderId, bool accept);
+    void  markReady(const std::string&amp; orderId);          // triggers/locks-in partner assignment
+    void  markPickedUp(const std::string&amp; orderId);
+    void  markDelivered(const std::string&amp; orderId);
+};
+
+class SearchService {
+public:
+    std::vector&lt;Restaurant&gt; search(Location loc, const std::string&amp; cuisine);
+};</code></pre>
+
+<p>What the interviewer is really testing:</p>
+<ul>
+<li>A correct <strong>order State machine</strong> with guarded transitions, exercised by three different actors calling in.</li>
+<li><strong>Atomic partner assignment</strong> — no delivery partner is ever double-booked, even under concurrent calls.</li>
+<li>A clean pluggable <strong>assignment Strategy</strong> and an <strong>Observer</strong> that decouples the order from whoever is listening.</li>
+<li>Whether <code>Cart</code>, <code>MenuItem</code>, <code>Restaurant</code>, and <code>Order</code> are modeled cleanly, with billing kept separate from the order itself.</li>
+</ul>
+
+<p>Follow-up questions to expect once the base design stands:</p>
+<ul>
+<li><strong>Order batching</strong> — one partner carries several nearby orders at once.</li>
+<li><strong>ETA estimation</strong> — combining restaurant prep time with partner travel time.</li>
+<li><strong>Coupons and offers</strong> behind a pluggable pricing/discount engine.</li>
+<li><strong>Live tracking and reassignment</strong> if a partner cancels mid-delivery.</li>
+</ul>
+
+<h2><span class="sec-no">13.2</span>How to Approach</h2>
+
+<h3>Mining the Constraints First</h3>
+<p>Before drawing a single class, mine the problem statement for what it names outright, because it names three patterns and one hidden requirement. "Order modeled as a State machine" means the deliverable is a guarded transition table, not scattered <code>if</code> checks on a status field. "Delivery-partner assignment is a pluggable Strategy" means matching logic sits behind an interface, swappable without touching the orchestrator. "Observer for customer/restaurant/partner notifications" means the order publishes changes and never knows who's subscribed. The fourth constraint is easy to miss because it isn't a pattern name: "assignment must be atomic" is telling you that the <em>select</em> and the <em>reserve</em> of a delivery partner have to be one indivisible step.</p>
+
+<div class="analogy">When a prompt names three patterns by name, don't invent a fourth. Map each one to the requirement it solves and the architecture is half-written before you've typed a class. The one requirement <em>without</em> a pattern name attached — "atomic" — is usually the one candidates forget, precisely because it doesn't come with a label to hang a diagram on.</div>
+
+<h3>Nouns Into Classes</h3>
+<p>Circle the nouns — customer, restaurant, menu, item, cart, order, delivery partner, location, bill, status — and split them along the seam the constraints already drew: dumb entities that hold state and tiny invariants, versus the one orchestrator that coordinates all three actors.</p>
+<table>
+<tr><th>Class</th><th>Owns</th><th>Why it exists</th></tr>
+<tr><td><strong>Order</strong></td><td>id, actors, status, partner</td><td>the State machine instance</td></tr>
+<tr><td><strong>DeliveryPartner</strong></td><td>id, location, <code>available</code> flag</td><td>the bookable resource — the hinge of atomicity</td></tr>
+<tr><td><strong>PartnerAssignmentStrategy</strong></td><td>the matching algorithm</td><td>Strategy: how a partner gets picked</td></tr>
+<tr><td><strong>OrderObserver</strong></td><td><code>onStatusChange(...)</code></td><td>Observer: the subscriber role</td></tr>
+<tr><td><strong>Bill / BillCalculator</strong></td><td>subtotal, tax, delivery fee</td><td>pricing kept out of <code>Order</code> on purpose</td></tr>
+<tr><td><strong>OrderService</strong></td><td>orders, partner pool, strategy, observers</td><td>the orchestrator — drives the lifecycle, books partners, publishes</td></tr>
+</table>
+<p>When actors act independently on shared state, that separation is the whole game: coordination belongs to exactly one class, and it never leaks into the entities it coordinates.</p>
+
+<h3>The Interface Is the Edge List</h3>
+<p>The given interface already commits to a decision worth stating out loud: each public verb on <code>OrderService</code> is exactly one transition. <code>restaurantRespond(accept=true)</code> is <code>PLACED → ACCEPTED</code> (then straight on to <code>PREPARING</code>); <code>markReady</code> is <code>PREPARING → READY</code> <em>and</em> the moment a partner gets locked in. List the edges of the state diagram first, and the method names write themselves.</p>
+<p>One refinement is worth making before writing <code>assign</code>'s body: the interface sketch takes the partner list by <code>const std::vector&lt;DeliveryPartner&gt;&amp;</code>, but booking a partner means <em>mutating</em> its <code>available</code> flag as part of the same call — so the real signature drops the <code>const</code>. That single word is where "atomic" actually gets implemented: find-and-book becomes one call instead of a caller-visible read followed by a separate write.</p>
+
+<h3>The Key Insight: a Guarded Transition Table</h3>
+<p>The naive answer scatters <code>if (order.status == X) order.status = Y;</code> across every method of the service. It works for the happy path, then the ninth method forgets a guard and an order goes <code>DELIVERED</code> without ever being <code>ACCEPTED</code>. The fix is to encode legality as data, in one place, behind a single gate every status change must pass through:</p>
+<pre><code class="language-text">PLACED ──accept──► ACCEPTED ──(auto)──► PREPARING ──ready──► READY
+   │                                                            │
+ reject                                                      assign + pickup
+   ▼                                                            ▼
+REJECTED                                                    PICKED_UP ──deliver──► DELIVERED
+
+(CANCELLED reachable from PLACED / ACCEPTED / PREPARING, before pickup)</code></pre>
+<p>Encode that graph as a lookup from each status to its legal next statuses, and check every move against it inside one method, conventionally called <code>transitionTo</code>. Terminal states — <code>DELIVERED</code>, <code>REJECTED</code>, <code>CANCELLED</code> — simply have no row in the table, so a delivered order cannot physically move again. Adding a future state is one new row, not an audit of every method that touches <code>status</code>.</p>
+
+<div class="keypoint">Whenever something has a lifecycle, make legality a lookup table checked by a single gate method. Centralize the guard once; never write <code>status = X</code> anywhere else in the codebase.</div>
+
+<h3>Atomic Assignment: Select and Reserve as One Step</h3>
+<p>The default strategy is ordinary: scan available partners, pick the nearest to the restaurant. The part that actually earns the word "atomic" is that booking happens <em>inside</em> the same function that finds the winner:</p>
+<pre><code class="language-cpp">for (auto&amp; p : partners) {
+    if (!p.available) continue;
+    double d = p.loc.distanceTo(restaurant_-&gt;loc);
+    if (d &lt; bestDist) { bestDist = d; best = &amp;p; }
+}
+if (best) best-&gt;available = false;   // book it inside the same critical section</code></pre>
+<p><code>available</code> is the resource lock — flipping it to <code>false</code> in the same pass that found the winner closes the window where a second order could see the same partner as free. That still isn't thread-safe by itself: two threads can both finish the scan before either flips the flag. The actual fix is where <code>assign</code> gets called from — inside <code>OrderService</code>, wrapped in the same mutex that guards the state transition. The lock is what makes "scan, then flip" indivisible from any other thread's point of view; the flag is just what it's protecting.</p>
+
+<div class="warfield">The bug this guards against is invisible in a single-threaded demo and shows up only under load: two customers' orders both call <code>markReady</code> around the same instant, both scan the partner pool, both see the same nearest courier as free, and both book them. Ask yourself "can someone slip between the read and the write?" for any shared resource you select-then-reserve — if yes, the read and the write belong inside one lock, not two separate ones.</div>
+
+<h3>Observer Ties the Three Actors Together</h3>
+<p>The order publishes; it does not know who's listening. Every transition ends by iterating a list of <code>OrderObserver*</code> and calling <code>onStatusChange</code> — a customer-facing notifier, a partner-facing notifier, and (for free) any future analytics or SMS subscriber, without ever touching <code>OrderService</code> again to add one.</p>
+
+<h3>Orchestration Rhythm</h3>
+<p>Every method on <code>OrderService</code> follows the same three beats: <strong>validate</strong> the transition through the guarded gate, <strong>mutate</strong> side effects (book a partner, free a partner), then <strong>publish</strong> to observers — all inside one mutex, so the three independently-acting actors can hammer the service concurrently without a partner ever getting double-booked or an order ever skipping a state. Fix that rhythm once and every method becomes a two-line variation on it.</p>
+<p>The follow-ups all land on seams the design already has, which is worth saying out loud in an interview: batching is just a new <code>PartnerAssignmentStrategy</code> that books an already-busy partner instead of a fresh one; ETA estimation is a new field published through the existing Observer channel; coupons promote <code>BillCalculator::compute</code> to its own pricing Strategy; and a partner cancelling mid-delivery is one new transition edge that frees the old partner and re-runs assignment. None of them force a rewrite of <code>OrderService</code> — that's the payoff of putting matching, notification, and pricing behind interfaces from the start.</p>
+
+<h2><span class="sec-no">13.3</span>Whole Solution</h2>
+<p>The reference solution below merges every incremental step above into one self-contained C++17 program: the leaf value types, the guarded <code>Order</code> state machine, the <code>NearestPartnerStrategy</code> with its atomic find-and-book, billing kept separate, the <code>OrderObserver</code> hierarchy, and the <code>OrderService</code> orchestrator that ties all three patterns together behind one mutex. <code>main()</code> walks the full happy path — place, accept, ready (which books a partner), pick up, deliver — and then deliberately attempts an illegal transition to prove the guard actually rejects it.</p>
+
+<pre><code class="language-cpp">#include &lt;iostream&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+#include &lt;unordered_map&gt;
+#include &lt;map&gt;
+#include &lt;memory&gt;
+#include &lt;mutex&gt;
+#include &lt;cmath&gt;
+#include &lt;limits&gt;
+#include &lt;algorithm&gt;
+#include &lt;stdexcept&gt;
+
+// ---------- Order lifecycle: PLACED -&gt; ... -&gt; DELIVERED (+ REJECTED / CANCELLED) ----------
+enum class OrderStatus { PLACED, ACCEPTED, PREPARING, READY, PICKED_UP, DELIVERED, REJECTED, CANCELLED };
+
+// ---------- Leaves: dependency-free value types ----------
+struct Location {
+    double x = 0, y = 0;
+    double distanceTo(const Location&amp; o) const {
+        double dx = x - o.x, dy = y - o.y;
+        return std::sqrt(dx * dx + dy * dy);   // good enough; swap for haversine in prod
+    }
+};
+
+struct MenuItem {
+    std::string id;
+    std::string name;
+    int price = 0;   // integer minor-units (paise/cents) -- never float money
+};
+
+// Thin basket tied to one restaurant: ids + quantities, never duplicated prices.
+class Cart {
+public:
+    std::string restaurantId;
+    void add(const std::string&amp; itemId, int qty) { lines_[itemId] += qty; }
+    const std::unordered_map&lt;std::string, int&gt;&amp; lines() const { return lines_; }
+private:
+    std::unordered_map&lt;std::string, int&gt; lines_;
+};
+
+class Restaurant {
+public:
+    std::string id;
+    std::string cuisine;
+    Location    loc;
+
+    void addItem(const MenuItem&amp; m) { menu_[m.id] = m; }
+    const MenuItem&amp; item(const std::string&amp; id) const { return menu_.at(id); }  // throws if missing
+private:
+    std::unordered_map&lt;std::string, MenuItem&gt; menu_;
+};
+
+// Bookable resource -- the single `available` flag is the hinge of atomic assignment.
+struct DeliveryPartner {
+    std::string id;
+    Location    loc;
+    bool        available = true;   // false once booked
+};
+
+class Order;   // forward declaration -- Strategy needs it before Order is fully defined
+
+// ---------- Strategy: pluggable partner assignment ----------
+class PartnerAssignmentStrategy {
+public:
+    // Non-const ref to the partner pool: assigning must MUTATE (flip `available`)
+    // as one indivisible find-and-book step -- that's what "atomic" buys us.
+    virtual DeliveryPartner* assign(const Order&amp; order,
+                                    std::vector&lt;DeliveryPartner&gt;&amp; partners) = 0;
+    virtual ~PartnerAssignmentStrategy() = default;
+};
+
+// ---------- The order: a guarded State machine, not a struct with a mutable status ----------
+class Order {
+public:
+    Order(std::string id, std::string customerId, std::string restaurantId)
+        : id_(std::move(id)), customerId_(std::move(customerId)),
+          restaurantId_(std::move(restaurantId)), status_(OrderStatus::PLACED) {}
+
+    OrderStatus status() const { return status_; }
+    const std::string&amp; id() const { return id_; }
+    const std::string&amp; customerId() const { return customerId_; }
+    const std::string&amp; restaurantId() const { return restaurantId_; }
+
+    DeliveryPartner* partner() const { return partner_; }
+    void setPartner(DeliveryPartner* p) { partner_ = p; }
+
+    // The ONE gate every status change goes through.
+    void transitionTo(OrderStatus next) {
+        if (!isLegal(status_, next))
+            throw std::logic_error("illegal transition: "
+                + std::to_string(int(status_)) + " -&gt; " + std::to_string(int(next)));
+        status_ = next;
+    }
+
+private:
+    static bool isLegal(OrderStatus from, OrderStatus to) {
+        static const std::map&lt;OrderStatus, std::vector&lt;OrderStatus&gt;&gt; table = {
+            {OrderStatus::PLACED,    {OrderStatus::ACCEPTED, OrderStatus::REJECTED, OrderStatus::CANCELLED}},
+            {OrderStatus::ACCEPTED,  {OrderStatus::PREPARING, OrderStatus::CANCELLED}},
+            {OrderStatus::PREPARING, {OrderStatus::READY, OrderStatus::CANCELLED}},
+            {OrderStatus::READY,     {OrderStatus::PICKED_UP}},
+            {OrderStatus::PICKED_UP, {OrderStatus::DELIVERED}},
+            // DELIVERED / REJECTED / CANCELLED are terminal -&gt; no outgoing edges
+        };
+        auto it = table.find(from);
+        if (it == table.end()) return false;   // terminal state
+        return std::find(it-&gt;second.begin(), it-&gt;second.end(), to) != it-&gt;second.end();
+    }
+
+    std::string id_, customerId_, restaurantId_;
+    OrderStatus status_;
+    DeliveryPartner* partner_ = nullptr;   // non-owning; OrderService owns the pool
+};
+
+// Default concrete Strategy: nearest available partner to the restaurant.
+class NearestPartnerStrategy : public PartnerAssignmentStrategy {
+public:
+    explicit NearestPartnerStrategy(const Restaurant* r) : restaurant_(r) {}
+
+    DeliveryPartner* assign(const Order&amp;,
+                            std::vector&lt;DeliveryPartner&gt;&amp; partners) override {
+        DeliveryPartner* best = nullptr;
+        double bestDist = std::numeric_limits&lt;double&gt;::max();
+        for (auto&amp; p : partners) {
+            if (!p.available) continue;
+            double d = p.loc.distanceTo(restaurant_-&gt;loc);
+            if (d &lt; bestDist) { bestDist = d; best = &amp;p; }
+        }
+        if (best) best-&gt;available = false;   // BOOK it inside the critical section
+        return best;                         // nullptr =&gt; nobody free
+    }
+private:
+    const Restaurant* restaurant_;
+};
+
+// ---------- Billing, kept out of Order on purpose ----------
+struct Bill {
+    int subtotal    = 0;
+    int tax         = 0;
+    int deliveryFee = 0;
+    int total() const { return subtotal + tax + deliveryFee; }
+};
+
+class BillCalculator {
+public:
+    // Price the cart against the restaurant's live menu.
+    static Bill compute(const Cart&amp; cart, const Restaurant&amp; r) {
+        Bill b;
+        for (auto&amp; [itemId, qty] : cart.lines())
+            b.subtotal += r.item(itemId).price * qty;
+        b.tax         = b.subtotal * 5 / 100;   // 5% -- a real engine would be pluggable
+        b.deliveryFee = 3000;                    // flat 30.00
+        return b;
+    }
+};
+
+// ---------- Observer: order publishes, subscribers react ----------
+class OrderObserver {
+public:
+    virtual void onStatusChange(const Order&amp; order, OrderStatus newStatus) = 0;
+    virtual ~OrderObserver() = default;
+};
+
+// Example concrete observers -- one per actor.
+class CustomerNotifier : public OrderObserver {
+public:
+    void onStatusChange(const Order&amp; o, OrderStatus s) override {
+        std::cout &lt;&lt; "[customer " &lt;&lt; o.customerId() &lt;&lt; "] order " &lt;&lt; o.id()
+                  &lt;&lt; " is now " &lt;&lt; int(s) &lt;&lt; "\n";
+    }
+};
+
+class PartnerNotifier : public OrderObserver {
+public:
+    void onStatusChange(const Order&amp; o, OrderStatus s) override {
+        if (s == OrderStatus::READY &amp;&amp; o.partner())
+            std::cout &lt;&lt; "[partner " &lt;&lt; o.partner()-&gt;id &lt;&lt; "] pickup ready for "
+                      &lt;&lt; o.id() &lt;&lt; "\n";
+    }
+};
+
+// ---------- Orchestrator: validate (guarded transition) -&gt; side effects -&gt; publish ----------
+class OrderService {
+public:
+    OrderService(std::vector&lt;DeliveryPartner&gt; partners,
+                 std::unique_ptr&lt;PartnerAssignmentStrategy&gt; strategy)
+        : partners_(std::move(partners)), strategy_(std::move(strategy)) {}
+
+    void addObserver(OrderObserver* o) { observers_.push_back(o); }
+
+    Order&amp; placeOrder(const std::string&amp; customerId,
+                      const std::string&amp; restaurantId, const Cart&amp;) {
+        std::lock_guard&lt;std::mutex&gt; lock(mtx_);
+        std::string id = "ORD-" + std::to_string(++counter_);
+        auto [it, inserted] = orders_.emplace(id, Order(id, customerId, restaurantId));
+        publish(it-&gt;second, OrderStatus::PLACED);   // already PLACED at construction
+        return it-&gt;second;
+    }
+
+    void restaurantRespond(const std::string&amp; orderId, bool accept) {
+        std::lock_guard&lt;std::mutex&gt; lock(mtx_);
+        Order&amp; o = find(orderId);
+        if (accept) {
+            o.transitionTo(OrderStatus::ACCEPTED);   publish(o, OrderStatus::ACCEPTED);
+            o.transitionTo(OrderStatus::PREPARING);  publish(o, OrderStatus::PREPARING);
+        } else {
+            o.transitionTo(OrderStatus::REJECTED);   publish(o, OrderStatus::REJECTED);
+        }
+    }
+
+    void markReady(const std::string&amp; orderId) {
+        std::lock_guard&lt;std::mutex&gt; lock(mtx_);   // assignment runs inside this lock =&gt; atomic
+        Order&amp; o = find(orderId);
+        o.transitionTo(OrderStatus::READY);
+
+        DeliveryPartner* p = strategy_-&gt;assign(o, partners_);   // find + book, atomic
+        if (!p) throw std::runtime_error("no delivery partner available");
+        o.setPartner(p);
+        publish(o, OrderStatus::READY);
+    }
+
+    void markPickedUp(const std::string&amp; orderId) {
+        std::lock_guard&lt;std::mutex&gt; lock(mtx_);
+        Order&amp; o = find(orderId);
+        o.transitionTo(OrderStatus::PICKED_UP);  publish(o, OrderStatus::PICKED_UP);
+    }
+
+    void markDelivered(const std::string&amp; orderId) {
+        std::lock_guard&lt;std::mutex&gt; lock(mtx_);
+        Order&amp; o = find(orderId);
+        o.transitionTo(OrderStatus::DELIVERED);  publish(o, OrderStatus::DELIVERED);
+        if (o.partner()) o.partner()-&gt;available = true;   // free the partner
+    }
+
+private:
+    Order&amp; find(const std::string&amp; id) {
+        auto it = orders_.find(id);
+        if (it == orders_.end()) throw std::invalid_argument("unknown order: " + id);
+        return it-&gt;second;
+    }
+    void publish(const Order&amp; o, OrderStatus s) {
+        for (auto* obs : observers_) obs-&gt;onStatusChange(o, s);
+    }
+
+    std::mutex mtx_;
+    std::map&lt;std::string, Order&gt; orders_;
+    std::vector&lt;DeliveryPartner&gt; partners_;                 // the pool we own + book
+    std::unique_ptr&lt;PartnerAssignmentStrategy&gt; strategy_;   // injected -- swappable
+    std::vector&lt;OrderObserver*&gt; observers_;                 // non-owning subscribers
+    int counter_ = 0;
+};
+
+// ---------- Driver: walk the happy path, then hit an illegal transition ----------
+int main() {
+    Restaurant r; r.id = "R1"; r.cuisine = "indian"; r.loc = {0, 0};
+    r.addItem({"M1", "Paneer Tikka", 25000});
+
+    std::vector&lt;DeliveryPartner&gt; partners = {
+        {"P1", {10, 10}, true},
+        {"P2", {1, 1},   true},   // closest to R1 -&gt; should be booked
+    };
+
+    OrderService svc(std::move(partners),
+                     std::make_unique&lt;NearestPartnerStrategy&gt;(&amp;r));
+    CustomerNotifier cust; PartnerNotifier part;
+    svc.addObserver(&amp;cust); svc.addObserver(&amp;part);
+
+    Cart cart; cart.restaurantId = "R1"; cart.add("M1", 2);
+    Bill bill = BillCalculator::compute(cart, r);
+    std::cout &lt;&lt; "Bill total: " &lt;&lt; bill.total() &lt;&lt; "\n";   // 2*25000 + tax + fee
+
+    Order&amp; o = svc.placeOrder("C1", "R1", cart);           // PLACED
+    svc.restaurantRespond(o.id(), true);                   // ACCEPTED -&gt; PREPARING
+    svc.markReady(o.id());                                 // READY + books P2
+    svc.markPickedUp(o.id());                              // PICKED_UP
+    svc.markDelivered(o.id());                             // DELIVERED, frees P2
+
+    // Illegal transition now throws -- DELIVERED is terminal.
+    try { svc.markPickedUp(o.id()); }
+    catch (const std::exception&amp; e) { std::cout &lt;&lt; "Rejected: " &lt;&lt; e.what() &lt;&lt; "\n"; }
+    return 0;
+}</code></pre>
+
+<details class="qa"><summary>The interface sketch has <code>assign</code> take the partner list by <code>const</code> reference. Why does the real implementation drop the <code>const</code>?</summary><div class="a"><p>Because assignment isn't just a lookup — it's a lookup <em>and</em> a reservation, and those two have to happen as one step for "atomic" to mean anything. If <code>assign</code> only read the pool and returned a pointer, the caller would need a second, separate call to flip <code>available</code>, and that gap between "found" and "booked" is exactly where two orders could pick the same courier. Dropping <code>const</code> lets the winning partner get flagged unavailable inside the same function that found it, so from the outside the whole operation looks like one indivisible step — which then only needs one mutex around it to be genuinely thread-safe.</p></div></details>
+
+<details class="qa"><summary>How would you add order batching — one partner carrying several orders — without touching <code>OrderService</code>?</summary><div class="a"><p>Write a new <code>BatchingStrategy</code> that implements <code>PartnerAssignmentStrategy</code>. Instead of only scanning for a fully free partner, it also considers partners already carrying an order whose route passes near the new restaurant, and appends to their batch — which means <code>available</code> stops being a bare bool and becomes a capacity counter inside that strategy's own bookkeeping. <code>OrderService</code> never changes: it still just calls <code>strategy_-&gt;assign(order, partners_)</code> under its lock. Swapping <code>NearestPartnerStrategy</code> for <code>BatchingStrategy</code> at construction time is the entire migration, which is exactly the open/closed payoff of putting matching behind an interface in the first place.</p></div></details>
+
+<details class="qa"><summary>A delivery partner cancels mid-delivery, after <code>PICKED_UP</code>. What changes in the design?</summary><div class="a"><p>Add one new edge: a <code>partnerCancel(orderId)</code> method that frees the current partner (<code>available = true</code>), leaves the order's <code>status</code> where it is rather than rewinding it, and re-runs <code>strategy_-&gt;assign</code> under the same lock to book a replacement — then publishes the reassignment through the existing Observer channel so the customer sees "new partner assigned" rather than silence. It's one more guarded transition and a reuse of the exact same select-and-reserve path <code>markReady</code> already uses; nothing about <code>Order</code>, <code>PartnerAssignmentStrategy</code>, or the Observer hierarchy needs to change shape.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 9 · LRU Cache · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">09</div>
+  <div class="chapter-kicker">Medium · 4 of 5</div>
+  <h1>LRU Cache: O(1) Get/Put via Hashmap + Linked List</h1>
+  <p class="chapter-sub">A hashmap that locates in O(1) paired with a doubly-linked list that reorders and evicts in O(1), wrapped so the eviction rule itself is a pluggable Strategy rather than logic baked into the cache.</p>
+</header>
+
+<h2><span class="sec-no">9.1</span>Problem Statement</h2>
+<p>Design an in-memory key-value cache with a fixed capacity and an eviction policy, suitable for embedding directly inside a service &mdash; think a per-process cache in front of a database call, not a distributed cache like Redis.</p>
+<div class="keypoint">A bounded key-value store where <code>get</code> and <code>put</code> are both O(1), the eviction rule (LRU, but pluggable to LFU/FIFO) lives behind a Strategy interface, and both operations are safe under concurrent access.</div>
+
+<p><strong>Functional requirements:</strong></p>
+<ul>
+  <li><code>get(key)</code> returns the value if present, else signals a miss.</li>
+  <li><code>put(key, value)</code> inserts or updates; if the cache is at capacity, it must <strong>evict</strong> an entry per the active policy before inserting.</li>
+  <li>The base policy is <strong>LRU</strong> &mdash; evict the least-recently-used entry.</li>
+  <li>Both <code>get</code> and <code>put</code> must be <strong>O(1) average time</strong>. This is the load-bearing constraint; nothing in the design is allowed to scan.</li>
+</ul>
+
+<p><strong>Non-functional requirements / constraints:</strong></p>
+<ul>
+  <li>The <strong>eviction policy must be pluggable</strong> &mdash; LRU is the base case, but LFU and FIFO must drop in via a common <code>EvictionPolicy</code> interface without touching the cache's core logic. At SDE-3 level, this generalization <em>is</em> the point of the exercise, not just coding LRU correctly.</li>
+  <li>The cache must be <strong>thread-safe</strong> for concurrent <code>get</code>/<code>put</code> calls.</li>
+  <li>The cache must be <strong>generic</strong> over key and value types.</li>
+</ul>
+
+<p><strong>Expected public interface:</strong></p>
+<pre><code class="language-cpp">template &lt;typename K, typename V&gt;
+class EvictionPolicy {                // Strategy
+public:
+    virtual void keyAccessed(const K&amp; key) = 0;
+    virtual K    evictKey() = 0;       // returns the key to remove
+    virtual void keyAdded(const K&amp; key) = 0;
+    virtual ~EvictionPolicy() = default;
+};
+
+template &lt;typename K, typename V&gt;
+class Cache {
+public:
+    Cache(size_t capacity, std::unique_ptr&lt;EvictionPolicy&lt;K,V&gt;&gt; policy);
+    std::optional&lt;V&gt; get(const K&amp; key);
+    void put(const K&amp; key, const V&amp; value);
+};</code></pre>
+
+<p><strong>What the interviewer is really testing:</strong></p>
+<ul>
+  <li>The <strong>hashmap + doubly-linked-list</strong> mechanism for O(1) LRU &mdash; and whether you can justify why <em>both</em> structures are necessary, not just one.</li>
+  <li>Whether you cleanly <strong>decouple the policy from the storage</strong>, so LFU/FIFO can swap in without editing <code>Cache</code>.</li>
+  <li>The <strong>thread-safety</strong> answer: reach for a single mutex first, then talk intelligently about contention and sharded/striped locks as the natural next step.</li>
+</ul>
+
+<p><strong>Follow-up questions to expect:</strong></p>
+<ol>
+  <li>Swap to <strong>LFU</strong> (frequency buckets) without changing the cache storage.</li>
+  <li><strong>TTL / expiry</strong> per entry alongside capacity-based eviction.</li>
+  <li>Reduce lock contention: a <strong>sharded</strong> cache, partitioned by key hash.</li>
+  <li>Make it <strong>write-through / write-back</strong> to a backing store.</li>
+</ol>
+
+<h2><span class="sec-no">9.2</span>How to Approach</h2>
+<p>Mine the hard constraints first, because they decide the design before you write a single class. "Both <code>get</code> and <code>put</code> must be O(1)" rules out anything that scans to find a victim. "Pluggable eviction policy" says the recency bookkeeping cannot live inside the same class as the key-value storage &mdash; that split is a seam, and the statement is telling you it's <em>the</em> seam it wants to see. "Thread-safe" means a mutex is a first-class requirement, not an afterthought bolted on at the end. "Generic over K and V" means templates from the first line.</p>
+
+<div class="keypoint">The non-functional constraints &mdash; O(1), pluggable, thread-safe &mdash; are not footnotes. They pick your data structures <em>and</em> your class boundaries before you've named a single class. Mine them before you design anything.</div>
+
+<p>Circle the nouns in the problem &mdash; cache, key, value, capacity, policy, eviction, recency, lock &mdash; and they hand you the class list almost for free: an <code>EvictionPolicy&lt;K,V&gt;</code> interface that owns the ordering rule; a concrete <code>LRUEvictionPolicy&lt;K,V&gt;</code> that implements it with a list plus a map; and a <code>Cache&lt;K,V&gt;</code> that is the public-facing orchestrator holding the values, the capacity, the policy, and the mutex. That's a textbook <strong>Strategy pattern</strong>: one interface, several interchangeable concrete strategies, and one context that holds a strategy pointer and never inspects which concrete strategy it was handed.</p>
+
+<p>A first instinct for storage is <code>std::unordered_map&lt;K, V&gt;</code>, and that instinct is correct &mdash; it gives O(1) average lookup, insert, and erase by key. The interesting state doesn't live there, though. It lives inside the policy. The cache holds <em>what</em> the values are; the policy holds <em>the order they should leave in</em>. Don't over-model the leaf; spend your modeling effort where the algorithm actually is.</p>
+
+<p>So why can't a plain hashmap alone give O(1) recency updates? Because a hashmap has no notion of order. The naive fix &mdash; stamp every entry with a "last used" timestamp, and on eviction scan every entry for the smallest one &mdash; is O(n) per eviction. That fails the O(1) requirement outright, and it's the single most common wrong turn candidates take into this problem.</p>
+
+<p>The fix is two structures cooperating, each covering the other's blind spot:</p>
+<pre><code class="language-text">       MRU (front)                          LRU (back / evict here)
+        &#9484;&#9472;&#9472;&#9472;&#9472;&#9516;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9516;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9516;   &#9484;&#9472;&#9472;&#9472;&#9472;&#9516;
+list:   &#9474;  D  &#9474; &#8644; &#9474;  A  &#9474; &#8644; &#9474;  C  &#9474; &#8644; &#9474;  B  &#9474;
+        &#9492;&#9472;&#9472;&#9472;&#9472;&#9524;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9524;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9524;   &#9492;&#9472;&#9472;&#9472;&#9472;&#9524;
+           &#9650;         &#9650;         &#9650;         &#9650;
+map:   key &#8594; iterator (node address) for each key, O(1) lookup</code></pre>
+<p>A doubly-linked list of keys orders them by recency: front is most-recently-used, back is least-recently-used. A hashmap from key to list iterator gives O(1) access to any node so it can be spliced out without walking the list. The list alone can't find a node by key without an O(n) scan; the map alone has no concept of order. Together: find-by-key is O(1) via the map, unlink-and-push-front is O(1) via the list, and eviction is O(1) &mdash; pop the back, erase from the map. The move that makes this legal is <code>std::list::splice</code>: it relinks a node in place without invalidating any iterator, which is exactly why the map is allowed to hold onto those iterators across reorders.</p>
+
+<div class="keypoint">Whenever "find it," "reorder it," and "pick the extreme" must all be O(1) simultaneously, reach for a hashmap paired with a linked structure. The map locates; the list orders. This combination recurs across a whole family of data-structure-design interview questions, not just LRU.</div>
+
+<p>With the mechanism settled, the policy interface is deliberately narrow: it speaks only in keys, never in values. <code>keyAdded</code> tells it a brand-new key entered; <code>keyAccessed</code> tells it an existing key was touched; <code>evictKey</code> asks it to name a victim and forget it. It never sees a <code>V</code>. That "data-free-of-V" discipline is exactly what makes the same interface serve LRU, LFU, or FIFO &mdash; each just answers those three questions differently. <code>Cache</code>, the context, never computes recency itself; it only ever asks the policy "who's the victim?" and evicts before it inserts, so the store's size invariant never goes transiently over capacity.</p>
+
+<div class="warfield"><code>get</code> is a writer, not a reader. It calls <code>keyAccessed</code>, which reorders the linked list. It is tempting to reach for a shared/read lock on <code>get</code> since it "just reads a value" &mdash; but under concurrency that corrupts the list, because two "readers" can splice the same node at once. One plain <code>std::mutex</code>, held by <code>lock_guard</code> (RAII: released automatically even on an exception path) for the entire body of both <code>get</code> and <code>put</code>, is the correct simple answer. State that first. Only after that should you volunteer that one global lock serializes the whole cache under contention, and that the standard fix is <strong>sharding</strong>: partition keys into N independent sub-caches by <code>hash(key) % N</code>, each with its own mutex and its own policy instance, so two threads hitting different shards never block each other.</div>
+
+<p>The remaining follow-ups all resolve the same way: a new injected interface or a thin composition, never an edit to <code>Cache</code>'s core. TTL becomes an expiry timestamp stored alongside the value, checked lazily on <code>get</code>. A sharded cache is N copies of the exact same <code>Cache&lt;K,V&gt;</code> wrapped by a router, reusing the single-cache code verbatim. Write-through/write-back is another injected strategy, orthogonal to eviction, sitting beside it rather than tangled with it. That pattern &mdash; new follow-up, new subclass or wrapper, zero edits to the core &mdash; is the open/closed principle, and pointing it out explicitly is what separates an LLD answer that merely works from one that reads as senior.</p>
+
+<h2><span class="sec-no">9.3</span>Whole Solution</h2>
+<p>One synthesized, internally-consistent program: the <code>EvictionPolicy</code> Strategy interface, the LRU concrete strategy (hashmap + doubly-linked-list), the LFU concrete strategy (frequency buckets, included to prove the abstraction actually holds), the <code>Cache</code> context wired with a mutex, and a driver that exercises a hit, a miss, an eviction, and a live swap of the strategy.</p>
+<pre><code class="language-cpp">#include &lt;iostream&gt;
+#include &lt;list&gt;
+#include &lt;memory&gt;
+#include &lt;mutex&gt;
+#include &lt;optional&gt;
+#include &lt;string&gt;
+#include &lt;unordered_map&gt;
+
+// ============================================================
+// Strategy interface: the eviction policy speaks only in keys.
+// It owns *ordering*; Cache owns *data*. That split is what lets
+// LRU / LFU / FIFO drop in without Cache ever changing.
+// ============================================================
+template &lt;typename K, typename V&gt;
+class EvictionPolicy {
+public:
+    virtual void keyAccessed(const K&amp; key) = 0;   // get or update touched this key
+    virtual void keyAdded(const K&amp; key)    = 0;   // a brand-new key was inserted
+    virtual K    evictKey()                = 0;   // returns the key to remove
+    virtual ~EvictionPolicy() = default;
+};
+
+// ============================================================
+// Concrete strategy #1: LRU via hashmap + doubly-linked-list.
+// front of order_ = most-recently-used, back = least-recently-used.
+// pos_ maps key -&gt; iterator into order_, so any node is O(1) reachable.
+// ============================================================
+template &lt;typename K, typename V&gt;
+class LRUEvictionPolicy : public EvictionPolicy&lt;K, V&gt; {
+public:
+    void keyAccessed(const K&amp; key) override {
+        auto it = pos_.find(key);
+        if (it == pos_.end()) return;              // not tracked yet; keyAdded handles new keys
+        // splice relinks the node in place without invalidating any iterator,
+        // including the one pos_ is holding for this key.
+        order_.splice(order_.begin(), order_, it-&gt;second);
+    }
+
+    void keyAdded(const K&amp; key) override {
+        order_.push_front(key);
+        pos_[key] = order_.begin();
+    }
+
+    K evictKey() override {
+        K victim = order_.back();                  // back = least-recently-used
+        order_.pop_back();
+        pos_.erase(victim);
+        return victim;
+    }
+
+private:
+    std::list&lt;K&gt; order_;                                          // front = MRU, back = LRU
+    std::unordered_map&lt;K, typename std::list&lt;K&gt;::iterator&gt; pos_;  // key -&gt; its node
+};
+
+// ============================================================
+// Concrete strategy #2: LFU via frequency buckets. Proves the
+// Strategy seam holds -- Cache below needs zero edits to use this
+// instead of LRU; only the constructor argument changes.
+// ============================================================
+template &lt;typename K, typename V&gt;
+class LFUEvictionPolicy : public EvictionPolicy&lt;K, V&gt; {
+public:
+    void keyAdded(const K&amp; key) override {
+        freqOf_[key] = 1;
+        buckets_[1].push_front(key);
+        pos_[key] = buckets_[1].begin();
+        minFreq_ = 1;                               // a new key is always freq 1
+    }
+
+    void keyAccessed(const K&amp; key) override {
+        int f = freqOf_[key];
+        buckets_[f].erase(pos_[key]);                // pull out of old bucket
+        if (buckets_[f].empty() &amp;&amp; f == minFreq_) ++minFreq_;
+        int nf = f + 1;
+        freqOf_[key] = nf;
+        buckets_[nf].push_front(key);                // promote to next bucket
+        pos_[key] = buckets_[nf].begin();
+    }
+
+    K evictKey() override {
+        auto&amp; lst = buckets_[minFreq_];             // lowest freq; back = least-recent there
+        K victim = lst.back();
+        lst.pop_back();
+        freqOf_.erase(victim);
+        pos_.erase(victim);
+        return victim;
+    }
+
+private:
+    int minFreq_ = 0;
+    std::unordered_map&lt;K, int&gt; freqOf_;                           // key -&gt; frequency
+    std::unordered_map&lt;int, std::list&lt;K&gt;&gt; buckets_;               // frequency -&gt; keys at it
+    std::unordered_map&lt;K, typename std::list&lt;K&gt;::iterator&gt; pos_;  // key -&gt; its node
+};
+
+// ============================================================
+// Context: owns the key-&gt;value store, the capacity bound, and the
+// mutex. Delegates "who leaves" to whichever policy was injected.
+// ============================================================
+template &lt;typename K, typename V&gt;
+class Cache {
+public:
+    Cache(size_t capacity, std::unique_ptr&lt;EvictionPolicy&lt;K, V&gt;&gt; policy)
+        : capacity_(capacity), policy_(std::move(policy)) {}
+
+    std::optional&lt;V&gt; get(const K&amp; key) {
+        std::lock_guard&lt;std::mutex&gt; lock(mutex_);   // get mutates recency: it's a writer
+        auto it = store_.find(key);
+        if (it == store_.end()) return std::nullopt;  // miss
+        policy_-&gt;keyAccessed(key);                     // touch: now most-recently-used
+        return it-&gt;second;
+    }
+
+    void put(const K&amp; key, const V&amp; value) {
+        std::lock_guard&lt;std::mutex&gt; lock(mutex_);
+
+        auto it = store_.find(key);
+        if (it != store_.end()) {            // update existing key
+            it-&gt;second = value;
+            policy_-&gt;keyAccessed(key);
+            return;
+        }
+
+        if (store_.size() &gt;= capacity_) {    // at capacity -&gt; evict before inserting
+            K victim = policy_-&gt;evictKey();
+            store_.erase(victim);
+        }
+
+        store_[key] = value;                 // insert new
+        policy_-&gt;keyAdded(key);
+    }
+
+private:
+    size_t capacity_;
+    std::unordered_map&lt;K, V&gt; store_;                       // key -&gt; value
+    std::unique_ptr&lt;EvictionPolicy&lt;K, V&gt;&gt; policy_;         // the Strategy
+    std::mutex mutex_;                                     // guards both above
+};
+
+// ============================================================
+// Driver: exercise a hit, a miss, and an eviction under LRU, then
+// swap in LFU against a fresh Cache to prove the abstraction holds.
+// ============================================================
+int main() {
+    // --- LRU behavior ---
+    auto lruPolicy = std::make_unique&lt;LRUEvictionPolicy&lt;int, std::string&gt;&gt;();
+    Cache&lt;int, std::string&gt; cache(2, std::move(lruPolicy));   // capacity 2
+
+    cache.put(1, "one");
+    cache.put(2, "two");
+
+    cache.get(1);              // touch 1 -&gt; order: [1 (MRU), 2 (LRU)]
+    cache.put(3, "three");     // at capacity -&gt; evict LRU key (2), insert 3
+
+    if (!cache.get(2))
+        std::cout &lt;&lt; "2 evicted (miss)\n";
+    if (auto v = cache.get(1))
+        std::cout &lt;&lt; "1 = " &lt;&lt; *v &lt;&lt; "\n";   // one
+    if (auto v = cache.get(3))
+        std::cout &lt;&lt; "3 = " &lt;&lt; *v &lt;&lt; "\n";   // three
+
+    // --- Same Cache template, different strategy: LFU, zero edits to Cache ---
+    Cache&lt;int, std::string&gt; lfuCache(2, std::make_unique&lt;LFUEvictionPolicy&lt;int, std::string&gt;&gt;());
+
+    lfuCache.put(10, "ten");
+    lfuCache.put(20, "twenty");
+    lfuCache.get(10);            // freq(10) = 2, freq(20) = 1
+    lfuCache.put(30, "thirty");  // at capacity -&gt; evict least-frequent (20), insert 30
+
+    if (!lfuCache.get(20))
+        std::cout &lt;&lt; "20 evicted (miss, lowest frequency)\n";
+    if (auto v = lfuCache.get(10))
+        std::cout &lt;&lt; "10 = " &lt;&lt; *v &lt;&lt; "\n";
+    if (auto v = lfuCache.get(30))
+        std::cout &lt;&lt; "30 = " &lt;&lt; *v &lt;&lt; "\n";
+
+    return 0;
+}</code></pre>
+
+<dl class="jargon">
+  <dt>Strategy pattern</dt><dd>One interface (<code>EvictionPolicy</code>), several interchangeable concrete implementations (LRU/LFU/FIFO), and one context (<code>Cache</code>) that holds a pointer to the interface and never branches on which concrete type it was handed.</dd>
+  <dt>std::list::splice</dt><dd>Moves a node from one position in a linked list (or another list) to another in O(1), without invalidating any iterator to that node. That guarantee is what lets the hashmap keep caching iterators across reorders.</dd>
+  <dt>lock_guard / RAII</dt><dd>A stack object that acquires a mutex on construction and releases it on destruction, including when the function exits via an exception. Removes the class of bug where a lock is acquired but a return path forgets to release it.</dd>
+  <dt>Sharding</dt><dd>Splitting one cache into N independent sub-caches, each with its own mutex and policy, keyed by <code>hash(key) % N</code>. Trades one global lock (serializes everything) for N smaller locks (only keys landing in the same shard contend).</dd>
+</dl>
+
+<details class="qa"><summary>Why does the cache need both a hashmap and a linked list &mdash; why can't either one do the job alone?</summary><div class="a"><p>A bare hashmap has no concept of order, so it cannot answer "which key is least-recently-used" without extra bookkeeping, and a naive timestamp-and-scan approach is O(n) per eviction. A bare linked list can maintain order in O(1) at its ends, but finding an arbitrary key's node to move it would require an O(n) walk. Pairing them removes both weaknesses: the map answers "where is this key's node" in O(1), and the list answers "reorder it" and "who is the victim" in O(1). The map locates; the list orders.</p></div></details>
+<details class="qa"><summary>Why is <code>get</code> not safe under a shared/read lock even though it looks read-only?</summary><div class="a"><p>Because <code>get</code> calls <code>keyAccessed</code> on a hit, which splices the accessed key's node to the front of the recency list. That mutates shared state (the list and, in LFU, the frequency buckets), so two "readers" running concurrently could corrupt the list by splicing at the same time. <code>get</code> must take the same exclusive lock as <code>put</code>. This is a classic interview trap: the fastest way to lose credibility here is proposing a <code>shared_mutex</code> for <code>get</code>.</p></div></details>
+<details class="qa"><summary>How would you swap in LFU, and does anything in <code>Cache</code> need to change?</summary><div class="a"><p>Nothing in <code>Cache</code> changes. LFU keeps a frequency count per key and, among ties, breaks by recency, implemented with a map from frequency to an ordered list of keys at that frequency, plus a running <code>minFreq</code>. It implements the exact same three methods &mdash; <code>keyAdded</code>, <code>keyAccessed</code>, <code>evictKey</code> &mdash; so swapping is just passing a different <code>unique_ptr&lt;EvictionPolicy&lt;K,V&gt;&gt;</code> at construction. If <code>Cache</code> needed an edit to support LFU, that would mean the original abstraction had leaked.</p></div></details>
+<details class="qa"><summary>The cache is under heavy contention in production. What's your next move, and what does it cost?</summary><div class="a"><p>Shard it: create N independent <code>Cache&lt;K,V&gt;</code> instances, each with its own mutex and its own policy instance, and route each key to shard <code>hash(key) % N</code>, splitting capacity roughly <code>total / N</code> per shard. Threads touching keys in different shards no longer block each other, and the single-cache code is reused unchanged. The cost is that global properties become approximate: total size is only exact up to per-shard rounding, and a single "evict globally least-recently-used" guarantee is lost in favor of "least-recently-used within its shard," which is normally an acceptable trade for the throughput gained.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

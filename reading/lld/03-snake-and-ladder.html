@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 3 · Snake &amp; Ladder · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">03</div>
+  <div class="chapter-kicker">Easy · 3 of 5</div>
+  <h1>Snake &amp; Ladder: Entity Modeling and a Pluggable Dice</h1>
+  <p class="chapter-sub">Snakes and ladders are the same move wearing two costumes &mdash; a teleport from one cell to another. This chapter walks the textbook design (one unifying <code>Jump</code> concept, a pluggable die), then shows the real solution in this repo, which makes a different, equally defensible set of calls.</p>
+</header>
+
+<h2><span class="sec-no">3.1</span>Problem Statement</h2>
+<p>Design the classic Snake &amp; Ladder board game for N players on a 100-cell board. It looks like a children's game, but the interview brief is almost algorithm-free on purpose: there is no pathfinding, no scoring math, nothing clever to compute. The entire grade is your class boundaries and whether you noticed that a "die" is a policy, not a constant.</p>
+<div class="keypoint">Snakes (head &rarr; tail) and ladders (bottom &rarr; top) are the same operation &mdash; land on cell X, get moved to cell Y &mdash; and the die that drives movement should be swappable without touching the game loop. Everything else in this chapter follows from those two sentences.</div>
+<p><strong>Functional requirements:</strong></p>
+<ul>
+  <li><strong>Configurable board.</strong> Snakes (head cell &rarr; tail cell) and ladders (bottom cell &rarr; top cell) placed at arbitrary positions on a 100-cell board.</li>
+  <li>Players <strong>roll a die</strong> in turn, advance their token by the roll, and their position adjusts automatically if they land on a snake head (slide down) or a ladder bottom (climb up).</li>
+  <li>The first player to land <strong>exactly</strong> on cell 100 wins. You must decide and <strong>state your overshoot rule</strong> out loud &mdash; e.g. a roll that would overshoot cell 100 is forfeited, and the player stays put.</li>
+  <li>Support a <strong>pluggable die</strong>: a single six-sided die, the sum of two dice, or a crooked/loaded die for testing deterministic scenarios.</li>
+</ul>
+<p><strong>Non-functional / constraints:</strong> almost no algorithm lives here &mdash; this problem is purely about clean class boundaries and abstracting the die behind an interface. If your solution has a branch that checks "is this a snake or a ladder," or a `rand()` call sitting inside the game loop, that is the signal you collapsed an abstraction you shouldn't have.</p>
+<p>The problem statement hands you the expected shape of the public interface directly, which is itself a hint: lock this down before writing any internals.</p>
+<pre><code class="language-cpp">class Dice {
+public:
+    virtual int roll() = 0;     // SixSidedDice, TwoDice, CrookedDice
+    virtual ~Dice() = default;
+};
+
+struct Jump {  // models both snakes and ladders
+    int start;
+    int end;
+};
+
+class Game {
+public:
+    Game(int boardSize, std::vector&lt;Jump&gt; jumps, std::unique_ptr&lt;Dice&gt; dice);
+    void addPlayer(const Player&amp; p);
+    Player startGame();          // runs the simulation loop, returns the winner
+};</code></pre>
+<p><strong>What the interviewer is really testing:</strong></p>
+<ul>
+  <li>Whether you separate the problem into <code>Board</code>, <code>Jump</code>, <code>Dice</code>, <code>Player</code>, and <code>Game</code> &mdash; five nouns, five clear jobs.</li>
+  <li>Whether the <code>Dice</code> interface lets behaviour swap freely without touching <code>Game</code> at all &mdash; the textbook Strategy pattern.</li>
+  <li>Whether snakes and ladders are unified as one <code>Jump</code> concept (start &rarr; end), rather than duplicated into two near-identical classes with no actual behavioural difference.</li>
+</ul>
+<p><strong>Follow-up questions to expect:</strong></p>
+<ol>
+  <li><strong>Roll again on a 6</strong>, with a cap of three consecutive sixes resetting the turn.</li>
+  <li><strong>Validate the board at construction</strong>: no two jumps share a start cell, no jump starts or ends on cell 1 or cell 100, and no jump cycles.</li>
+  <li><strong>Multiple dice and a configurable winning cell</strong> &mdash; can your design absorb both without new branching?</li>
+</ol>
+
+<h2><span class="sec-no">3.2</span>How to Approach</h2>
+<p>Read the problem the way an interviewer wrote it: mine the constraints first, because they decide the design, and notice what's conspicuously <em>absent</em>. There's barely any algorithm here, so the whole grade rests on class boundaries and abstractions, not cleverness.</p>
+<p>Two phrases in the prompt are doing all the work. <em>"Support a pluggable die"</em> is naming a Strategy pattern outright &mdash; a hardcoded <code>rand() % 6 + 1</code> living inside <code>Game</code> is a fail before you've written a second class. And <em>"snakes (head &rarr; tail) and ladders (bottom &rarr; top)"</em> describes two nouns that differ only in the direction of the same operation: a teleport from one cell to another. Two separate <code>Snake</code> / <code>Ladder</code> classes would be duplicated code with zero behavioural difference, and interviewers watch for exactly that.</p>
+<div class="keypoint">Thinking habit: when the prompt says "pluggable X," it's naming a Strategy. When two nouns differ only in direction (snake down / ladder up), they're one concept wearing a different sign &mdash; collapse them before you list classes.</div>
+<p>Now circle the nouns: board, cell, snake, ladder, jump, die, player, token, position, game, turn, winner. Collapse the synonyms &mdash; snake and ladder both become <code>Jump</code>; token and position both become a plain <code>int</code> on <code>Player</code> &mdash; and group what's left by responsibility:</p>
+<table>
+<tr><th>Class</th><th>Owns</th><th>Why it exists</th></tr>
+<tr><td><code>Jump</code> (struct)</td><td><code>start</code>, <code>end</code> cells</td><td>unifies snake and ladder as one "teleport"</td></tr>
+<tr><td><code>Dice</code> (interface)</td><td>the <code>roll()</code> contract</td><td>abstracts how many pips so behaviour swaps freely</td></tr>
+<tr><td><code>SixSidedDice</code> / <code>TwoDice</code> / <code>CrookedDice</code></td><td>their own RNG/bias</td><td>the concrete roll behaviours</td></tr>
+<tr><td><code>Board</code></td><td>size + start &rarr; end jump map</td><td>knows geometry; answers "where does this cell send me?"</td></tr>
+<tr><td><code>Player</code></td><td>id, name, current position</td><td>identity + token location</td></tr>
+<tr><td><code>Game</code></td><td>board, players, dice, turn order</td><td>orchestrates the simulation, declares the winner</td></tr>
+</table>
+<p>Pin the public interface before internals &mdash; it forces you to decide what the outside world sees. <code>Dice</code> is an abstract base with one pure-virtual <code>roll()</code>; <code>Game</code> depends on it as an interface and never on a concrete die, so swapping behaviour never touches <code>Game</code>. <code>Game</code> takes a <code>std::unique_ptr&lt;Dice&gt;</code> and owns the injected die explicitly &mdash; the die is polymorphic, so it is passed by pointer, never by value, to avoid slicing. <code>startGame()</code> returns the winning <code>Player</code>: a single value out, with the loop running to completion internally.</p>
+<p>The key insight is where the unification actually lives: inside <code>Board</code>. A snake and a ladder do the same thing &mdash; land on a special cell, get teleported elsewhere &mdash; so <code>Board</code> stores one map, <code>start &rarr; end</code>, and answers a single question: if a token lands on cell <code>p</code>, where does it actually end up?</p>
+<pre><code class="language-cpp">std::unordered_map&lt;int, int&gt; jumps_;   // start cell -&gt; end cell
+
+// Resolve a landing cell: follow a jump if one starts here, else stay put.
+int finalPosition(int landed) const {
+    auto it = jumps_.find(landed);
+    return (it != jumps_.end()) ? it-&gt;second : landed;
+}</code></pre>
+<p>Direction is data (<code>end &lt; start</code> is a snake, <code>end &gt; start</code> is a ladder), not type, so one lookup covers both, the simulation loop never special-cases "which feature is this," and the whole resolution is an O(1) map probe. <code>Board</code> owns geometry only &mdash; it doesn't know about players, turns, or dice.</p>
+<div class="keypoint">Thinking habit: when two entities differ only by data (direction), store them in one structure keyed by what they have in common (the trigger cell). The type system shouldn't carry information the data already encodes.</div>
+<p>With the entities settled, the game loop can stay genuinely thin: roll, bound-check against the overshoot rule, resolve through <code>Board</code>, check for a win, advance the turn.</p>
+<pre><code class="language-cpp">int target = current.position + roll;
+if (target &lt;= board_.size()) {           // overshoot rule: skip if it would pass the end
+    current.position = board_.finalPosition(target);
+    if (current.position == board_.size()) return current;   // winner
+}
+// else: forfeited move, stay put; turn passes on regardless</code></pre>
+<p>All the "what does this cell do" logic lives in <code>Board</code>; all the "how many pips" logic lives in <code>Dice</code>; <code>Game</code> only sequences the two. That division is also what makes the follow-ups land predictably instead of forcing a redesign: roll-again-on-6 is a turn-policy tweak isolated to the loop (track a per-turn six-count, only advance the turn when appropriate); board validation (no shared start cells, nothing anchored to cell 1 or 100, no self-loops) belongs in <code>Board</code>'s constructor, so an illegal board can never exist; and multiple dice or a configurable winning cell cost zero new branches &mdash; <code>TwoDice</code> is just another <code>Dice</code> subclass, and the winning cell is already the value the loop compares against.</p>
+
+<h3>The Design Actually Built: Polymorphism Over a Data Struct</h3>
+<p>Everything above is the textbook route through this problem, and it's what most interviewers expect you to arrive at. The working solution in this repo (section 3.3) makes a different, equally legitimate set of calls, and it's worth reading both so you can defend either one in an interview.</p>
+<p>Instead of one <code>Jump{start, end}</code> struct, the real code gives <code>Snake</code> and <code>Ladder</code> their own classes under an abstract <code>BoardEntity</code> (holding <code>start</code>/<code>end</code>, plus a pure-virtual <code>display()</code> and <code>name()</code>). <code>Board</code> stores them polymorphically in a <code>map&lt;int, BoardEntity*&gt;</code> keyed by start cell &mdash; so resolution is still one O(1) lookup, it just returns a base-class pointer instead of a plain <code>int</code>. The trade you're making: two small classes instead of one struct, in exchange for a seam where a snake and a ladder genuinely could behave differently later (different `display()` art, a different sound cue, a "poisonous snake" variant with its own rule) without touching <code>Board</code> at all. The Jump-struct version is leaner when they truly never diverge; the polymorphic version is the safer bet when "never" is doing a lot of work.</p>
+<p>The Strategy pattern still shows up &mdash; just applied somewhere more interesting than the die. <code>BoardSetupStrategy</code> is the abstraction, with three concrete strategies: <code>RandomBoardStrategy</code> (probabilistic placement scaled by an <code>EASY</code>/<code>MEDIUM</code>/<code>HARD</code> difficulty), <code>CustomCountStrategy</code> (a fixed number of snakes/ladders, either random or hand-placed), and <code>StandardBoardStrategy</code> (the classic hardcoded 100-cell layout). <code>Board::setupBoard(BoardSetupStrategy*)</code> never knows which one it got &mdash; the exact same "swap behavior without touching the consumer" property the die was supposed to demonstrate in the textbook design.</p>
+<div class="warfield">Two honest gaps versus the brief: the <code>Dice</code> class here is concrete, not an interface &mdash; there's no <code>SixSidedDice</code>/<code>TwoDice</code>/<code>CrookedDice</code> family, just one class with a <code>faces</code> count, so "pluggable die" from the problem statement isn't actually implemented. And there's no <code>Player</code> or <code>Game</code> class at all: what exists is the board layer (entities + setup strategies + an <code>IObserver</code> notification hook) with no simulation loop wired on top. Section 3.3 adds a small driver on top of the real classes to show them actually playing a game, but making <code>Dice</code> pluggable and adding a proper multi-player <code>Game</code> loop are the two follow-ups this design still owes.</div>
+
+<h2><span class="sec-no">3.3</span>Whole Solution</h2>
+<p>The complete listing below is the real, working code from this repo: an <code>IObserver</code> notification contract, the polymorphic <code>Snake</code>/<code>Ladder</code> board entities, <code>Board</code> itself, and the three <code>BoardSetupStrategy</code> implementations. Since the repo file stops at board setup, a short <code>main()</code> is appended at the end to actually play a game with it &mdash; rolling the die, resolving landings through <code>Board::getEntity</code>, and reporting each turn through the notifier &mdash; using only the classes already defined above it.</p>
+<pre><code class="language-cpp">#include &lt;bits/stdc++.h&gt;
+
+using namespace std;
+
+class IObserver{
+    public:
+        virtual void update(string msg) = 0;
+        virtual ~IObserver(){}
+};
+
+//Sample Observer Implemetation
+
+class SnakeAndLadderConsoleNotifier : public IObserver{
+    public:
+        void update(string msg){
+            cout &lt;&lt; "[Notification] " &lt;&lt; msg &lt;&lt;endl;
+        }
+};
+
+class Dice{
+    private:
+        int faces;
+
+    public:
+        Dice(int f){
+            faces = f;
+            srand(time(0));
+        }
+
+        int roll(){
+            return (rand()%(this-&gt;faces)) +1;
+        }
+};
+
+class BoardEntity{
+    private:
+        int startPostion;
+        int endPostion;
+
+    public:
+        BoardEntity(int start, int end){
+            startPostion = start;
+            endPostion = end;
+        }
+
+        int getStart(){
+            return startPostion;
+        }
+
+        int getEnd(){
+            return endPostion;
+        }
+
+        virtual void display() = 0;
+        virtual string name() = 0 ;
+        virtual ~BoardEntity(){};
+};
+
+class Snake : public BoardEntity{
+    public:
+        Snake(int start, int end):BoardEntity(start, end){
+            if(start&gt;=end){
+                cout&lt;&lt; "Invalid Snake" &lt;&lt; endl;
+             }
+        }
+
+        void display() override{
+            cout &lt;&lt;  "Snake: " &lt;&lt; getStart() &lt;&lt;  " -&gt; " &lt;&lt; getEnd() &lt;&lt; endl;
+        }
+
+        string name() override {
+            return "SNAKE";
+        }
+
+};
+
+class Ladder : public BoardEntity{
+    public:
+        Ladder(int start, int end):BoardEntity(start, end){
+            if(start&lt;=end){
+                cout&lt;&lt; "Invalid Ladder" &lt;&lt; endl;
+             }
+        }
+
+        void display() override{
+            cout &lt;&lt;  "Ladder: " &lt;&lt; getStart() &lt;&lt;  " -&gt; " &lt;&lt; getEnd() &lt;&lt; endl;
+        }
+
+        string name() override {
+            return "LADDER";
+        }
+
+};
+
+class BoardSetupStrategy;
+
+class Board{
+    private:
+        int size;
+        vector&lt;BoardEntity*&gt; snakeAndLadder;
+        map&lt;int, BoardEntity*&gt; boardEntities;
+
+    public:
+        Board(int s){
+            size = s;
+        }
+
+        bool canAddEntities(int pos){
+            return boardEntities.find(pos) == boardEntities.end();
+        }
+
+        void addBoardEntities(BoardEntity* boardEntity){
+                if(canAddEntities(boardEntity-&gt;getStart())){
+                    snakeAndLadder.push_back(boardEntity);
+                    boardEntities[boardEntity-&gt;getStart()] = boardEntity;
+                }
+
+        }
+
+        void setupBoard(BoardSetupStrategy* stategy);
+
+        BoardEntity* getEntity(int pos){
+            if(boardEntities.find(pos) != boardEntities.end()){
+                return boardEntities[pos];
+            }
+
+            return nullptr;
+        }
+
+        int getBoardSize(){
+            return size;
+        }
+
+        void display(){
+            cout&lt;&lt; "\n=== Board Configurations === \n" &lt;&lt; endl;
+            cout &lt;&lt; "Board Size: " &lt;&lt; size &lt;&lt;" Cells" &lt;&lt; endl;
+
+            int snakeCount =0 ;
+            int ladderCount =0 ;
+            for(auto entity : snakeAndLadder){
+                if(entity-&gt;name()=="SNAKE"){
+                    snakeCount++;
+                }else{
+                    ladderCount++;
+                }
+            }
+
+            cout &lt;&lt; "\n === Snakes:" &lt;&lt;snakeCount &lt;&lt;endl;
+            for(auto entity: snakeAndLadder){
+                if(entity-&gt;name()=="Snake"){
+                    entity-&gt;display();
+                }
+            }
+
+            cout &lt;&lt; "\n === Ladders:" &lt;&lt;ladderCount &lt;&lt;endl;
+            for(auto entity: snakeAndLadder){
+                if(entity-&gt;name()=="LADDER"){
+                    entity-&gt;display();
+                }
+            }
+
+            cout &lt;&lt; "==============================================" &lt;&lt;endl;
+
+        }
+
+        ~Board(){
+            for(auto entity:snakeAndLadder){
+                delete(entity);
+            }
+        }
+};
+
+class BoardSetupStrategy{
+    public:
+        virtual void setupBoard(Board* baord) =0;
+        virtual ~BoardSetupStrategy(){}
+};
+
+class RandomBoardStrategy : public BoardSetupStrategy{
+    public:
+        enum Difficulty{
+            EASY,
+            MEDIUM,
+            HARD
+        };
+    private:
+        Difficulty difficulty;
+
+        void setupWithProbability(Board* board, double snakeProbability){
+            int boardSize = board-&gt;getBoardSize();
+            int totalEntities = boardSize/10;
+
+            for(int i =0; i&lt;totalEntities; i++){
+                double prob =(double)rand()/RAND_MAX;
+                if(prob&lt;snakeProbability){
+                    int attempts = 0;
+                    while(attempts&lt;50){
+                        int start  = rand()%(boardSize-10) + 10;
+                        int end = rand()%(start-1)+1;
+                        if(board-&gt;canAddEntities(start)){
+                            board-&gt;addBoardEntities(new Snake(start, end));
+                            break;
+                        }
+                        attempts++;
+                     }
+                 }else{
+                    int attempts = 0;
+                    while(attempts&lt;50){
+                        int start  = rand()%(boardSize-10) + 1;
+                        int end = rand()%(boardSize-start) + start + 1;
+                        if(board-&gt;canAddEntities(start) &amp;&amp; end&lt;boardSize){
+                            board-&gt;addBoardEntities(new Ladder(start, end));
+                            break;
+                        }
+                        attempts++;
+
+                    }
+            }
+        }
+    }
+
+    public:
+        RandomBoardStrategy(Difficulty d){
+            difficulty =d;
+        }
+
+        void setupBoard(Board* board) override{
+            switch(difficulty){
+                case EASY:
+                    setupWithProbability(board, 0.3);
+                    break;
+                case MEDIUM:
+                    setupWithProbability(board ,0.5);
+                    break;
+                case HARD:
+                    setupWithProbability(board, 0.7);
+                    break;
+            }
+        }
+
+};
+
+class CustomCountStrategy : public BoardSetupStrategy{
+    private:
+        int numLadders;
+        int numSnakes;
+        bool randomPostions;
+        vector&lt;pair&lt;int, int&gt;&gt; snakePostions;
+        vector&lt;pair&lt;int, int&gt;&gt; ladderPostions;
+
+    public:
+        CustomCountStrategy(int snakes, int ladders, bool random){
+            numSnakes = snakes;
+            numLadders = ladders;
+            randomPostions = random;
+        }
+
+        void addSnakePosition(int start, int end){
+            snakePostions.push_back(make_pair(start, end));
+        }
+        void addLadderPosition(int start, int end){
+            ladderPostions.push_back(make_pair(start, end));
+        }
+
+        void setupBoard(Board* board)override{
+            if(randomPostions){
+                int boardSize = board-&gt;getBoardSize();
+                int snakesAdded= 0 ;
+                while(snakesAdded&lt;numSnakes){
+                    int start = rand()%(boardSize-10)+10;
+                    int end = rand()%(start-1)+1;
+                    if(board-&gt;canAddEntities(start)){
+                        board-&gt;addBoardEntities(new Snake(start, end));
+                        snakesAdded++;
+                    }
+                }
+
+                int laddersAdded= 0 ;
+                while(laddersAdded&lt;numLadders){
+                    int start = rand()%(boardSize-10)+ 1 ;
+                    int end = rand()%(boardSize-start)+start+1;
+                    if(board-&gt;canAddEntities(start)){
+                        board-&gt;addBoardEntities(new Ladder(start, end));
+                        laddersAdded++;
+                    }
+                }
+            }else{
+                for(auto pos : snakePostions){
+                    if(board-&gt;canAddEntities(pos.first)){
+                        board-&gt;addBoardEntities(new Snake(pos.first, pos.second));
+
+                    }
+                }
+
+                      for(auto pos : ladderPostions){
+                    if(board-&gt;canAddEntities(pos.first)){
+                        board-&gt;addBoardEntities(new Ladder(pos.first, pos.second));
+
+                    }
+                }
+            }
+        }
+
+};
+
+class StandardBoardStrategy : public BoardSetupStrategy{
+    public:
+        void setupBoard(Board* board){
+            if(board-&gt;getBoardSize()!=100){
+                cout&lt;&lt;"Standard Stretegy Only for 10x10" &lt;&lt;endl;
+                return;
+            }
+
+            board-&gt;addBoardEntities(new Snake(99,54));
+            board-&gt;addBoardEntities(new Snake(95,75));
+            board-&gt;addBoardEntities(new Snake(92,88));
+            board-&gt;addBoardEntities(new Snake(89,68));
+            board-&gt;addBoardEntities(new Snake(74,53));
+            board-&gt;addBoardEntities(new Snake(64,60));
+            board-&gt;addBoardEntities(new Snake(62,19));
+            board-&gt;addBoardEntities(new Snake(49,11));
+            board-&gt;addBoardEntities(new Snake(46,25));
+            board-&gt;addBoardEntities(new Snake(16,6));
+
+
+            board-&gt;addBoardEntities(new Ladder(2,38));
+            board-&gt;addBoardEntities(new Ladder(7,14));
+            board-&gt;addBoardEntities(new Ladder(8,31));
+            board-&gt;addBoardEntities(new Ladder(15,26));
+            board-&gt;addBoardEntities(new Ladder(21,42));
+            board-&gt;addBoardEntities(new Ladder(28,84));
+            board-&gt;addBoardEntities(new Ladder(36,44));
+            board-&gt;addBoardEntities(new Ladder(51,67));
+            board-&gt;addBoardEntities(new Ladder(71,91));
+            board-&gt;addBoardEntities(new Ladder(78,98));
+
+
+        }
+};
+
+void Board::setupBoard(BoardSetupStrategy* strategy){
+    strategy-&gt;setupBoard(this);
+}
+
+// --- driver: plays one game using only the classes above ---
+int main(){
+    Board board(100);
+    StandardBoardStrategy standard;
+    board.setupBoard(&amp;standard);
+    board.display();
+
+    Dice dice(6);
+    SnakeAndLadderConsoleNotifier notifier;
+
+    int position = 1;
+    int turn = 1;
+    while (position &lt; board.getBoardSize()) {
+        int roll = dice.roll();
+        int target = position + roll;
+        if (target &gt; board.getBoardSize()) {
+            notifier.update("Turn " + to_string(turn) + ": rolled " + to_string(roll) + ", overshoot, staying at " + to_string(position));
+        } else {
+            position = target;
+            BoardEntity* entity = board.getEntity(position);
+            if (entity) {
+                notifier.update("Turn " + to_string(turn) + ": landed on " + to_string(position) + ", hit a " + entity-&gt;name() + ", moved to " + to_string(entity-&gt;getEnd()));
+                position = entity-&gt;getEnd();
+            } else {
+                notifier.update("Turn " + to_string(turn) + ": moved to " + to_string(position));
+            }
+        }
+        turn++;
+    }
+    notifier.update("Reached cell " + to_string(position) + " - game over!");
+    return 0;
+}
+</code></pre>
+
+<details class="qa"><summary>Why unify snakes and ladders into one <code>Jump</code> concept instead of two classes?</summary><div class="a"><p>Because they have zero behavioural difference &mdash; both are "land on cell X, get moved to cell Y." The only thing that differs is the direction of the move, and direction is a fact about the two integers (<code>end &lt; start</code> vs. <code>end &gt; start</code>), not a reason to fork the type hierarchy. A single <code>start &rarr; end</code> map lets <code>Board</code> answer "where does this cell send me?" with one O(1) lookup, and it keeps the simulation loop from ever having to ask "is this a snake or a ladder" before deciding what to do.</p></div></details>
+<details class="qa"><summary>How would you support "roll again on a 6," capped at three consecutive sixes?</summary><div class="a"><p>This is a turn-policy rule, so it belongs entirely inside the game loop, not inside <code>Board</code> or <code>Dice</code>. Track a per-turn six-count: on a roll of 6, increment it and let the same player roll again, unless the count reaches three, in which case the whole turn is forfeited and play passes on. Any roll that isn't a 6 resets the counter and advances the turn normally. Neither the board's jump map nor the die implementation needs to change at all.</p></div></details>
+<details class="qa"><summary>Where would you add board validation, and what would you check?</summary><div class="a"><p>In <code>Board</code>'s constructor, so an invalid board can never exist in the first place. Check that no two jumps share a start cell (ambiguous landing), that no jump starts or ends on cell 1 or the final cell, and that no jump is a self-loop. Whether a jump's destination can itself be another jump's start (chained snakes and ladders) is a rule you should state explicitly rather than assume &mdash; most implementations resolve exactly one jump per landing and treat chaining as disallowed.</p></div></details>
+<details class="qa"><summary>The actual code uses polymorphic Snake/Ladder classes and puts Strategy on board setup, not the die. Is that a worse design?</summary><div class="a"><p>Not worse &mdash; different trade-offs, and both are defensible in an interview. A <code>Jump</code> struct is leaner when snake and ladder behavior truly never diverges; polymorphic <code>Snake</code>/<code>Ladder</code> classes cost one extra type but leave a seam for them to diverge later (different rendering, a rule variant) without ever touching <code>Board</code>. Putting <code>Strategy</code> on <em>who builds the board</em> rather than <em>how the die rolls</em> is arguably the more realistic call: production Snake &amp; Ladder implementations vary far more in how boards get generated (random, curated, difficulty-scaled) than in how a die works, and this repo's version demonstrates the pattern on the axis that actually needs to vary. The one real gap is that the die itself stayed a concrete class, so "pluggable die" from the brief is still unaddressed &mdash; wrapping it behind the same <code>Dice</code> interface from 3.1 is a small, isolated change.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

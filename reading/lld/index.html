@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLD: Zero to Hero · A Field Book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <div class="topbar" id="booktop"></div>
+
+  <div class="cover">
+    <div class="cover-kicker">A Field Book for the Systems Design Interview · 2026 Edition</div>
+    <h1>LLD<br><span class="accent">from zero</span> to hero</h1>
+    <p class="cover-sub">Fifteen of the most-asked Low-Level Design interview problems, each taken from a bare problem statement to a working C++ design. No prior LLD knowledge assumed. Every chapter names the pattern being tested and ends with a complete, runnable solution.</p>
+    <div class="cover-rule"></div>
+  </div>
+
+  <h2><span class="sec-no">Before You Start</span>How to Read This Book</h2>
+  <p>Each chapter follows the same rhythm: the problem statement exactly as an interviewer would hand it to you (context, requirements, the interface you're expected to fill in, and what's actually being tested), then how to approach it (the reasoning that gets you from a blank page to the design, in the order you'd think it through in the room), then the whole solution as one complete C++ listing you can read top to bottom or paste and compile.</p>
+  <p>The book is graded Easy, Medium, Hard by how many subsystems interact and how much concurrency is really at stake. Easy chapters are one clean pattern in isolation. Medium chapters make two or three patterns cooperate under real constraints (seat locks, dispatch queues, balance sheets). Hard chapters add multiple actors, multiple state machines, or both at once.</p>
+  <div class="keypoint">Spend the first 2&ndash;3 minutes of any LLD problem writing down assumptions and the public interface before touching a single class internal. Every chapter here is built in that order on purpose &mdash; interviewers score that habit heavily.</div>
+  <p>Pattern overlaps worth exploiting across chapters: <strong>State</strong> shows up in Vending Machine, ATM Machine, Elevator System, Ride-Sharing and Food Delivery. <strong>Chain of Responsibility</strong> connects the ATM's cash dispenser to the Logging Framework's level handling. <strong>Strategy</strong> is nearly everywhere &mdash; win rules, split types, dispatch algorithms, rate-limiting algorithms. <strong>Observer plus real concurrency</strong> ties together BookMyShow, Ride-Sharing and Message Queue / Pub-Sub. Once one of these clicks in one chapter, you'll recognize it wearing a different costume two chapters later.</p>
+
+  <h2><span class="sec-no">Contents</span>Fifteen Problems</h2>
+  <nav class="toc" id="toc"></nav>
+
+  <h2><span class="sec-no">Suggested Order</span>If You're Short on Time</h2>
+  <p>Reading front to back works, but if you only have a week: <a href="02-vending-machine.html">Vending Machine</a> &rarr; <a href="06-parking-lot.html">Parking Lot</a> &rarr; <a href="09-lru-cache.html">LRU Cache</a> &rarr; <a href="10-bookmyshow.html">BookMyShow</a> &rarr; <a href="11-chess.html">Chess</a>. That path hits State, the most-asked question outright, a pure data-structure design, real concurrency, and the deepest single-domain problem in the set &mdash; in increasing order of how many things have to be right at once.</p>
+  <p style="font-family:var(--mono); font-size:13px; color:var(--ink-soft); margin-top:50px;">Compiled July 2026 · Built for study, not for citation · All code is real, working C++ from the companion problem set.</p>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

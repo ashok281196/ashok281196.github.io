@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 12 · Ride-Sharing · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">12</div>
+  <div class="chapter-kicker">Hard · 2 of 5</div>
+  <h1>Ride-Sharing: Matching, Surge, and Three State Machines</h1>
+  <p class="chapter-sub">A rider, a driver and a trip each have their own lifecycle, and the whole design is the discipline of keeping those three in lockstep while matching stays atomic and pricing stays pluggable.</p>
+</header>
+
+<h2><span class="sec-no">12.1</span>Problem Statement</h2>
+<p>Design the core of a ride-hailing service &mdash; Uber or Ola stripped to its LLD skeleton. A rider requests a ride from a pickup to a drop location; the system finds a nearby available driver; the trip runs through a lifecycle from assignment to completion, with a fare computed at the end.</p>
+<p><strong>Functional requirements:</strong></p>
+<ul>
+  <li>Riders request a ride from a pickup to a drop location, choosing a ride type (Mini / Sedan / SUV).</li>
+  <li>Drivers go online/offline, publish their location, and accept/reject ride offers.</li>
+  <li>The system matches a request to a suitable nearby available driver.</li>
+  <li>Trip lifecycle: <code>REQUESTED &rarr; DRIVER_ASSIGNED &rarr; ARRIVED &rarr; IN_PROGRESS &rarr; COMPLETED / CANCELLED</code>.</li>
+  <li>Compute fare on completion (base + distance + time, with surge).</li>
+  <li>Notify rider and driver on each state change.</li>
+</ul>
+<p><strong>Non-functional / constraints:</strong></p>
+<ul>
+  <li>Matching strategy is pluggable (nearest driver, highest-rated, least-idle).</li>
+  <li>Pricing strategy is pluggable (normal vs. surge, based on demand/supply).</li>
+  <li>Driver and Trip are modeled as State machines.</li>
+  <li>Observer pattern drives rider/driver notifications.</li>
+  <li>Concurrency: one driver must never be assigned to two trips; matching must be atomic.</li>
+</ul>
+<p><strong>Expected public interface</strong> (given, not invented &mdash; lock this down before writing a single internal):</p>
+<pre><code class="language-cpp">enum class TripStatus { REQUESTED, DRIVER_ASSIGNED, ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED };
+
+class MatchingStrategy {              // Strategy
+public:
+    virtual Driver* match(const RideRequest&amp;, const std::vector&lt;Driver*&gt;&amp; available) = 0;
+    virtual ~MatchingStrategy() = default;
+};
+
+class PricingStrategy {               // Strategy (normal / surge)
+public:
+    virtual double fare(const Trip&amp;) const = 0;
+    virtual ~PricingStrategy() = default;
+};
+
+class RideService {
+public:
+    Trip&amp;   requestRide(const std::string&amp; riderId, Location pickup, Location drop, RideType type);
+    void    acceptRide(const std::string&amp; driverId, const std::string&amp; tripId);
+    void    startTrip(const std::string&amp; tripId);
+    Receipt endTrip(const std::string&amp; tripId);   // computes fare
+    void    cancelTrip(const std::string&amp; tripId, const std::string&amp; byActor);
+};</code></pre>
+<div class="keypoint">The essence of this problem in one line: two coupled State machines that must never disagree, kept in sync by an atomic match-and-lock under a mutex, wrapped in pluggable matching and pricing Strategies, with an Observer firing on every transition.</div>
+<p><strong>What the interviewer is really testing:</strong> multiple interacting state machines (driver availability vs. trip lifecycle) kept consistent under change; atomic matching so a driver isn't double-booked under concurrency; pluggable matching and surge-pricing Strategies; Observer notifications threaded through every state change without a missed call site.</p>
+<p><strong>Follow-up questions to expect:</strong></p>
+<ol>
+  <li>Geospatial matching at scale &mdash; grid, quadtree, or geohash for "nearby drivers" instead of a linear scan.</li>
+  <li>Cancellation policy and fees &mdash; who cancelled, and when, changes what gets charged.</li>
+  <li>Pool / shared rides &mdash; multiple riders per trip.</li>
+  <li>Ratings, driver payout, and ETA estimation.</li>
+</ol>
+
+<h2><span class="sec-no">12.2</span>How to Approach</h2>
+<p>Read the constraints like an interviewer wrote them, because they decide the whole design. <em>"Driver and Trip modeled as State machines&hellip; kept consistent"</em> means there are (at least) two machines and they must never disagree: a driver going <code>ON_TRIP</code> and a trip going <code>DRIVER_ASSIGNED</code> are the same real-world event seen from two angles. <em>"Matching must be atomic"</em> is the concurrency trap: selecting a driver and marking them busy must be one indivisible step, or two riders race onto the same driver. The two Strategy interfaces and the Observer requirement are handed to you outright &mdash; your job is to wire them cleanly, not invent architecture.</p>
+
+<h3>Why three state machines, not one shared enum</h3>
+<p>A tempting shortcut is one shared status enum slapped onto rider, driver and trip alike. It falls apart immediately: what does <code>ON_TRIP</code> mean for a rider who hasn't been matched yet? A driver's timeline doesn't line up 1:1 with any one trip's timeline either &mdash; a driver can be <code>OFFLINE</code> long before any trip exists, and <code>AVAILABLE</code> between trips, states no single trip ever observes. Conflating "whose perspective is this status from" produces impossible combinations. The fix is to scope each machine to what's actually true for that actor:</p>
+<ul>
+  <li><strong>Driver</strong> gets a real, stored <code>DriverStatus { OFFLINE, AVAILABLE, ON_TRIP }</code>, because its lifetime outlives any single trip.</li>
+  <li><strong>Trip</strong> gets the real, stored <code>TripStatus</code> lifecycle &mdash; it is the canonical record of what actually happened to this one ride.</li>
+  <li><strong>Rider</strong> doesn't need a third stored field at all. A rider's experience &mdash; waiting for a match, waiting for pickup, on the trip, done &mdash; is always a deterministic function of whichever trip currently references them. Derive it as a read-only view over <code>Trip::status()</code> instead of storing a second copy that could quietly drift out of sync.</li>
+</ul>
+<div class="analogy">Think of it like a shared calendar invite. The meeting (Trip) has one canonical status that everyone reads. The room (Driver) has its own booking state because it gets reused across meetings. The attendee (Rider) doesn't need their own separate "meeting status" field &mdash; they just look at the meeting's status. Giving the attendee their own copy is how two truths quietly disagree six months later.</div>
+
+<h3>The atomic matching problem</h3>
+<p>The concurrency trap is a classic check-then-act race: "find an available driver" and "mark them busy" cannot be two separate steps with a gap between them, or two concurrent <code>requestRide</code> calls can both see the same driver as free. The fix is to make the whole sequence &mdash; snapshot available drivers, ask the matching Strategy to pick one, flip that driver to <code>ON_TRIP</code>, flip the trip to <code>DRIVER_ASSIGNED</code> &mdash; happen inside one critical section guarded by a single mutex. Nothing outside that block can observe a half-matched state. The same lock guards the release path (a trip completing or cancelling hands the driver back to <code>AVAILABLE</code>), so availability flips are always serialized through one gate.</p>
+<div class="keypoint">The coupling invariant to write down before coding a single transition: a driver is <code>ON_TRIP</code> if and only if exactly one trip whose status is in <code>{DRIVER_ASSIGNED, ARRIVED, IN_PROGRESS}</code> references them. Every transition afterward is just "preserve this invariant" &mdash; assignment sets both sides together, and both terminal paths (complete, cancel) release the driver.</div>
+
+<h3>The two Strategy seams and the Observer channel</h3>
+<p><code>MatchingStrategy::match(request, availableDrivers)</code> and <code>PricingStrategy::fare(trip)</code> should be pure functions of their inputs &mdash; no shared mutable state, so a nearest-driver rule and a highest-rated rule are equally drop-in, and normal pricing vs. surge pricing can be swapped at runtime with one call. Surge is naturally a decorator over the normal fare: compute the base fare, then multiply. For notifications, resist the urge to fire an observer callback at every call site that touches a trip's status; instead route every transition through one choke point (a small helper that runs the mutation, diffs old vs. new status, and only then notifies). That guarantees no transition ever ships silently, and adding a second observer later touches zero existing call sites.</p>
+<div class="warfield">The bug this design prevents: someone adds a new trip transition later, forgets to release the driver on one of the two terminal paths, and the driver is now permanently "on a trip" that no longer exists &mdash; leaked capacity that silently shrinks your driver pool. Guard against it by writing the release call next to every path that reaches a terminal status, not by remembering to do it.</div>
+<p>Each follow-up maps onto a seam that's already there. Geospatial scale doesn't touch <code>MatchingStrategy</code> at all &mdash; a grid, geohash, or quadtree just shrinks the candidate list handed to <code>match()</code>. Cancellation fees are a new Strategy reading <code>(actor, status, elapsed)</code>. Pooled rides extend <code>Trip</code> to a list of riders and waypoints without touching the driver machine. Ratings are an Observer that updates <code>Driver</code> on <code>COMPLETED</code>, feeding straight back into a highest-rated matching Strategy.</p>
+
+<h2><span class="sec-no">12.3</span>Whole Solution</h2>
+<p>One synthesized, compiling C++17 program merging every fragment above into a single consistent design: <code>Location</code>/<code>RideType</code>/<code>Rider</code>/<code>RideRequest</code>/<code>Receipt</code> as the immutable leaves, <code>Driver</code> and <code>Trip</code> as the two stored state machines (with <code>RiderView</code> as the derived third), the two Strategy interfaces with two implementations each, the Observer interface with one concrete notifier, and <code>RideService</code> as the orchestrator owning the atomic match. <code>main()</code> runs a full happy path, swaps pricing strategies live, cancels a trip, rejects an illegal transition, and shows an unmatched request when no driver is free.</p>
+<pre><code class="language-cpp">// ride_sharing.cpp
+// LLD: Zero to Hero -- Chapter 12: Ride-Sharing
+// Three coupled state machines (rider view is derived, driver and trip are
+// stored), a pluggable MatchingStrategy, a pluggable PricingStrategy, and an
+// Observer channel for status-change notifications. Atomic matching is a
+// single lock_guard around "pick a driver, then mark them busy."
+
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+#include &lt;limits&gt;
+#include &lt;memory&gt;
+#include &lt;mutex&gt;
+#include &lt;stdexcept&gt;
+#include &lt;string&gt;
+#include &lt;unordered_map&gt;
+#include &lt;utility&gt;
+#include &lt;vector&gt;
+
+// ---------------------------------------------------------------------------
+// Leaves: no dependencies on anything below.
+// ---------------------------------------------------------------------------
+
+struct Location {
+    double lat = 0, lng = 0;
+    // Cheap planar approximation; good enough for matching/fare in an LLD.
+    double distanceTo(const Location&amp; o) const {
+        double dx = lat - o.lat, dy = lng - o.lng;
+        return std::sqrt(dx * dx + dy * dy);
+    }
+};
+
+enum class RideType { MINI, SEDAN, SUV };
+
+// Per-tier multiplier; a bigger car costs more per km.
+inline double tierMultiplier(RideType t) {
+    switch (t) {
+        case RideType::MINI:  return 1.0;
+        case RideType::SEDAN: return 1.3;
+        case RideType::SUV:   return 1.7;
+    }
+    return 1.0;
+}
+
+struct Rider {
+    std::string id;
+    std::string name;
+};
+
+// Immutable description of an ask. Strategies read it, never mutate it.
+struct RideRequest {
+    std::string riderId;
+    Location    pickup;
+    Location    drop;
+    RideType    type;
+    double tripDistance() const { return pickup.distanceTo(drop); }
+};
+
+struct Receipt {
+    std::string tripId;
+    double      fare = 0;
+    double      distance = 0;
+    double      surgeMultiplier = 1.0;
+};
+
+// ---------------------------------------------------------------------------
+// Driver: the first state machine. Availability persists across trips and
+// has a state (OFFLINE) that no trip ever sees, so it earns its own stored
+// field. RideService flips it under a lock; nobody else may call
+// markOnTrip()/markAvailable() directly.
+// ---------------------------------------------------------------------------
+
+enum class DriverStatus { OFFLINE, AVAILABLE, ON_TRIP };
+
+class Driver {
+public:
+    Driver(std::string id, Location loc, double rating)
+        : id_(std::move(id)), loc_(loc), rating_(rating) {}
+
+    const std::string&amp; id() const { return id_; }
+    Location location() const     { return loc_; }
+    double   rating() const       { return rating_; }
+    DriverStatus status() const   { return status_; }
+
+    void goOnline()  { if (status_ == DriverStatus::OFFLINE)   status_ = DriverStatus::AVAILABLE; }
+    void goOffline() { if (status_ == DriverStatus::AVAILABLE) status_ = DriverStatus::OFFLINE; }
+
+    // Driven by RideService under the matcher lock -- never call directly.
+    void markOnTrip()    { status_ = DriverStatus::ON_TRIP; }
+    void markAvailable() { status_ = DriverStatus::AVAILABLE; }
+
+    void setLocation(Location l) { loc_ = l; }
+
+private:
+    std::string  id_;
+    Location     loc_;
+    double       rating_ = 0;
+    DriverStatus status_ = DriverStatus::OFFLINE;
+};
+
+// ---------------------------------------------------------------------------
+// Trip: the second state machine, and the canonical source of truth for the
+// whole ride. The rider's experience -- WAITING_FOR_MATCH, WAITING_FOR_PICKUP,
+// ON_TRIP, DONE -- is a *read-only derived view* over this same status (see
+// riderView() below), never a second stored enum that could drift out of
+// sync with it. Legal moves are guarded inside the object, so callers cannot
+// corrupt the machine.
+// ---------------------------------------------------------------------------
+
+enum class TripStatus { REQUESTED, DRIVER_ASSIGNED, ARRIVED, IN_PROGRESS, COMPLETED, CANCELLED };
+
+// The rider's third state machine. No stored field anywhere -- see Trip::riderView().
+enum class RiderView { IDLE, WAITING_FOR_MATCH, WAITING_FOR_PICKUP, ON_TRIP, DONE };
+
+class Trip {
+public:
+    Trip(std::string id, RideRequest req)
+        : id_(std::move(id)), req_(std::move(req)) {}
+
+    const std::string&amp; id() const       { return id_; }
+    TripStatus status() const           { return status_; }
+    const RideRequest&amp; request() const  { return req_; }
+    const std::string&amp; driverId() const { return driverId_; }
+    double distance() const             { return req_.tripDistance(); }
+    RideType type() const               { return req_.type; }
+
+    double fare() const          { return fare_; }
+    void   setFare(double f)     { fare_ = f; }
+
+    // ---- guarded transitions: legal move =&gt; advance, illegal =&gt; throw ----
+    void assign(const std::string&amp; driverId) {
+        expect(TripStatus::REQUESTED, "assign");
+        driverId_ = driverId;
+        status_   = TripStatus::DRIVER_ASSIGNED;
+    }
+    void arrive() {
+        expect(TripStatus::DRIVER_ASSIGNED, "arrive");
+        status_ = TripStatus::ARRIVED;
+    }
+    void start() {
+        expect(TripStatus::ARRIVED, "start");
+        status_ = TripStatus::IN_PROGRESS;
+    }
+    void complete() {
+        expect(TripStatus::IN_PROGRESS, "complete");
+        status_ = TripStatus::COMPLETED;
+    }
+    void cancel() {
+        if (isTerminal())
+            throw std::logic_error("trip already finished; cannot cancel");
+        status_ = TripStatus::CANCELLED;
+    }
+
+    bool isTerminal() const {
+        return status_ == TripStatus::COMPLETED || status_ == TripStatus::CANCELLED;
+    }
+    // A driver is "held" while the trip is active (assigned but not terminal).
+    bool holdsDriver() const {
+        return !driverId_.empty() &amp;&amp; !isTerminal();
+    }
+
+    // The rider's derived view -- computed on demand, always in lockstep.
+    RiderView riderView() const {
+        switch (status_) {
+            case TripStatus::REQUESTED:       return RiderView::WAITING_FOR_MATCH;
+            case TripStatus::DRIVER_ASSIGNED:
+            case TripStatus::ARRIVED:         return RiderView::WAITING_FOR_PICKUP;
+            case TripStatus::IN_PROGRESS:     return RiderView::ON_TRIP;
+            case TripStatus::COMPLETED:
+            case TripStatus::CANCELLED:       return RiderView::DONE;
+        }
+        return RiderView::IDLE;
+    }
+
+private:
+    void expect(TripStatus s, const char* op) const {
+        if (status_ != s)
+            throw std::logic_error(std::string("illegal transition: ") + op);
+    }
+
+    std::string id_;
+    RideRequest req_;
+    std::string driverId_;
+    TripStatus  status_ = TripStatus::REQUESTED;
+    double      fare_   = 0;
+};
+
+inline const char* riderViewName(RiderView v) {
+    switch (v) {
+        case RiderView::IDLE:               return "IDLE";
+        case RiderView::WAITING_FOR_MATCH:  return "WAITING_FOR_MATCH";
+        case RiderView::WAITING_FOR_PICKUP: return "WAITING_FOR_PICKUP";
+        case RiderView::ON_TRIP:            return "ON_TRIP";
+        case RiderView::DONE:               return "DONE";
+    }
+    return "?";
+}
+
+// ---------------------------------------------------------------------------
+// Strategy seam #1: matching. A pure function of (request, candidates) --
+// no shared mutable state, so it is trivially swappable and testable alone.
+// ---------------------------------------------------------------------------
+
+class MatchingStrategy {
+public:
+    virtual ~MatchingStrategy() = default;
+    // Pick a driver from `available`, or nullptr if none is suitable.
+    virtual Driver* match(const RideRequest&amp; req,
+                           const std::vector&lt;Driver*&gt;&amp; available) = 0;
+};
+
+// Closest driver to the pickup point.
+class NearestDriverStrategy : public MatchingStrategy {
+public:
+    Driver* match(const RideRequest&amp; req,
+                   const std::vector&lt;Driver*&gt;&amp; available) override {
+        Driver* best = nullptr;
+        double  bestDist = std::numeric_limits&lt;double&gt;::max();
+        for (Driver* d : available) {
+            double dist = d-&gt;location().distanceTo(req.pickup);
+            if (dist &lt; bestDist) { bestDist = dist; best = d; }
+        }
+        return best;
+    }
+};
+
+// Highest-rated driver (tie-break: first one seen). Drop-in replacement --
+// RideService never needs to change to use this instead.
+class HighestRatedStrategy : public MatchingStrategy {
+public:
+    Driver* match(const RideRequest&amp;,
+                   const std::vector&lt;Driver*&gt;&amp; available) override {
+        Driver* best = nullptr;
+        for (Driver* d : available)
+            if (!best || d-&gt;rating() &gt; best-&gt;rating()) best = d;
+        return best;
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Strategy seam #2: pricing. A pure function of a Trip; surge just wraps
+// the normal fare with a multiplier (decorator-ish, but kept as a Strategy
+// so RideService can swap it at runtime with one call).
+// ---------------------------------------------------------------------------
+
+class PricingStrategy {
+public:
+    virtual ~PricingStrategy() = default;
+    virtual double fare(const Trip&amp;) const = 0;
+};
+
+// base + per-km + per-tier multiplier.
+class NormalPricing : public PricingStrategy {
+public:
+    double fare(const Trip&amp; t) const override {
+        const double base = 50.0, perKm = 12.0;
+        return (base + perKm * t.distance()) * tierMultiplier(t.type());
+    }
+};
+
+class SurgePricing : public PricingStrategy {
+public:
+    explicit SurgePricing(double multiplier) : surge_(multiplier) {}
+    double fare(const Trip&amp; t) const override {
+        return base_.fare(t) * surge_;
+    }
+    double surge() const { return surge_; }
+private:
+    NormalPricing base_;
+    double        surge_ = 1.0;
+};
+
+// ---------------------------------------------------------------------------
+// Observer seam: fired from exactly one choke point inside RideService
+// (see transition() below), never from scattered call sites, so no
+// transition can ship without notifying every subscriber.
+// ---------------------------------------------------------------------------
+
+class TripObserver {
+public:
+    virtual ~TripObserver() = default;
+    virtual void onStatusChange(const Trip&amp; trip, TripStatus from, TripStatus to) = 0;
+};
+
+class NotificationService : public TripObserver {
+public:
+    void onStatusChange(const Trip&amp; trip, TripStatus from, TripStatus to) override {
+        std::cout &lt;&lt; "[notify] trip " &lt;&lt; trip.id()
+                  &lt;&lt; " : " &lt;&lt; name(from) &lt;&lt; " -&gt; " &lt;&lt; name(to) &lt;&lt; "\n";
+    }
+private:
+    static const char* name(TripStatus s) {
+        switch (s) {
+            case TripStatus::REQUESTED:       return "REQUESTED";
+            case TripStatus::DRIVER_ASSIGNED: return "DRIVER_ASSIGNED";
+            case TripStatus::ARRIVED:         return "ARRIVED";
+            case TripStatus::IN_PROGRESS:     return "IN_PROGRESS";
+            case TripStatus::COMPLETED:       return "COMPLETED";
+            case TripStatus::CANCELLED:       return "CANCELLED";
+        }
+        return "?";
+    }
+};
+
+// ---------------------------------------------------------------------------
+// RideService: the orchestrator. Owns atomic matching (the concurrency
+// trap named in the prompt) and the single choke point where the driver
+// and trip machines flip together and observers fire.
+// ---------------------------------------------------------------------------
+
+class RideService {
+public:
+    RideService(std::unique_ptr&lt;MatchingStrategy&gt; matcher,
+                std::unique_ptr&lt;PricingStrategy&gt;  pricing)
+        : matcher_(std::move(matcher)), pricing_(std::move(pricing)) {}
+
+    void addDriver(Driver* d)                            { drivers_.push_back(d); }
+    void setPricing(std::unique_ptr&lt;PricingStrategy&gt; p)  { pricing_ = std::move(p); }
+    void subscribe(TripObserver* o)                      { observers_.push_back(o); }
+
+    Trip&amp; requestRide(const std::string&amp; riderId, Location pickup,
+                       Location drop, RideType type) {
+        RideRequest req{riderId, pickup, drop, type};
+        std::string tripId = "T" + std::to_string(++counter_);
+        auto trip = std::make_unique&lt;Trip&gt;(tripId, req);
+        Trip&amp; ref = *trip;
+        trips_[tripId] = std::move(trip);
+
+        // ---- ATOMIC: snapshot available drivers, pick one, lock him in ----
+        {
+            std::lock_guard&lt;std::mutex&gt; guard(matchMutex_);
+            std::vector&lt;Driver*&gt; available;
+            for (Driver* d : drivers_)
+                if (d-&gt;status() == DriverStatus::AVAILABLE) available.push_back(d);
+
+            Driver* chosen = matcher_-&gt;match(req, available);
+            if (chosen) {
+                chosen-&gt;markOnTrip();                                // (1) flip driver  } both
+                transition(ref, [&amp;] { ref.assign(chosen-&gt;id()); });  // (2) flip trip    } inside
+            }                                                        //     the same lock
+        }
+        return ref;   // REQUESTED if no driver was free, else DRIVER_ASSIGNED
+    }
+
+    void acceptRide(const std::string&amp; driverId, const std::string&amp; tripId) {
+        // In a pure offer/accept model the driver confirms here. With the
+        // synchronous matcher above the assignment already happened; this
+        // method exists for the explicit-handshake variant of the design.
+        (void)driverId; (void)tripId;
+    }
+
+    void arrive(const std::string&amp; tripId) {
+        Trip&amp; t = trip(tripId);
+        transition(t, [&amp;] { t.arrive(); });
+    }
+
+    void startTrip(const std::string&amp; tripId) {
+        Trip&amp; t = trip(tripId);
+        transition(t, [&amp;] { t.start(); });
+    }
+
+    Receipt endTrip(const std::string&amp; tripId) {
+        Trip&amp; t = trip(tripId);
+        double f = pricing_-&gt;fare(t);           // Strategy decides the fare
+        t.setFare(f);
+        transition(t, [&amp;] { t.complete(); });
+        releaseDriver(t);                        // driver back to AVAILABLE
+        return Receipt{tripId, f, t.distance(), surgeOf()};
+    }
+
+    void cancelTrip(const std::string&amp; tripId, const std::string&amp; byActor) {
+        Trip&amp; t = trip(tripId);
+        std::cout &lt;&lt; "[cancel] " &lt;&lt; tripId &lt;&lt; " by " &lt;&lt; byActor &lt;&lt; "\n";
+        transition(t, [&amp;] { t.cancel(); });
+        releaseDriver(t);                        // free the held driver, if any
+    }
+
+private:
+    // Single choke point: run the mutation, then fire observers with from/to.
+    template &lt;typename Fn&gt;
+    void transition(Trip&amp; t, Fn&amp;&amp; mutate) {
+        TripStatus from = t.status();
+        mutate();
+        TripStatus to = t.status();
+        if (from != to)
+            for (TripObserver* o : observers_) o-&gt;onStatusChange(t, from, to);
+    }
+
+    void releaseDriver(Trip&amp; t) {
+        std::lock_guard&lt;std::mutex&gt; guard(matchMutex_);
+        for (Driver* d : drivers_)
+            if (d-&gt;id() == t.driverId()) { d-&gt;markAvailable(); break; }
+    }
+
+    Trip&amp; trip(const std::string&amp; id) {
+        auto it = trips_.find(id);
+        if (it == trips_.end()) throw std::invalid_argument("no such trip: " + id);
+        return *it-&gt;second;
+    }
+
+    double surgeOf() const {
+        if (auto* s = dynamic_cast&lt;SurgePricing*&gt;(pricing_.get())) return s-&gt;surge();
+        return 1.0;
+    }
+
+    std::unique_ptr&lt;MatchingStrategy&gt; matcher_;
+    std::unique_ptr&lt;PricingStrategy&gt;  pricing_;
+    std::vector&lt;Driver*&gt;              drivers_;    // not owned here
+    std::unordered_map&lt;std::string, std::unique_ptr&lt;Trip&gt;&gt; trips_;
+    std::vector&lt;TripObserver*&gt;        observers_;
+    std::mutex                        matchMutex_;
+    int                                counter_ = 0;
+};
+
+// ---------------------------------------------------------------------------
+// main: happy path, a live Strategy swap, a cancellation, an illegal
+// transition, and an unmatched request -- proves all three state machines,
+// both Strategy seams, and the guard rails together.
+// ---------------------------------------------------------------------------
+
+int main() {
+    Driver alice("D1", {0.0, 0.0}, 4.9);
+    Driver bob  ("D2", {5.0, 5.0}, 4.5);
+    alice.goOnline();
+    bob.goOnline();
+
+    RideService svc(std::make_unique&lt;NearestDriverStrategy&gt;(),
+                     std::make_unique&lt;NormalPricing&gt;());
+    NotificationService notifier;
+    svc.subscribe(&amp;notifier);
+    svc.addDriver(&amp;alice);
+    svc.addDriver(&amp;bob);
+
+    // --- Trip 1: rider near (0,0). NearestDriverStrategy should pick Alice.
+    Trip&amp; trip1 = svc.requestRide("R1", {0.1, 0.1}, {3.0, 4.0}, RideType::SEDAN);
+    std::cout &lt;&lt; "trip1 assigned driver: " &lt;&lt; trip1.driverId() &lt;&lt; "\n";           // D1
+    std::cout &lt;&lt; "trip1 rider view: " &lt;&lt; riderViewName(trip1.riderView()) &lt;&lt; "\n"; // WAITING_FOR_PICKUP
+
+    svc.arrive(trip1.id());       // DRIVER_ASSIGNED -&gt; ARRIVED
+    svc.startTrip(trip1.id());    // ARRIVED -&gt; IN_PROGRESS
+    std::cout &lt;&lt; "trip1 rider view: " &lt;&lt; riderViewName(trip1.riderView()) &lt;&lt; "\n"; // ON_TRIP
+
+    // Swap to surge before completing -- a runtime Strategy swap.
+    svc.setPricing(std::make_unique&lt;SurgePricing&gt;(1.8));
+    Receipt r1 = svc.endTrip(trip1.id());   // IN_PROGRESS -&gt; COMPLETED
+    std::cout &lt;&lt; "trip1 fare: " &lt;&lt; r1.fare &lt;&lt; " (surge x" &lt;&lt; r1.surgeMultiplier &lt;&lt; ")\n";
+    std::cout &lt;&lt; "trip1 rider view: " &lt;&lt; riderViewName(trip1.riderView()) &lt;&lt; "\n"; // DONE
+    std::cout &lt;&lt; "alice available again? "
+              &lt;&lt; (alice.status() == DriverStatus::AVAILABLE) &lt;&lt; "\n";
+
+    // --- Trip 2: rider near (5,5). Alice is free again but far away, so
+    // NearestDriverStrategy should now pick Bob.
+    Trip&amp; trip2 = svc.requestRide("R2", {5.1, 5.0}, {6.0, 6.0}, RideType::MINI);
+    std::cout &lt;&lt; "trip2 assigned driver: " &lt;&lt; trip2.driverId() &lt;&lt; "\n";   // D2
+
+    // Rider cancels before pickup -- Bob must be released, invariant held.
+    svc.cancelTrip(trip2.id(), "rider:R2");
+    std::cout &lt;&lt; "bob available again? "
+              &lt;&lt; (bob.status() == DriverStatus::AVAILABLE) &lt;&lt; "\n";
+
+    // --- Illegal transition: a completed trip cannot be started again.
+    try {
+        svc.startTrip(trip1.id());
+    } catch (const std::exception&amp; e) {
+        std::cout &lt;&lt; "rejected: " &lt;&lt; e.what() &lt;&lt; "\n";
+    }
+
+    // --- No driver available: both go offline, request should stay unmatched.
+    alice.goOffline();
+    bob.goOffline();
+    Trip&amp; trip3 = svc.requestRide("R3", {1.0, 1.0}, {2.0, 2.0}, RideType::MINI);
+    std::cout &lt;&lt; "trip3 rider view (no driver): " &lt;&lt; riderViewName(trip3.riderView()) &lt;&lt; "\n"; // WAITING_FOR_MATCH
+
+    return 0;
+}
+</code></pre>
+
+<details class="qa"><summary>Why is a driver's status a stored enum, but a rider's status is a derived, computed view?</summary><div class="a"><p>Because their lifetimes don't match. A driver exists and has meaningful states (<code>OFFLINE</code>, waiting between trips as <code>AVAILABLE</code>) outside of any particular trip, so it needs its own persistent field that RideService mutates directly. A rider's status, by contrast, is always a pure function of whichever trip currently references them &mdash; waiting for a match, waiting for pickup, on the trip, done. Storing that as a second field risks it disagreeing with the trip's real status after a bug or a missed update; computing it on demand from <code>Trip::status()</code> makes disagreement structurally impossible.</p></div></details>
+<details class="qa"><summary>Why put the lock around "pick a driver, then mark them busy" instead of locking the whole RideService?</summary><div class="a"><p>Locking only the read-modify-write sequence that actually needs to be atomic &mdash; snapshot available drivers, call the matching Strategy, flip the chosen driver to <code>ON_TRIP</code>, flip the trip to <code>DRIVER_ASSIGNED</code> &mdash; keeps the critical section as small as possible while still closing the race. A service-wide lock would also serialize unrelated operations, like two different completed trips computing their fares at the same time, which don't touch shared driver-availability state and don't need to wait on each other.</p></div></details>
+<details class="qa"><summary>How would you extend this design for geospatial matching at city scale?</summary><div class="a"><p>The <code>MatchingStrategy</code> interface doesn't change at all &mdash; only the candidate list handed to it shrinks. Today <code>RideService</code> builds <code>available</code> by scanning every driver; at scale you'd index driver locations in a grid, geohash, or quadtree, query only the cells near the pickup point, and pass that short list into the same <code>match(req, available)</code> call. The trade-off worth naming out loud: a grid is simplest to reason about and rebalance, a quadtree adapts better to uneven driver density across a city.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

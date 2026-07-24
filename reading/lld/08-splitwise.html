@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 8 · Splitwise · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">08</div>
+  <div class="chapter-kicker">Medium · 3 of 5</div>
+  <h1>Splitwise: Pluggable Splits and the Balance Sheet</h1>
+  <p class="chapter-sub">Three split algorithms hide behind one <code>SplitStrategy</code> interface, a pairwise balance sheet keeps every IOU in sync as expenses land, and settling up runs the exact same increment in reverse.</p>
+</header>
+
+<h2><span class="sec-no">8.1</span>Problem Statement</h2>
+<p>Design the core engine behind an expense-sharing app like Splitwise: <strong>users</strong> belong to <strong>groups</strong> (and can also owe each other directly, outside any group), anyone can record a shared <strong>expense</strong> &mdash; a payer, a total amount, and a set of participants &mdash; and the system must track, at all times, exactly who owes whom and by how much. It must also let two people <strong>settle up</strong>: record a payment that reduces what one owes the other.</p>
+<p>The expense itself supports three ways of dividing the bill, and how you divide it is the whole point of the interview:</p>
+<ul>
+  <li><strong>EQUAL</strong> &mdash; split evenly across participants.</li>
+  <li><strong>EXACT</strong> &mdash; each participant is assigned an explicit amount; the amounts must sum to the total.</li>
+  <li><strong>PERCENT</strong> &mdash; each participant is assigned a percentage; the percentages must sum to 100.</li>
+</ul>
+<p><strong>Non-functional constraints, stated outright in most versions of this prompt:</strong> the split logic must be a <strong>Strategy</strong> &mdash; a <code>SplitStrategy</code> interface &mdash; so a new split type drops in without touching the expense-recording code path, and each split type must validate its own inputs (EXACT sums to the total, PERCENT sums to 100) before any balance is touched.</p>
+<div class="keypoint">Splitwise, reduced to one sentence: pluggable arithmetic (Strategy) decides <em>how much</em> each person owes on one expense, and a pairwise balance sheet decides <em>who owes whom, in total</em>, across every expense ever recorded.</div>
+<p>The interface most versions of this prompt hand you is small and worth memorizing, because it bakes in every decision above:</p>
+<pre><code class="language-cpp">enum class SplitType { EQUAL, EXACT, PERCENT };
+
+class SplitStrategy {                 // Strategy
+public:
+    virtual std::vector&lt;Split&gt; computeSplits(double amount,
+                                             const std::vector&lt;User&gt;&amp; participants,
+                                             const std::vector&lt;double&gt;&amp; values) = 0;
+    virtual ~SplitStrategy() = default;
+};
+
+class ExpenseManager {
+public:
+    void addExpense(const std::string&amp; payerId,
+                    double amount,
+                    const std::vector&lt;std::string&gt;&amp; participantIds,
+                    SplitType type,
+                    const std::vector&lt;double&gt;&amp; values);   // values used by EXACT/PERCENT
+    void settleUp(const std::string&amp; fromId, const std::string&amp; toId, double amount);
+    std::map&lt;std::string,double&gt; getBalances(const std::string&amp; userId) const;  // +owed, -owes
+};</code></pre>
+<p>What the interviewer is actually scoring: whether the three split types live behind that one <code>SplitStrategy</code> interface with zero <code>if (type == ...)</code> branching anywhere near the math, whether the balance sheet is a correct pairwise model updated transactionally per expense, and whether <code>getBalances</code> reads as a near-trivial lookup rather than a recomputation over history.</p>
+<div class="warfield">The follow-up almost everyone gets asked, and the one worth rehearsing before you walk in: <strong>debt simplification</strong> &mdash; given the current tangle of pairwise IOUs in a group, produce the minimum number of payments that zero everyone out. It's the classic min-cash-flow / greedy problem, and it is asked here more often than not. Two smaller follow-ups round it out: multi-currency expenses (conversion at record time), and editing or deleting an expense with correct balance recomputation.</div>
+
+<h2><span class="sec-no">8.2</span>How to Approach</h2>
+<p>Start by mining the two sentences that decide the whole design. <em>"Split logic must be a Strategy"</em> names the pattern outright &mdash; build <code>SplitStrategy</code> plus three concrete classes, and let <code>addExpense</code> pick one by a single map lookup, never an <code>if/else</code> chain. And <em>"validate splits (exact sums to total; percentages sum to 100)"</em> tells you validation is <strong>per split type</strong>, so it lives inside each strategy, not inside the manager.</p>
+<p>From there the nouns in the prompt hand you the class list almost for free. <code>User</code> and <code>Group</code> are dumb identity records. <code>Split</code> is one participant's slice of one expense. <code>Expense</code> is an immutable record of a payer, an amount, and the splits that resulted &mdash; it carries no logic, because the math already happened upstream in a strategy. <code>ExpenseManager</code> is the only class with real behavior: it resolves ids, delegates to a strategy, and folds the result into a balance sheet.</p>
+<dl class="jargon">
+  <dt>SplitStrategy</dt><dd>One interface, three concretes (<code>EqualSplit</code> / <code>ExactSplit</code> / <code>PercentSplit</code>), one client. Each concrete owns both its arithmetic <em>and</em> its own validation rule &mdash; the client never branches on the type to do math.</dd>
+  <dt>Balance sheet</dt><dd>A nested map of pairwise net balances between every pair of users who have ever transacted, kept antisymmetric so <code>balance[A][B] == -balance[B][A]</code> always holds.</dd>
+  <dt>Debt simplification (min-cash-flow)</dt><dd>Collapsing the pairwise sheet into one net figure per person, then greedily paying the largest debtor to the largest creditor until everyone is at zero. A good answer, not a provably minimal one.</dd>
+</dl>
+<p>Each strategy rejects before it produces anything: <code>EqualSplit</code> just needs a non-empty participant list; <code>ExactSplit</code> requires the given amounts to sum to the expense total; <code>PercentSplit</code> requires the given percentages to sum to 100. All three hand any share back as a plain <code>Split{userId, amount}</code>, and <code>EqualSplit</code> gives the last participant whatever remainder is left after dividing, so the shares always add back up to the original amount instead of drifting off by a cent.</p>
+<div class="keypoint">Thinking habit: floating-point money is never compared with <code>==</code>. Use an epsilon for the EXACT/PERCENT sum checks, and hand any rounding remainder from EQUAL to one participant so the splits always sum <em>exactly</em> to the total. Saying this out loud unprompted is what separates a careful answer from a memorized one.</div>
+<p>The balance sheet is the other half of the score, and it's where naive answers leak time. The representation that makes every later operation trivial is a nested map keyed by user:</p>
+<pre><code class="language-cpp">// balance_[A][B] = how much A owes B (positive) or B owes A (negative).
+std::unordered_map&lt;std::string,
+    std::unordered_map&lt;std::string, double&gt;&gt; balance_;</code></pre>
+<p>Applying one expense is then a batch of pairwise increments, nothing more: for every split except the payer's own (nobody owes themselves), <code>balance_[participant][payer] += share</code> and its mirror <code>balance_[payer][participant] -= share</code> keep the sheet antisymmetric. <strong>Settling up is the identical increment run in the paying direction</strong> &mdash; an expense and a payment are the same mechanism wearing two names. And because the outer key is the user, <code>getBalances(userId)</code> is a one-line read of <code>balance_[userId]</code>, never a scan over history.</p>
+<div class="keypoint">Thinking habit: pick the data structure by the query you must answer fastest. Here that query is "all balances for one user," so make that user the outer map key &mdash; the read falls out for free instead of needing a pass over every expense ever recorded.</div>
+<p>The headline follow-up, debt simplification, reuses the balance sheet rather than recomputing anything: sum each user's row into one net figure (creditor positive, debtor negative &mdash; the whole group always nets to zero), then greedily match the largest debtor against the largest creditor, transfer <code>min(debt, credit)</code>, and repeat until both lists are exhausted. This collapses however many pairwise edges existed down to at most <code>n&minus;1</code> transactions for <code>n</code> people with a nonzero net. The honest caveat, worth saying unprompted: this greedy approach gives a <strong>good</strong> answer, not a provably minimal one &mdash; minimizing the transaction count exactly is NP-hard, closer to a partition problem than a graph one.</p>
+<p>Two smaller follow-ups fall out of the same shape once you see it. Multi-currency just means storing each expense in its native currency and converting to a group base currency at record time via an injected <code>ExchangeRateProvider</code> &mdash; itself another Strategy &mdash; so the balance sheet math never changes. Editing or deleting an expense is reversible for the same reason settle-up is trivial: because the balance updates are increments rather than a recomputation, deleting an expense is just subtracting the same pairwise amounts you originally added, and editing is delete-then-re-add.</p>
+
+<h2><span class="sec-no">8.3</span>Whole Solution</h2>
+<p>Everything above merged into one program: the three strategies with their per-type validation, the balance-sheet-backed <code>ExpenseManager</code>, the debt-simplification follow-up, and a driver that exercises EQUAL, EXACT, a rejected PERCENT, settle-up, and the simplified settle-up plan.</p>
+<pre><code class="language-cpp">#include &lt;algorithm&gt;
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+#include &lt;map&gt;
+#include &lt;memory&gt;
+#include &lt;stdexcept&gt;
+#include &lt;string&gt;
+#include &lt;unordered_map&gt;
+#include &lt;vector&gt;
+
+// =====================================================================
+// Enums &amp; leaf records -- dumb data, no logic. The math happens either
+// inside a SplitStrategy or inside ExpenseManager's balance sheet.
+// =====================================================================
+
+enum class SplitType { EQUAL, EXACT, PERCENT };
+
+struct User {
+    std::string id;
+    std::string name;
+};
+
+// A Group just scopes "who owes whom" queries to a set of members;
+// the balance sheet itself stays global and per-user-pair (see below).
+struct Group {
+    std::string name;
+    std::vector&lt;std::string&gt; memberIds;
+};
+
+// One participant's slice of one expense.
+struct Split {
+    std::string userId;
+    double amount = 0.0;   // this participant's share (&gt;= 0)
+};
+
+// An immutable record of one shared cost. Carries no logic -- the
+// math already happened in whichever SplitStrategy produced `splits`.
+struct Expense {
+    std::string payerId;
+    double amount = 0.0;
+    std::vector&lt;Split&gt; splits;   // sum of split.amount == amount
+};
+
+// =====================================================================
+// SplitStrategy -- the interface -- plus its three concrete algorithms.
+// Each concrete class owns both the math AND the validation rule for
+// its type; ExpenseManager never branches on SplitType to do math.
+// =====================================================================
+
+class SplitStrategy {
+public:
+    virtual ~SplitStrategy() = default;
+    virtual std::vector&lt;Split&gt; computeSplits(double amount,
+                                              const std::vector&lt;User&gt;&amp; participants,
+                                              const std::vector&lt;double&gt;&amp; values) = 0;
+};
+
+// EQUAL: ignore `values`, divide evenly. The last participant absorbs
+// the rounding remainder so the splits always sum exactly to `amount`.
+class EqualSplit : public SplitStrategy {
+public:
+    std::vector&lt;Split&gt; computeSplits(double amount,
+                                      const std::vector&lt;User&gt;&amp; participants,
+                                      const std::vector&lt;double&gt;&amp; /*values*/) override {
+        if (participants.empty())
+            throw std::invalid_argument("no participants");
+
+        std::vector&lt;Split&gt; splits;
+        double share = amount / participants.size();
+        double assigned = 0.0;
+        for (std::size_t i = 0; i &lt; participants.size(); ++i) {
+            // last participant gets the remainder so the sum is exact
+            double s = (i + 1 == participants.size()) ? (amount - assigned) : share;
+            splits.push_back({participants[i].id, s});
+            assigned += s;
+        }
+        return splits;
+    }
+};
+
+// EXACT: values[i] is participant i's amount; must sum to `amount`.
+class ExactSplit : public SplitStrategy {
+public:
+    std::vector&lt;Split&gt; computeSplits(double amount,
+                                      const std::vector&lt;User&gt;&amp; participants,
+                                      const std::vector&lt;double&gt;&amp; values) override {
+        if (values.size() != participants.size())
+            throw std::invalid_argument("one exact value per participant required");
+
+        double sum = 0.0;
+        for (double v : values) sum += v;
+        if (std::abs(sum - amount) &gt; kEps)
+            throw std::invalid_argument("exact splits must sum to the total");
+
+        std::vector&lt;Split&gt; splits;
+        for (std::size_t i = 0; i &lt; participants.size(); ++i)
+            splits.push_back({participants[i].id, values[i]});
+        return splits;
+    }
+private:
+    static constexpr double kEps = 1e-9;
+};
+
+// PERCENT: values[i] is participant i's percentage; must sum to 100.
+class PercentSplit : public SplitStrategy {
+public:
+    std::vector&lt;Split&gt; computeSplits(double amount,
+                                      const std::vector&lt;User&gt;&amp; participants,
+                                      const std::vector&lt;double&gt;&amp; values) override {
+        if (values.size() != participants.size())
+            throw std::invalid_argument("one percentage per participant required");
+
+        double sum = 0.0;
+        for (double v : values) sum += v;
+        if (std::abs(sum - 100.0) &gt; kEps)
+            throw std::invalid_argument("percentages must sum to 100");
+
+        std::vector&lt;Split&gt; splits;
+        for (std::size_t i = 0; i &lt; participants.size(); ++i)
+            splits.push_back({participants[i].id, amount * values[i] / 100.0});
+        return splits;
+    }
+private:
+    static constexpr double kEps = 1e-9;
+};
+
+// =====================================================================
+// ExpenseManager -- the client. Reads like a sentence: resolve, then
+// delegate to a strategy, then fold the result into the balance sheet.
+// =====================================================================
+
+class ExpenseManager {
+public:
+    ExpenseManager() {
+        strategies_[SplitType::EQUAL]   = std::make_unique&lt;EqualSplit&gt;();
+        strategies_[SplitType::EXACT]   = std::make_unique&lt;ExactSplit&gt;();
+        strategies_[SplitType::PERCENT] = std::make_unique&lt;PercentSplit&gt;();
+    }
+
+    void addUser(const std::string&amp; id, const std::string&amp; name) {
+        users_[id] = {id, name};
+    }
+
+    void addGroup(const std::string&amp; groupName, const std::vector&lt;std::string&gt;&amp; memberIds) {
+        groups_[groupName] = {groupName, memberIds};
+    }
+
+    void addExpense(const std::string&amp; payerId,
+                    double amount,
+                    const std::vector&lt;std::string&gt;&amp; participantIds,
+                    SplitType type,
+                    const std::vector&lt;double&gt;&amp; values) {
+        // 1. resolve participants
+        std::vector&lt;User&gt; participants;
+        for (const auto&amp; pid : participantIds)
+            participants.push_back(users_.at(pid));   // throws if unknown
+
+        // 2. delegate the math to the strategy (it validates internally)
+        std::vector&lt;Split&gt; splits =
+            strategies_.at(type)-&gt;computeSplits(amount, participants, values);
+
+        // 3. keep the immutable record (needed to reverse an edit/delete)
+        expenses_.push_back({payerId, amount, splits});
+
+        // 4. fold splits into the pairwise balance sheet
+        for (const auto&amp; s : splits) {
+            if (s.userId == payerId) continue;        // you don't owe yourself
+            balance_[s.userId][payerId] += s.amount;
+            balance_[payerId][s.userId] -= s.amount;
+        }
+    }
+
+    void settleUp(const std::string&amp; fromId, const std::string&amp; toId, double amount) {
+        // `from` pays `to`, reducing what `from` owes `to`. Same antisymmetric
+        // increment as addExpense -- a payment and an expense share one mechanism.
+        balance_[fromId][toId] -= amount;
+        balance_[toId][fromId] += amount;
+    }
+
+    // +ve =&gt; the other user owes `userId`; -ve =&gt; `userId` owes the other user.
+    std::map&lt;std::string, double&gt; getBalances(const std::string&amp; userId) const {
+        std::map&lt;std::string, double&gt; out;
+        auto it = balance_.find(userId);
+        if (it == balance_.end()) return out;
+        for (const auto&amp; [other, owed] : it-&gt;second)
+            if (std::abs(owed) &gt; 1e-9)                 // hide settled (zero) pairs
+                out[other] = -owed;   // stored "userId owes other"; flip to the API's sign
+        return out;
+    }
+
+    // Net position of every user with a nonzero balance: total owed to
+    // them (+) or owed by them (-), collapsing the whole pairwise sheet
+    // into one number per person. Feeds the debt-simplification follow-up.
+    std::unordered_map&lt;std::string, double&gt; netBalances() const {
+        std::unordered_map&lt;std::string, double&gt; net;
+        for (const auto&amp; [user, others] : balance_)
+            for (const auto&amp; [other, owed] : others)
+                net[user] -= owed;   // owed = "user owes other"; net credit is the negative
+        return net;
+    }
+
+private:
+    std::unordered_map&lt;std::string, User&gt; users_;
+    std::unordered_map&lt;std::string, Group&gt; groups_;
+    std::vector&lt;Expense&gt; expenses_;
+    std::unordered_map&lt;SplitType, std::unique_ptr&lt;SplitStrategy&gt;&gt; strategies_;
+    // balance_[A][B] = how much A owes B (positive), or B owes A (if negative).
+    // Kept antisymmetric: balance_[A][B] == -balance_[B][A] always.
+    std::unordered_map&lt;std::string, std::unordered_map&lt;std::string, double&gt;&gt; balance_;
+};
+
+// =====================================================================
+// Follow-up: debt simplification (min-cash-flow / greedy). Collapses the
+// pairwise graph into net[user] figures, then greedily settles the
+// largest debtor against the largest creditor. This is a GOOD answer,
+// not a provably MINIMAL one -- exact minimization is NP-hard.
+// =====================================================================
+
+std::vector&lt;std::pair&lt;std::string, double&gt;&gt; simplifyDebts(
+        std::unordered_map&lt;std::string, double&gt; net) {
+    std::vector&lt;std::pair&lt;std::string, double&gt;&gt; creditors, debtors, txns;
+    for (const auto&amp; [u, v] : net) {
+        if (v &gt;  1e-9) creditors.push_back({u, v});
+        if (v &lt; -1e-9) debtors.push_back({u, -v});   // store as positive owed
+    }
+    // "largest debtor against largest creditor" needs both sorted descending.
+    auto byAmountDesc = [](const auto&amp; a, const auto&amp; b) { return a.second &gt; b.second; };
+    std::sort(debtors.begin(), debtors.end(), byAmountDesc);
+    std::sort(creditors.begin(), creditors.end(), byAmountDesc);
+
+    std::size_t i = 0, j = 0;
+    while (i &lt; debtors.size() &amp;&amp; j &lt; creditors.size()) {
+        double pay = std::min(debtors[i].second, creditors[j].second);
+        txns.push_back({debtors[i].first + " -&gt; " + creditors[j].first, pay});
+        debtors[i].second   -= pay;
+        creditors[j].second -= pay;
+        if (debtors[i].second   &lt; 1e-9) ++i;
+        if (creditors[j].second &lt; 1e-9) ++j;
+    }
+    return txns;
+}
+
+// =====================================================================
+// Driver -- exercises all three strategies, a settle-up, one rejected
+// (invalid) split, and the debt-simplification follow-up.
+// =====================================================================
+
+int main() {
+    ExpenseManager mgr;
+    mgr.addUser("alice", "Alice");
+    mgr.addUser("bob",   "Bob");
+    mgr.addUser("carol", "Carol");
+    mgr.addGroup("weekend-trip", {"alice", "bob", "carol"});
+
+    // Alice pays 90, split EQUALLY among all three -&gt; bob &amp; carol owe 30 each.
+    mgr.addExpense("alice", 90.0, {"alice", "bob", "carol"}, SplitType::EQUAL, {});
+
+    // Bob pays 100, EXACT: alice 60, bob 40 (sums to 100).
+    mgr.addExpense("bob", 100.0, {"alice", "bob"}, SplitType::EXACT, {60.0, 40.0});
+
+    std::cout &lt;&lt; "-- alice's balances --\n";
+    for (const auto&amp; [other, amt] : mgr.getBalances("alice"))
+        std::cout &lt;&lt; "  alice vs " &lt;&lt; other &lt;&lt; ": " &lt;&lt; amt &lt;&lt; "\n";   // bob: -30
+
+    // Carol settles her 30 to Alice.
+    mgr.settleUp("carol", "alice", 30.0);
+    std::cout &lt;&lt; "-- alice's balances after carol settles --\n";
+    for (const auto&amp; [other, amt] : mgr.getBalances("alice"))
+        std::cout &lt;&lt; "  alice vs " &lt;&lt; other &lt;&lt; ": " &lt;&lt; amt &lt;&lt; "\n";   // carol pair now hidden
+
+    // Carol pays 60, split EQUALLY among all three -&gt; alice &amp; bob now owe carol 20 each.
+    mgr.addExpense("carol", 60.0, {"alice", "bob", "carol"}, SplitType::EQUAL, {});
+
+    // Invalid PERCENT (sums to 90, not 100) is rejected, not silently applied.
+    try {
+        mgr.addExpense("alice", 50.0, {"alice", "bob"}, SplitType::PERCENT, {40.0, 50.0});
+    } catch (const std::exception&amp; e) {
+        std::cout &lt;&lt; "Rejected: " &lt;&lt; e.what() &lt;&lt; "\n";
+    }
+
+    // Follow-up: three pairwise edges now exist (alice-bob, alice-carol,
+    // bob-carol). Debt simplification should collapse them into fewer txns.
+    std::cout &lt;&lt; "-- simplified settle-up plan --\n";
+    for (const auto&amp; [route, amt] : simplifyDebts(mgr.netBalances()))
+        std::cout &lt;&lt; "  " &lt;&lt; route &lt;&lt; " : " &lt;&lt; amt &lt;&lt; "\n";   // 2 txns, not 3
+
+    return 0;
+}</code></pre>
+
+<details class="qa"><summary>Why must validation live inside each SplitStrategy instead of in ExpenseManager?</summary><div class="a"><p>Because the rule is different for every type: EQUAL only needs a non-empty participant list, EXACT needs its values to sum to the total, PERCENT needs its values to sum to 100. Hoisting any of that into <code>ExpenseManager</code> reintroduces exactly the <code>if (type == ...)</code> branch the Strategy pattern was supposed to remove, and it means adding a fourth split type later requires editing the manager instead of just adding a class. Each concrete strategy should reject before it produces a single split, and the manager should never need to know the rule in order to enforce it.</p></div></details>
+<details class="qa"><summary>Why a nested map of pairwise balances instead of a flat list of transactions?</summary><div class="a"><p>Because the query you must answer fastest is "give me every balance for user X," and a flat transaction log turns that into a scan over history on every call. A map keyed by user, holding a map of counterparty to signed amount, makes <code>getBalances</code> a one-line read and makes both <code>settleUp</code> and folding in a new expense a constant number of increments. It also makes edits and deletes reversible for free: subtract the same increments you originally added, rather than replaying the whole expense history to rebuild state.</p></div></details>
+<details class="qa"><summary>Is the greedy debt-simplification algorithm actually optimal?</summary><div class="a"><p>No, and saying so unprompted is worth more than getting a "yes" wrong. Matching the largest debtor to the largest creditor gives a good settlement plan, typically close to minimal and always at most <code>n-1</code> transactions for <code>n</code> people with a nonzero net, but proving the exact minimum number of transactions is NP-hard &mdash; it reduces to a partition-style problem, not a simple graph one. In an interview, name the greedy approach, show it works on the example, and then explicitly flag that it is a heuristic rather than a proof of optimality.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

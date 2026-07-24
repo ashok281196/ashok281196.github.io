@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ch. 15 · Message Queue / Pub-Sub · LLD: Zero to Hero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">15</div>
+  <div class="chapter-kicker">Hard · 5 of 5</div>
+  <h1>Message Queue / Pub-Sub: a Mini-Kafka in Memory</h1>
+  <p class="chapter-sub">One append-only log per topic is read by independent broadcast cursors and a shared, round-robin consumer-group cursor alike, with per-consumer offsets that make replay a one-line rewind and a bounded buffer that turns a slow consumer into backpressure instead of an outage.</p>
+</header>
+
+<h2><span class="sec-no">15.1</span>Problem Statement</h2>
+<p>Design an in-memory publish-subscribe / message-queue system — a mini-Kafka. Producers publish messages to named topics; consumers subscribe and receive them, either as a <strong>broadcast</strong> (every subscriber sees every message) or as part of a <strong>consumer group</strong> (each message goes to exactly one member, load-balanced). Every consumer tracks its own progress and can rewind to replay history.</p>
+
+<div class="keypoint">A topic is an append-only log. Consumers don't consume messages out of it — they hold an <strong>offset</strong> and walk the log at their own pace. Broadcast, replay, and bounded memory all fall out of that one structure.</div>
+
+<p>Functional requirements:</p>
+<ul>
+<li><strong>Topics</strong>: named channels. Producers <strong>publish</strong> messages to a topic.</li>
+<li><strong>Consumers</strong> subscribe to a topic and receive messages, either <strong>broadcast</strong> (every subscriber gets every message) or via a <strong>consumer group</strong> (each message delivered to exactly one consumer in the group).</li>
+<li>Each consumer tracks its own <strong>offset</strong> so it resumes correctly, and can <strong>replay</strong> from an arbitrary offset.</li>
+<li>Delivery must not block producers — publish and consume are decoupled.</li>
+</ul>
+
+<p>Non-functional constraints — read these as the actual grading rubric:</p>
+<ul>
+<li><strong>Thread-safe</strong> under many concurrent producers and consumers.</li>
+<li><strong>Observer</strong> is the core pattern: subscribers get messages pushed to them, not polled.</li>
+<li><strong>Backpressure / bounded buffers</strong>: a slow consumer must not grow memory without bound — block, drop, or cap it, and <em>state the policy</em>.</li>
+<li>Pick <strong>at-least-once</strong> or <strong>at-most-once</strong> delivery, and justify the pick.</li>
+</ul>
+
+<p>The expected public interface, given up front so the design effort goes into behavior, not signatures:</p>
+
+<pre><code class="language-cpp">using Message = std::string;          // or a struct with payload + metadata
+
+class Subscriber {                     // Observer
+public:
+    virtual void onMessage(const std::string&amp; topic, const Message&amp; msg) = 0;
+    virtual ~Subscriber() = default;
+};
+
+class MessageBroker {
+public:
+    void createTopic(const std::string&amp; topic);
+    void publish(const std::string&amp; topic, const Message&amp; msg);                 // non-blocking
+    void subscribe(const std::string&amp; topic, std::shared_ptr&lt;Subscriber&gt; sub,
+                   const std::string&amp; groupId = "");                            // group =&gt; competing consumers
+    void resetOffset(const std::string&amp; topic, const std::string&amp; consumerId, size_t offset);  // replay
+};</code></pre>
+
+<p>What the interviewer is really testing:</p>
+<ul>
+<li><strong>Observer done at scale</strong>, with a <strong>producer-consumer queue</strong> decoupling publish from delivery.</li>
+<li><strong>Per-consumer offsets</strong> and the ability to <strong>replay</strong> from any of them.</li>
+<li>A concrete <strong>concurrency</strong> design: per-topic queue, condition variables, a dispatch thread pool.</li>
+<li>A stated <strong>backpressure</strong> policy for slow consumers — the detail that signals seniority.</li>
+</ul>
+
+<p>Follow-up questions to expect once the base design stands:</p>
+<ul>
+<li><strong>Consumer groups</strong> with partition-style load balancing across members.</li>
+<li><strong>At-least-once</strong> delivery with acknowledgements and redelivery on timeout.</li>
+<li><strong>Persistence / durability</strong> — how the in-memory log extends to disk.</li>
+<li><strong>Ordering guarantees</strong> within a partition versus across the whole topic.</li>
+</ul>
+
+<h2><span class="sec-no">15.2</span>How to Approach</h2>
+
+<h3>Mining the Constraints First</h3>
+<p>Two sentences in the prompt decide almost the entire architecture. "Delivery should not block producers — decouple publish from consume" means <code>publish()</code> can never call a subscriber inline; it appends and returns, with a buffer sitting between producer and consumer. "Thread-safe under many concurrent producers and consumers" means every shared structure — the topic registry, each topic's log, each consumer's offset — needs a stated locking story; concurrency isn't a follow-up here, it's the body of the answer. A naive Observer (loop over subscribers, call each one from inside <code>publish</code>) satisfies "Observer at the core" but violates the no-blocking rule the instant one subscriber is slow. The twist being tested is Observer <em>plus</em> an asynchronous dispatch layer sitting between the log and the callback.</p>
+
+<div class="analogy">"Don't block producers" and "thread-safe" together are naming a producer-consumer queue with a dispatch thread, not a simple Observer loop. Build that async seam first; every other requirement hangs off it.</div>
+
+<h3>The Key Insight: the Log Is Not a Queue</h3>
+<p>The instinctive first draft is a <code>std::queue</code> per topic, with delivery as <code>pop()</code>. That breaks two requirements simultaneously: you can't replay, because the message is already gone, and broadcast is impossible, because the first consumer to pop it consumes it before anyone else sees it.</p>
+<p>The fix is to stop treating storage and consumption as the same operation. A topic is an <strong>append-only log</strong>; each consumer holds an <strong>offset</strong>, the index of the next entry it should read. Delivery never removes anything — it only advances a cursor.</p>
+<pre><code class="language-text">Topic "orders" log:   [ m0 ][ m1 ][ m2 ][ m3 ][ m4 ]   &lt;- append at tail
+                                         ▲              ▲
+                          consumerB.offset=2       consumerA.offset=5 (caught up)</code></pre>
+<p>Broadcast falls out for free: every consumer walks the whole log independently, so nothing is ever "used up." Replay is one assignment: <code>resetOffset(consumerId, k)</code> moves that consumer's cursor back to <code>k</code>, and the next dispatch re-delivers from there. And bounded memory becomes a question about the <em>slowest</em> reader: the log can't grow past its cap while a lagging cursor still points into the region we'd have to evict.</p>
+
+<div class="keypoint">When a prompt combines "replay" with "every subscriber gets every message," stop reaching for <code>queue::pop</code>. The structure that gives you both, for free, is an append-only log with one cursor per reader.</div>
+
+<p>Consumer groups turn out to need no new structure, just a different cursor owner: instead of one offset per consumer, a group gets <em>one shared offset</em> for the whole group, and members take turns — round-robin — being handed whatever sits at that shared position. Broadcast is a consumer with a private cursor; a group is several consumers sharing one. Same log, different cursor ownership.</p>
+
+<h3>Interface as a Threading Contract</h3>
+<p>The interface sketch above is silent on one thing the design needs: a stable per-consumer key. <code>resetOffset</code> already takes a <code>consumerId</code>, so <code>subscribe</code> has to hand one in too — the interface is quietly implying it even though the first draft didn't spell it out. The bigger point: "<code>publish</code> is non-blocking" is a promise about <em>threading</em>, not about the function signature. Write that promise down before touching internals, so nothing later quietly breaks it — under our backpressure policy <code>publish</code> may still block, but only as deliberate backpressure, never to run a subscriber's callback.</p>
+
+<h3>Lock Granularity and the Line User Code Must Never Cross</h3>
+<p>Each topic gets its own mutex, so traffic on one topic never contends with another — lock granularity is a design decision worth stating out loud, and "one global broker mutex" is the answer that signals you didn't think about it. Two condition variables complete the classic bounded-buffer pair: <code>notFull_</code>, which producers wait on when the log is at capacity, and <code>notEmpty_</code>, the hook a blocking dispatcher would wait on for new work.</p>
+
+<div class="warfield">The rule that actually matters: never hold a topic's lock while calling a subscriber's <code>onMessage</code>. That callback is user code — it may be slow, may block, may even re-enter the broker. Copy out the <code>shared_ptr&lt;Subscriber&gt;</code> and the message under the lock, release the lock, then deliver. Holding a lock across a callback you don't control is how real systems deadlock.</div>
+
+<h3>Backpressure and Delivery Semantics, Said Out Loud</h3>
+<p>The prompt explicitly grades the choosing, not just the mechanism. <strong>Backpressure: bounded log per topic, block the producer</strong> when the slowest reader hasn't drained enough to make room — a slow consumer eventually throttles a fast producer instead of exhausting memory. The stated alternative is drop-oldest: evict the head and shove any lagging cursor forward, bounded but lossy, the right call for telemetry where freshness beats completeness and the wrong one for orders or payments. <strong>Delivery: at-most-once</strong> as the baseline — a dispatcher commits (advances the offset) right after <code>onMessage</code> returns; if the consumer throws, we skip and move on rather than stall the whole topic on one bad subscriber. The stated upgrade is at-least-once: stop auto-committing, hand out an explicit <code>ack(offset)</code>, and redeliver anything that times out un-acked — a deferred commit, not a structural change.</p>
+
+<h3>What the Follow-Ups Actually Cost</h3>
+<p>Every follow-up lands on a seam the design already has, and saying so out loud is the senior move. Consumer groups are a new cursor owner, described above. At-least-once is a deferred commit plus a reaper thread. Persistence is realizing the log already <em>is</em> a write-ahead log — back it with a segment file, fsync before signalling, replay on restart. Ordering is a stated trade: total order within one topic's log, but only <em>per partition</em> once a topic is split for parallelism across group members — the same trade-off Kafka makes, worth naming explicitly rather than discovering under questioning.</p>
+
+<h2><span class="sec-no">15.3</span>Whole Solution</h2>
+<p>The program below merges every incremental step above into one self-contained C++17 file: the <code>Message</code>/<code>Subscriber</code> leaves, a <code>Topic</code> that owns the append-only log plus both kinds of cursor (per-consumer and per-group), and a <code>MessageBroker</code> facade backed by a small dispatch thread pool. Two refinements beyond the narrative above are worth flagging, because they're exactly the kind of gap synthesis is supposed to close: the dispatch loop needs the real topic name to hand to <code>onMessage</code> (the sketch left that as a placeholder), and a per-topic <code>try_lock</code> around each dispatch attempt stops two dispatcher threads from ever grabbing the same pending message at once — a small addition in the same spirit as the per-topic data mutex already described. <code>main()</code> exercises a standalone broadcast consumer alongside a two-member consumer group on the same topic, then a replay and a rejected replay of an unknown consumer.</p>
+
+<pre><code class="language-cpp">// ============================================================
+// In-Memory Message Queue / Pub-Sub -- a mini-Kafka
+// Observer at scale + producer-consumer concurrency + offsets/backpressure
+// Compile: g++ -std=c++17 -O2 -pthread mqueue.cpp -o mqueue
+// ============================================================
+#include &lt;iostream&gt;
+#include &lt;string&gt;
+#include &lt;memory&gt;
+#include &lt;vector&gt;
+#include &lt;unordered_map&gt;
+#include &lt;mutex&gt;
+#include &lt;condition_variable&gt;
+#include &lt;thread&gt;
+#include &lt;atomic&gt;
+#include &lt;chrono&gt;
+#include &lt;stdexcept&gt;
+#include &lt;algorithm&gt;
+#include &lt;limits&gt;
+#include &lt;cstdint&gt;
+
+// ---------- Message: the unit that flows through the system ----------
+// id doubles as the message's absolute offset in its topic's log, so
+// "offset N" and "message with id N" are the same integer.
+struct Message {
+    std::string payload;
+    uint64_t    id        = 0;
+    long long   timestamp = 0;
+};
+
+// ---------- Subscriber: the Observer ----------
+class Subscriber {
+public:
+    virtual void onMessage(const std::string&amp; topic, const Message&amp; msg) = 0;
+    virtual ~Subscriber() = default;
+};
+
+// A trivial concrete observer used by the driver below.
+class PrintingSubscriber : public Subscriber {
+public:
+    explicit PrintingSubscriber(std::string name) : name_(std::move(name)) {}
+    void onMessage(const std::string&amp; topic, const Message&amp; msg) override {
+        std::cout &lt;&lt; "[" &lt;&lt; name_ &lt;&lt; "] " &lt;&lt; topic &lt;&lt; "#" &lt;&lt; msg.id
+                  &lt;&lt; " -&gt; " &lt;&lt; msg.payload &lt;&lt; "\n";
+    }
+private:
+    std::string name_;
+};
+
+// ---------- Consumer: a subscriber's registration + its cursor ----------
+// groupId == "" means a standalone / broadcast consumer: it owns "offset"
+// outright. A non-empty groupId means this consumer competes inside a
+// group; "offset" is then unused, because the group's shared cursor
+// (Topic::GroupState::offset) is authoritative for every member.
+struct Consumer {
+    std::string                 id;
+    std::string                 groupId;
+    std::shared_ptr&lt;Subscriber&gt; sub;
+    size_t                      offset = 0;
+};
+
+// ---------- Topic: the append-only log + per-consumer/per-group cursors ----------
+class Topic {
+public:
+    // What one dispatch step needs in order to deliver a single message to
+    // a single subscriber, without holding any lock while it does so.
+    struct Delivery {
+        std::string                 consumerId;
+        std::string                 groupId;   // "" if this was a standalone/broadcast delivery
+        std::shared_ptr&lt;Subscriber&gt; sub;
+        Message                     msg;
+    };
+
+    explicit Topic(std::string name, size_t capacity = 1024)
+        : name_(std::move(name)), capacity_(capacity) {}
+
+    const std::string&amp; name() const { return name_; }
+
+    // Producer side. Blocks if the log is full AND the slowest reader
+    // (a standalone consumer or a group) hasn't drained past the point
+    // we'd need to evict to make room -- our backpressure policy.
+    void append(const Message&amp; msg) {
+        std::unique_lock&lt;std::mutex&gt; lk(mtx_);
+        notFull_.wait(lk, [&amp;] { return log_.size() - minOffset() &lt; capacity_; });
+        Message stamped = msg;
+        stamped.id = baseOffset_ + log_.size();     // id == absolute offset
+        log_.push_back(std::move(stamped));
+        notEmpty_.notify_all();                      // hook for a future blocking dispatcher
+    }
+
+    // Register a consumer. Standalone consumers (groupId == "") get their
+    // own cursor, starting at the current tail -- new subscribers see only
+    // what's published from now on, not ancient history. Group members
+    // share one cursor per group: the group's cursor is created at the
+    // tail the first time that group is seen, and later joiners simply
+    // attach to the existing shared cursor rather than resetting it.
+    void addConsumer(const std::string&amp; consumerId, const std::string&amp; groupId,
+                      std::shared_ptr&lt;Subscriber&gt; sub) {
+        std::lock_guard&lt;std::mutex&gt; lk(mtx_);
+        size_t tail = baseOffset_ + log_.size();
+        consumers_[consumerId] = Consumer{consumerId, groupId, std::move(sub), tail};
+        if (!groupId.empty()) {
+            auto it = groups_.find(groupId);
+            if (it == groups_.end()) {
+                GroupState g;
+                g.offset = tail;
+                g.members.push_back(consumerId);
+                groups_.emplace(groupId, std::move(g));
+            } else {
+                it-&gt;second.members.push_back(consumerId);
+            }
+        }
+    }
+
+    // Replay: rewind a consumer's cursor. For a group member this rewinds
+    // the whole group's shared cursor -- a group has exactly one reading
+    // position, so replaying one member replays all of them.
+    void resetOffset(const std::string&amp; consumerId, size_t offset) {
+        std::lock_guard&lt;std::mutex&gt; lk(mtx_);
+        auto it = consumers_.find(consumerId);
+        if (it == consumers_.end())
+            throw std::invalid_argument("unknown consumer: " + consumerId);
+        if (it-&gt;second.groupId.empty()) {
+            it-&gt;second.offset = offset;
+        } else {
+            auto git = groups_.find(it-&gt;second.groupId);
+            if (git != groups_.end()) git-&gt;second.offset = offset;
+        }
+        notEmpty_.notify_all();
+    }
+
+    // Dispatcher side: find the next (consumer, message) pair ready to go,
+    // if any. Standalone consumers are checked first, each against its own
+    // independent cursor (broadcast: nothing is ever "used up"). Grouped
+    // consumers share one cursor per group and are handed messages
+    // round-robin among the group's members (partitioned, load-balanced).
+    bool nextPending(Delivery&amp; d) {
+        std::lock_guard&lt;std::mutex&gt; lk(mtx_);
+        for (auto&amp; [id, c] : consumers_) {
+            if (!c.groupId.empty()) continue;
+            size_t idx = c.offset - baseOffset_;
+            if (idx &lt; log_.size()) {
+                d.consumerId = id; d.groupId.clear(); d.sub = c.sub; d.msg = log_[idx];
+                return true;
+            }
+        }
+        for (auto&amp; [gid, g] : groups_) {
+            if (g.members.empty()) continue;
+            size_t idx = g.offset - baseOffset_;
+            if (idx &gt;= log_.size()) continue;
+            const std::string&amp; memberId = g.members[g.rrIndex % g.members.size()];
+            auto mit = consumers_.find(memberId);
+            if (mit == consumers_.end()) continue;
+            d.consumerId = memberId; d.groupId = gid; d.sub = mit-&gt;second.sub; d.msg = log_[idx];
+            return true;
+        }
+        return false;
+    }
+
+    // Called by the dispatcher AFTER a successful onMessage -- our
+    // at-most-once commit. Advances the right cursor (the consumer's own,
+    // or the group's shared one) and rotates the group's round-robin.
+    void commit(const std::string&amp; consumerId, const std::string&amp; groupId) {
+        std::lock_guard&lt;std::mutex&gt; lk(mtx_);
+        if (groupId.empty()) {
+            auto it = consumers_.find(consumerId);
+            if (it != consumers_.end()) ++it-&gt;second.offset;
+        } else {
+            auto git = groups_.find(groupId);
+            if (git != groups_.end()) {
+                ++git-&gt;second.offset;
+                git-&gt;second.rrIndex =
+                    (git-&gt;second.rrIndex + 1) % std::max&lt;size_t&gt;(1, git-&gt;second.members.size());
+            }
+        }
+        notFull_.notify_all();                        // a reader advanced -&gt; maybe room now
+    }
+
+    // Serializes one topic's dispatch attempts so two dispatcher threads
+    // can never grab the same pending message for the same consumer or
+    // group at once. Held only around fetch+commit, never across the
+    // subscriber callback's own work -- nextPending/commit copy out what
+    // they need and return quickly (see MessageBroker::dispatchLoop).
+    std::mutex&amp; dispatchMutex() { return dispatchMtx_; }
+
+private:
+    // Smallest offset any reader (a standalone consumer or a group) still
+    // needs -- the floor below which the log may not grow past capacity_
+    // without blocking the producer (our backpressure policy).
+    size_t minOffset() const {
+        if (consumers_.empty() &amp;&amp; groups_.empty()) return baseOffset_ + log_.size();
+        size_t m = std::numeric_limits&lt;size_t&gt;::max();
+        for (auto&amp; [id, c] : consumers_) if (c.groupId.empty()) m = std::min(m, c.offset);
+        for (auto&amp; [gid, g] : groups_) m = std::min(m, g.offset);
+        return m;
+    }
+
+    struct GroupState {
+        size_t                   offset  = 0;   // the group's one shared cursor
+        std::vector&lt;std::string&gt; members;       // round-robin order
+        size_t                   rrIndex = 0;   // index into members for the next delivery
+    };
+
+    std::string name_;
+    size_t      capacity_;
+    size_t      baseOffset_ = 0;                // offset of log_[0]; this design never evicts,
+                                                 // so baseOffset_ stays 0 (see 15.2 on backpressure)
+    std::vector&lt;Message&gt; log_;
+    std::unordered_map&lt;std::string, Consumer&gt;   consumers_;
+    std::unordered_map&lt;std::string, GroupState&gt; groups_;
+    std::mutex               mtx_;              // guards log_, consumers_, groups_
+    std::mutex               dispatchMtx_;      // serializes dispatch attempts per topic
+    std::condition_variable  notEmpty_;         // reserved for a future CV-based dispatcher
+    std::condition_variable  notFull_;          // producers wait here -- backpressure
+};
+
+// ---------- MessageBroker: facade + dispatch thread pool ----------
+class MessageBroker {
+public:
+    explicit MessageBroker(unsigned dispatchers = std::thread::hardware_concurrency()) {
+        running_ = true;
+        for (unsigned i = 0; i &lt; std::max(1u, dispatchers); ++i)
+            pool_.emplace_back([this] { dispatchLoop(); });
+    }
+
+    ~MessageBroker() {
+        running_ = false;             // dispatchLoop polls this every spin; no wake-up needed
+        for (auto&amp; th : pool_) if (th.joinable()) th.join();
+    }
+
+    void createTopic(const std::string&amp; topic) {
+        std::lock_guard&lt;std::mutex&gt; lk(reg_mtx_);
+        topics_.emplace(topic, std::make_unique&lt;Topic&gt;(topic));
+    }
+
+    // Non-blocking, except for the deliberate backpressure block inside
+    // Topic::append() when the log is at capacity.
+    void publish(const std::string&amp; topic, const Message&amp; msg) {
+        find(topic)-&gt;append(msg);
+    }
+
+    void subscribe(const std::string&amp; topic, std::shared_ptr&lt;Subscriber&gt; sub,
+                   const std::string&amp; consumerId, const std::string&amp; groupId = "") {
+        find(topic)-&gt;addConsumer(consumerId, groupId, std::move(sub));
+    }
+
+    void resetOffset(const std::string&amp; topic, const std::string&amp; consumerId, size_t offset) {
+        find(topic)-&gt;resetOffset(consumerId, offset);
+    }
+
+private:
+    Topic* find(const std::string&amp; topic) {
+        std::lock_guard&lt;std::mutex&gt; lk(reg_mtx_);
+        auto it = topics_.find(topic);
+        if (it == topics_.end()) throw std::invalid_argument("no such topic: " + topic);
+        return it-&gt;second.get();
+    }
+
+    // Each dispatcher thread repeatedly: try every topic, and if no other
+    // dispatcher currently owns it, pull one pending delivery, call
+    // onMessage with NO lock held, then commit.
+    void dispatchLoop() {
+        while (running_) {
+            bool didWork = false;
+            std::vector&lt;Topic*&gt; snapshot;
+            { std::lock_guard&lt;std::mutex&gt; lk(reg_mtx_);
+              for (auto&amp; [n, t] : topics_) snapshot.push_back(t.get()); }
+
+            for (Topic* t : snapshot) {
+                std::unique_lock&lt;std::mutex&gt; dlk(t-&gt;dispatchMutex(), std::try_to_lock);
+                if (!dlk.owns_lock()) continue;        // another thread already owns this topic
+
+                Topic::Delivery d;
+                if (t-&gt;nextPending(d)) {
+                    try { d.sub-&gt;onMessage(t-&gt;name(), d.msg); }
+                    catch (...) { /* at-most-once: log and move on */ }
+                    t-&gt;commit(d.consumerId, d.groupId);
+                    didWork = true;
+                }
+            }
+            if (!didWork) std::this_thread::yield();   // production: wait on a CV instead of spin
+        }
+    }
+
+    std::unordered_map&lt;std::string, std::unique_ptr&lt;Topic&gt;&gt; topics_;
+    std::mutex                reg_mtx_;                 // guards the topic registry only
+    std::vector&lt;std::thread&gt;  pool_;
+    std::atomic&lt;bool&gt;         running_{false};
+};
+
+// ---------- Driver: broadcast + consumer group + replay + error path ----------
+int main() {
+    MessageBroker broker(/*dispatchers=*/3);
+    broker.createTopic("orders");
+
+    auto alice = std::make_shared&lt;PrintingSubscriber&gt;("alice");
+    auto w1    = std::make_shared&lt;PrintingSubscriber&gt;("worker-1");
+    auto w2    = std::make_shared&lt;PrintingSubscriber&gt;("worker-2");
+
+    // Broadcast: alice is a standalone consumer with her own cursor --
+    // she will see every message published to "orders".
+    broker.subscribe("orders", alice, "alice");
+
+    // Consumer group "shippers": worker-1 and worker-2 share one cursor
+    // and split the stream between them, round-robin.
+    broker.subscribe("orders", w1, "worker-1", "shippers");
+    broker.subscribe("orders", w2, "worker-2", "shippers");
+
+    for (int i = 0; i &lt; 6; ++i)
+        broker.publish("orders", Message{"order-" + std::to_string(i)});
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));  // let dispatch drain
+
+    // Replay: rewind alice to offset 0; she re-receives the whole log.
+    // The group's shared cursor is untouched -- workers do not replay.
+    std::cout &lt;&lt; "--- alice replays from 0 ---\n";
+    broker.resetOffset("orders", "alice", 0);
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+    // resetOffset on an unknown consumer is rejected, not crashed.
+    try { broker.resetOffset("orders", "ghost", 0); }
+    catch (const std::exception&amp; e) { std::cout &lt;&lt; "Rejected: " &lt;&lt; e.what() &lt;&lt; "\n"; }
+
+    return 0;   // ~MessageBroker stops and joins the dispatch pool cleanly
+}
+// Expected shape of output: "order-0".."order-5" printed once each for
+// alice (broadcast); the same six messages split between worker-1 and
+// worker-2 (round-robin within "shippers"), interleaved with alice's in
+// some order; then all six reprinted for alice only (replay); then the
+// "Rejected: unknown consumer: ghost" line.</code></pre>
+
+<details class="qa"><summary>Why is the topic modeled as an append-only log with per-reader cursors instead of a plain queue?</summary><div class="a"><p>A queue's <code>pop()</code> is destructive: the first consumer to dequeue a message removes it for everyone else, which makes broadcast impossible, and once it's popped there's nothing left to replay. A log never removes anything — each consumer (or group) owns an offset, an index into the log, and delivery only ever advances that index. That single structure gives broadcast (every cursor walks the whole log independently), replay (rewind one cursor's offset), and bounded memory (cap the log and block the producer once the slowest cursor falls too far behind) all at once, which is exactly why Kafka itself is built the same way.</p></div></details>
+
+<details class="qa"><summary>How do consumer groups get a partitioned, load-balanced share of a topic without a separate partitioning data structure?</summary><div class="a"><p>By changing who owns the cursor, not the log. A standalone consumer gets a private offset; a group gets one shared offset for the whole group, plus a round-robin pointer over its members. Every dispatch for that group reads the message at the shared offset and hands it to whichever member is next in rotation, then advances the shared offset once — so the group collectively reads the log exactly once, split across members, while a broadcast consumer elsewhere reads the same log in full. Real partitioning (splitting the topic into P physical logs so P group members can pull truly in parallel) is the natural next step, but the single-log, shared-cursor version already delivers the partitioned, load-balanced behavior the follow-up asks for.</p></div></details>
+
+<details class="qa"><summary>Why must a dispatcher thread never hold a topic's lock while calling a subscriber's <code>onMessage</code>?</summary><div class="a"><p>Because <code>onMessage</code> is code the broker doesn't control — it might do I/O, block, throw, or even call back into the broker (say, to <code>publish</code> to another topic). Holding the topic's data mutex across that call means one slow or misbehaving subscriber can freeze every producer and every other consumer on that topic, and a re-entrant call is a straight path to deadlock. The fix is mechanical: <code>nextPending</code> copies out the <code>shared_ptr&lt;Subscriber&gt;</code> and the message while the lock is held, then releases it before returning, so the actual delivery call happens lock-free. The topic's own dispatch mutex, held only to stop two dispatcher threads from grabbing the same pending message, is a separate, coarser lock that likewise gets released before the next spin — never something held across user code.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>
