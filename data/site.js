@@ -47,6 +47,17 @@ const SITE = {
         { label: '15 chapters' },
         { label: 'updated Jul 2026' }
       ]
+    },
+    {
+      file: 'reading/interviews/index.html',
+      title: 'Common Robotics Interview Questions',
+      desc: 'Thirty-nine recurring robotics engineering interview questions across SLAM, firmware, middleware, computer vision, learning-based robotics, edge deployment, manipulation and systems design.',
+      meta: [
+        { label: 'LIVE', hot: true },
+        { label: 'robotics' },
+        { label: '39 questions' },
+        { label: 'updated Jul 2026' }
+      ]
     }
   ],
 
