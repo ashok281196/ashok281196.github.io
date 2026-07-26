@@ -58,6 +58,17 @@ const SITE = {
         { label: '39 questions' },
         { label: 'updated Jul 2026' }
       ]
+    },
+    {
+      file: 'reading/state-estimation-primer.html',
+      title: 'Three Ways to Know Where You Are — EKF, UKF, Factor Graphs',
+      desc: 'A state estimation primer in six chapters: the problem before any algorithm, the exact Kalman filter, the EKF’s linearisation, the UKF’s sampled sigma points, factor graphs that keep everything, and the three compared and unified.',
+      meta: [
+        { label: 'LIVE', hot: true },
+        { label: 'robotics' },
+        { label: '6 chapters' },
+        { label: 'updated Jul 2026' }
+      ]
     }
   ],
 

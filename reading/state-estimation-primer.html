@@ -1,0 +1,829 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three Ways to Know Where You Are — EKF, UKF, Factor Graphs</title>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:opsz,wght@6..96,400;6..96,500;6..96,700&family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,300;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+
+<style>
+:root{
+  --paper:#E7E5DC;
+  --paper-hi:#EFEDE6;
+  --paper-lo:#DBD8CD;
+  --ink:#17212A;
+  --ink-soft:#4C5761;
+  --ink-faint:#8B9199;
+  --rule:#C2BFB3;
+  --red:#8A2B22;
+  --blue:#2C5871;
+  --serif:"Spectral",Georgia,serif;
+  --display:"Bodoni Moda",Didot,Georgia,serif;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --col:640px;
+  --marg:150px;
+  --gutter:40px;
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  padding:38px 20px 90px;
+  background:#B7B4A8;
+  background-image:
+    radial-gradient(ellipse at 50% 0%, #C6C3B6 0%, #A9A69A 70%);
+  font-family:var(--serif);
+  color:var(--ink);
+  font-weight:400;
+  line-height:1.68;
+  font-size:17.5px;
+}
+
+/* ── the physical book ─────────────────────────────── */
+.book{
+  max-width:990px;
+  margin:0 auto;
+  background:var(--paper);
+  position:relative;
+  border-left:14px solid var(--paper-lo);
+  box-shadow:
+    0 1px 0 rgba(255,255,255,.5) inset,
+    0 30px 70px -20px rgba(20,25,30,.55),
+    0 2px 6px rgba(20,25,30,.3);
+}
+.book::before{ /* stitched spine */
+  content:"";position:absolute;top:0;bottom:0;left:-14px;width:14px;
+  background:
+    repeating-linear-gradient(to bottom, transparent 0 14px, rgba(23,33,42,.32) 14px 24px),
+    linear-gradient(to right, rgba(23,33,42,.18), rgba(23,33,42,0));
+}
+.book::after{ /* grain */
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background-image:radial-gradient(rgba(23,33,42,.055) .5px, transparent .6px);
+  background-size:3px 3px;
+}
+.leaf{padding:0 70px;position:relative;z-index:1}
+
+/* ── running head & folio ──────────────────────────── */
+.running{
+  display:flex;justify-content:space-between;align-items:baseline;gap:1rem;
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.19em;text-transform:uppercase;
+  color:var(--ink-faint);border-bottom:1px solid var(--rule);
+  padding:44px 0 8px;margin-bottom:44px;
+}
+.running em{font-style:normal;color:var(--red)}
+.folio{
+  text-align:center;font-family:var(--display);font-size:14px;color:var(--ink-faint);
+  padding:34px 0 60px;letter-spacing:.1em;
+}
+.folio::before{content:"— ";}
+.folio::after{content:" —";}
+
+/* ── title page ────────────────────────────────────── */
+.title-page{padding:96px 0 48px;text-align:center}
+.halftitle{
+  font-family:var(--mono);font-size:10px;letter-spacing:.34em;text-transform:uppercase;
+  color:var(--red);margin-bottom:56px;
+}
+.title-page h1{
+  font-family:var(--display);font-weight:400;font-style:italic;
+  font-size:clamp(38px,7vw,68px);line-height:1.02;letter-spacing:-.012em;
+  margin:0 auto;max-width:11ch;
+}
+.title-rule{
+  width:78px;height:1px;background:var(--ink);margin:34px auto;position:relative;
+}
+.title-rule::before,.title-rule::after{
+  content:"";position:absolute;top:-2px;width:5px;height:5px;
+  background:var(--red);transform:rotate(45deg);
+}
+.title-rule::before{left:-14px}.title-rule::after{right:-14px}
+.subtitle{
+  font-family:var(--serif);font-style:italic;font-weight:300;
+  font-size:clamp(17px,2.4vw,22px);color:var(--ink-soft);max-width:34ch;margin:0 auto;
+}
+.imprint{
+  margin-top:70px;font-family:var(--mono);font-size:10px;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--ink-faint);line-height:2.1;
+}
+
+/* ── table of contents ─────────────────────────────── */
+.toc-head{
+  font-family:var(--mono);font-size:10px;letter-spacing:.3em;text-transform:uppercase;
+  color:var(--ink-faint);text-align:center;margin:0 0 26px;
+}
+.toc{list-style:none;margin:0 auto 10px;padding:0;max-width:600px}
+.toc li{margin:0}
+.toc a{
+  display:flex;align-items:baseline;gap:0;text-decoration:none;color:var(--ink);
+  padding:9px 0;border-bottom:1px solid transparent;transition:color .18s;
+}
+.toc a:hover,.toc a:focus-visible{color:var(--red)}
+.toc .n{
+  font-family:var(--display);font-size:14px;width:2.6rem;flex:none;color:var(--red);
+  letter-spacing:.06em;
+}
+.toc .t{font-size:16.5px}
+.toc .dots{flex:1;border-bottom:1px dotted var(--rule);margin:0 .7rem .34em;min-width:1.5rem}
+.toc .p{font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
+
+/* ── chapter ───────────────────────────────────────── */
+.chapter{scroll-margin-top:20px}
+.chap-open{display:flex;align-items:flex-start;gap:26px;margin-bottom:34px}
+.chap-num{
+  font-family:var(--display);font-size:64px;line-height:.82;color:var(--red);
+  flex:none;width:var(--marg);text-align:right;font-weight:400;
+}
+.chap-title{margin:0;padding-top:4px}
+.chap-title .kicker{
+  display:block;font-family:var(--mono);font-size:9.5px;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--ink-faint);margin-bottom:10px;
+}
+.chap-title .name{
+  display:block;font-family:var(--display);font-weight:400;
+  font-size:clamp(26px,4vw,38px);line-height:1.12;letter-spacing:-.008em;
+}
+
+/* body grid: margin column + text column */
+.body-col{padding-left:calc(var(--marg) + var(--gutter));max-width:calc(var(--marg) + var(--gutter) + var(--col))}
+.body-col > p{margin:0 0 1.15em}
+.lede::first-letter{
+  float:left;font-family:var(--display);font-size:60px;line-height:.78;
+  padding:6px 10px 0 0;color:var(--ink);
+}
+.lede::first-line{font-variant-caps:small-caps;letter-spacing:.02em}
+
+h3.sub{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.2em;text-transform:uppercase;
+  color:var(--red);margin:2.5em 0 .9em;font-weight:500;
+}
+strong{font-weight:600}
+em.term{font-style:italic;color:var(--ink)}
+.tight{margin-top:-.3em}
+
+/* margin notes */
+.note{
+  float:left;width:var(--marg);margin-left:calc(-1 * (var(--marg) + var(--gutter)));
+  clear:left;font-family:var(--mono);font-size:11px;line-height:1.62;
+  color:var(--ink-soft);text-align:right;padding-top:.42em;
+}
+.note b{display:block;color:var(--red);font-weight:500;letter-spacing:.1em;
+  text-transform:uppercase;font-size:9px;margin-bottom:4px}
+
+/* ── equations ─────────────────────────────────────── */
+.eq{
+  display:grid;grid-template-columns:1fr auto;align-items:center;gap:1rem;
+  margin:1.7em 0;
+}
+.eq .eq-body{overflow-x:auto;overflow-y:hidden;padding:2px 0}
+.eq .eq-num{font-family:var(--mono);font-size:11px;color:var(--ink-faint)}
+.katex{font-size:1.03em}
+.katex-display{margin:0 !important}
+
+/* notation panel */
+.panel{
+  border-top:2px solid var(--ink);border-bottom:1px solid var(--ink);
+  padding:16px 0 14px;margin:2em 0;background:linear-gradient(var(--paper-hi),var(--paper-hi));
+}
+.panel h4{
+  margin:0 0 10px;font-family:var(--mono);font-size:9.5px;letter-spacing:.24em;
+  text-transform:uppercase;color:var(--red);font-weight:500;
+}
+.panel dl{margin:0;display:grid;grid-template-columns:auto 1fr;gap:6px 18px;font-size:15.5px}
+.panel dt{font-family:var(--mono);font-size:13px;color:var(--blue);white-space:nowrap}
+.panel dd{margin:0;color:var(--ink-soft)}
+
+/* proposition */
+.prop{
+  border-left:3px solid var(--red);padding:4px 0 4px 20px;margin:2em 0;
+  font-size:18px;font-style:italic;color:var(--ink);
+}
+.prop b{
+  display:block;font-family:var(--mono);font-style:normal;font-size:9.5px;
+  letter-spacing:.24em;text-transform:uppercase;color:var(--red);
+  margin-bottom:8px;font-weight:500;
+}
+
+/* ── figures ───────────────────────────────────────── */
+figure{
+  margin:2.4em 0;padding:22px 22px 16px;
+  border:1px solid var(--rule);background:var(--paper-hi);
+}
+figure svg{display:block;width:100%;height:auto}
+figcaption{
+  margin-top:14px;padding-top:10px;border-top:1px solid var(--rule);
+  font-family:var(--mono);font-size:11px;line-height:1.6;color:var(--ink-soft);
+}
+figcaption b{color:var(--red);font-weight:500;letter-spacing:.06em}
+.fx-ink{stroke:var(--ink)}
+.fx-lab{font-family:var(--mono);font-size:10.5px;fill:var(--ink-soft)}
+.fx-lab-r{font-family:var(--mono);font-size:10.5px;fill:var(--red)}
+.fx-lab-b{font-family:var(--mono);font-size:10.5px;fill:var(--blue)}
+
+/* ── table ─────────────────────────────────────────── */
+.tbl-wrap{overflow-x:auto;margin:2.2em 0}
+table{border-collapse:collapse;width:100%;font-size:15px;min-width:560px}
+th,td{text-align:left;padding:11px 14px 11px 0;vertical-align:top;border-bottom:1px solid var(--rule)}
+thead th{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--red);font-weight:500;border-bottom:1.5px solid var(--ink);padding-bottom:8px;
+}
+tbody th{font-weight:500;color:var(--ink);width:26%}
+tbody tr:last-child th,tbody tr:last-child td{border-bottom:1.5px solid var(--ink)}
+
+/* ── colophon ──────────────────────────────────────── */
+.colophon{
+  margin-top:20px;padding:40px 0 70px;border-top:1px solid var(--rule);
+  text-align:center;font-family:var(--mono);font-size:10px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--ink-faint);line-height:2.2;
+}
+.colophon span{color:var(--red)}
+
+/* ── motion ────────────────────────────────────────── */
+.rise{opacity:0;transform:translateY(14px)}
+.rise.in{opacity:1;transform:none;transition:opacity .7s ease,transform .7s cubic-bezier(.2,.7,.3,1)}
+.title-page .halftitle,.title-page h1,.title-page .title-rule,
+.title-page .subtitle,.title-page .imprint{
+  animation:fadeup .85s cubic-bezier(.2,.7,.3,1) backwards;
+}
+.title-page h1{animation-delay:.1s}
+.title-page .title-rule{animation-delay:.2s}
+.title-page .subtitle{animation-delay:.26s}
+.title-page .imprint{animation-delay:.36s}
+@keyframes fadeup{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+:focus-visible{outline:2px solid var(--red);outline-offset:3px}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation:none !important;transition:none !important}
+  .rise{opacity:1;transform:none}
+}
+
+/* ── responsive ────────────────────────────────────── */
+@media (max-width:900px){
+  body{padding:14px 10px 50px;font-size:17px}
+  .book{border-left-width:8px}
+  .book::before{left:-8px;width:8px}
+  .leaf{padding:0 26px}
+  .body-col{padding-left:0;max-width:none}
+  .note{
+    float:none;width:auto;margin:1.3em 0;clear:none;text-align:left;
+    border-left:2px solid var(--red);padding:2px 0 2px 14px;
+  }
+  .chap-open{gap:16px;align-items:baseline}
+  .chap-num{width:auto;font-size:44px}
+  .title-page{padding:60px 0 30px}
+  .eq{grid-template-columns:1fr;gap:.3rem}
+  .eq .eq-num{justify-self:end}
+  figure{padding:14px 14px 12px}
+  .panel dl{grid-template-columns:1fr;gap:2px 0}
+  .panel dd{margin-bottom:8px}
+}
+</style>
+
+<div class="book">
+<div class="leaf">
+
+<!-- ══ TITLE PAGE ══════════════════════════════════ -->
+<section class="title-page">
+  <div class="halftitle">A short course in state estimation</div>
+  <h1>Three Ways to Know Where You Are</h1>
+  <div class="title-rule"></div>
+  <p class="subtitle">The extended Kalman filter, the unscented Kalman filter, and the factor graph — built up from first principles, then set against each other.</p>
+  <div class="imprint">
+    Written for engineering students<br>
+    Prerequisites: linear algebra · probability · calculus<br>
+    Six chapters · three plates
+  </div>
+</section>
+
+<!-- ══ CONTENTS ════════════════════════════════════ -->
+<nav aria-label="Contents">
+  <p class="toc-head">Contents</p>
+  <ol class="toc">
+    <li><a href="#ch1"><span class="n">I</span><span class="t">The problem, before any algorithm</span><span class="dots"></span><span class="p">1</span></a></li>
+    <li><a href="#ch2"><span class="n">II</span><span class="t">The Kalman filter: the exact case</span><span class="dots"></span><span class="p">4</span></a></li>
+    <li><a href="#ch3"><span class="n">III</span><span class="t">The EKF: pretend it is a straight line</span><span class="dots"></span><span class="p">9</span></a></li>
+    <li><a href="#ch4"><span class="n">IV</span><span class="t">The UKF: do not differentiate, sample</span><span class="dots"></span><span class="p">15</span></a></li>
+    <li><a href="#ch5"><span class="n">V</span><span class="t">Factor graphs: keep everything, solve it all</span><span class="dots"></span><span class="p">22</span></a></li>
+    <li><a href="#ch6"><span class="n">VI</span><span class="t">The three compared, and unified</span><span class="dots"></span><span class="p">31</span></a></li>
+  </ol>
+</nav>
+
+<!-- ══ CHAPTER I ═══════════════════════════════════ -->
+<section class="chapter" id="ch1">
+  <div class="running"><span>Three ways to know where you are</span><span><em>Chapter I</em> — The problem</span></div>
+  <div class="chap-open">
+    <div class="chap-num">I</div>
+    <h2 class="chap-title">
+      <span class="kicker">Chapter one</span>
+      <span class="name">The problem, before any algorithm</span>
+    </h2>
+  </div>
+
+  <div class="body-col">
+    <p class="lede">You have a robot. It carries sensors, and every one of them lies a little. The wheel encoders slip, the IMU drifts, the GPS wanders by a few metres, the camera sees blurry corners. You also have a model of how the robot moves, and that model lies too, because you never know the wind or the friction exactly.</p>
+
+    <p>The question is not "which sensor is right." None of them is. The question is: <em class="term">given everything I have measured up to now, what is the probability distribution over where I actually am?</em> Every method in this book is an answer to that one question. They differ only in what they are willing to approximate in order to compute the answer fast enough.</p>
+
+    <aside class="note"><b>Notation</b> Subscript <i>k</i> is the discrete time step. A hat means "our estimate of". A superscript minus means "before the measurement was folded in".</aside>
+
+    <h3 class="sub">1.1 · The state, and why it is enough</h3>
+
+    <p>The <em class="term">state</em> \(x_k \in \mathbb{R}^n\) is the smallest vector that captures everything about the system's past that matters for its future. For a ground robot that might be \([\,p_x, p_y, \theta\,]^\top\). For a drone with an IMU it is more like position, velocity, attitude quaternion, and the three-axis gyroscope and accelerometer biases — fifteen or sixteen numbers.</p>
+
+    <p>We assume the state evolves as a <em class="term">Markov process</em>: the next state depends only on the current one, not the whole history. And we assume each measurement depends only on the state at the instant it was taken. Those two assumptions are what make everything tractable.</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ x_k = f(x_{k-1},\, u_k) + w_k, \qquad w_k \sim \mathcal{N}(0, Q_k) \]</div>
+      <div class="eq-num">(1.1)</div>
+    </div>
+
+    <div class="eq">
+      <div class="eq-body">\[ z_k = h(x_k) + v_k, \qquad v_k \sim \mathcal{N}(0, R_k) \]</div>
+      <div class="eq-num">(1.2)</div>
+    </div>
+
+    <p>Equation (1.1) is the <em class="term">process model</em> — physics, kinematics, whatever you know about how the thing moves, driven by a control input \(u_k\). Equation (1.2) is the <em class="term">measurement model</em> — what a perfect sensor would read if the state were \(x_k\). The noises \(w_k\) and \(v_k\) are what you admit you do not know, and their covariances \(Q_k\) and \(R_k\) are how loudly you admit it.</p>
+
+    <div class="panel">
+      <h4>Symbols used throughout</h4>
+      <dl>
+        <dt>x<sub>k</sub></dt><dd>state at step <i>k</i>, dimension <i>n</i></dd>
+        <dt>z<sub>k</sub></dt><dd>measurement at step <i>k</i>, dimension <i>m</i></dd>
+        <dt>P<sub>k</sub></dt><dd>state covariance — how uncertain we are, and in which directions</dd>
+        <dt>Q, R</dt><dd>process and measurement noise covariance</dd>
+        <dt>f, h</dt><dd>process and measurement functions (possibly nonlinear)</dd>
+        <dt>F, H</dt><dd>Jacobians of <i>f</i> and <i>h</i></dd>
+      </dl>
+    </div>
+
+    <h3 class="sub">1.2 · The recursive Bayes filter</h3>
+
+    <aside class="note"><b>Read (1.3) as</b> "the total probability of landing at x<sub>k</sub>, summed over every place we could have come from."</aside>
+
+    <p>What we actually want is the <em class="term">belief</em>: the posterior distribution \(p(x_k \mid z_{1:k})\). It can be computed recursively in two half-steps. First <em class="term">predict</em>, which pushes the old belief forward through the motion model and always makes us less certain:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ p(x_k \mid z_{1:k-1}) = \int p(x_k \mid x_{k-1})\; p(x_{k-1} \mid z_{1:k-1})\; dx_{k-1} \]</div>
+      <div class="eq-num">(1.3)</div>
+    </div>
+
+    <p>Then <em class="term">update</em>, which multiplies in the new evidence and always makes us more certain:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ p(x_k \mid z_{1:k}) \;\propto\; \underbrace{p(z_k \mid x_k)}_{\text{likelihood}} \; \underbrace{p(x_k \mid z_{1:k-1})}_{\text{prior}} \]</div>
+      <div class="eq-num">(1.4)</div>
+    </div>
+
+    <p>That is the whole theory. Everything that follows is engineering, because that integral is intractable for a general distribution. There are exactly two escape routes, and they define the two families in this book.</p>
+
+    <p><strong>Route one: assume the belief is a Gaussian.</strong> Then you never store a distribution, only a mean \(\hat{x}\) and a covariance \(P\), and (1.3) and (1.4) collapse into matrix algebra. This gives you the Kalman filter, and its nonlinear cousins the EKF and UKF. <strong>Route two: stop tracking a belief at all.</strong> Instead keep every measurement ever taken and, whenever you need an answer, solve for the whole trajectory that best explains all of them at once. This gives you the factor graph.</p>
+  </div>
+  <div class="folio">1</div>
+</section>
+
+<!-- ══ CHAPTER II ══════════════════════════════════ -->
+<section class="chapter" id="ch2">
+  <div class="running"><span>Three ways to know where you are</span><span><em>Chapter II</em> — The Kalman filter</span></div>
+  <div class="chap-open">
+    <div class="chap-num">II</div>
+    <h2 class="chap-title">
+      <span class="kicker">Chapter two</span>
+      <span class="name">The Kalman filter: the exact case</span>
+    </h2>
+  </div>
+
+  <div class="body-col">
+    <p class="lede">Suppose the world is kind. Suppose \(f\) and \(h\) are linear, and every noise is Gaussian. Then something remarkable happens: a Gaussian pushed through a linear map is still exactly Gaussian, and the product of two Gaussians is exactly Gaussian. The belief never leaves the family, no approximation is ever made, and the Kalman filter is not a heuristic — it is the exact optimal solution.</p>
+
+    <p>You must understand this chapter before the next two, because the EKF and the UKF are both nothing more than "the Kalman filter, but with a trick for handling the curve."</p>
+
+    <p>In the linear case the models become matrices:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ x_k = F x_{k-1} + B u_k + w_k, \qquad z_k = H x_k + v_k \]</div>
+      <div class="eq-num">(2.1)</div>
+    </div>
+
+    <h3 class="sub">2.1 · Predict</h3>
+
+    <aside class="note"><b>Intuition</b> Moving blind always widens the ellipse. That is the <i>+ Q</i>.</aside>
+
+    <p>Push the mean through the model, and push the covariance through it twice — once on each side, because covariance is quadratic in the state:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ \hat{x}_k^- = F\hat{x}_{k-1} + Bu_k \]</div>
+      <div class="eq-num">(2.2)</div>
+    </div>
+    <div class="eq">
+      <div class="eq-body">\[ P_k^- = F P_{k-1} F^\top + Q \]</div>
+      <div class="eq-num">(2.3)</div>
+    </div>
+
+    <h3 class="sub">2.2 · Update</h3>
+
+    <p>Now a measurement arrives. Compute what you <em>expected</em> to see, \(H\hat{x}_k^-\), and subtract it from what you <em>did</em> see. The difference is the <em class="term">innovation</em>, and it is the only new information in the world:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ y_k = z_k - H\hat{x}_k^-, \qquad S_k = H P_k^- H^\top + R \]</div>
+      <div class="eq-num">(2.4)</div>
+    </div>
+
+    <aside class="note"><b>The whole filter in one line</b> New estimate = old estimate + gain × surprise.</aside>
+
+    <p>\(S_k\) is the <em class="term">innovation covariance</em>: how surprised you were entitled to be. The <em class="term">Kalman gain</em> then decides how much of that surprise to believe:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ K_k = P_k^- H^\top S_k^{-1} \]</div>
+      <div class="eq-num">(2.5)</div>
+    </div>
+
+    <div class="eq">
+      <div class="eq-body">\[ \hat{x}_k = \hat{x}_k^- + K_k y_k, \qquad P_k = (I - K_k H)\,P_k^- \]</div>
+      <div class="eq-num">(2.6)</div>
+    </div>
+
+    <p>Look at (2.5) and read it as a ratio. If \(P^-\) is large (you are lost) and \(R\) is small (the sensor is crisp), \(K\) tends toward \(H^{-1}\) and you snap onto the measurement. If \(P^-\) is tiny and \(R\) is huge, \(K \to 0\) and you ignore the sensor entirely. The gain is an automatic, optimal trust dial, and nobody has to tune it — it falls out of the covariances you declared.</p>
+
+    <div class="prop">
+      <b>Why this matters for the rest of the book</b>
+      The Kalman filter is exact only because linearity preserves Gaussianity. The moment \(f\) or \(h\) curves, a Gaussian pushed through it comes out lopsided and non-Gaussian, and the whole scheme becomes an approximation. The EKF and the UKF are two different ways of forcing the answer back into a Gaussian.
+    </div>
+  </div>
+  <div class="folio">4</div>
+</section>
+
+<!-- ══ CHAPTER III ═════════════════════════════════ -->
+<section class="chapter" id="ch3">
+  <div class="running"><span>Three ways to know where you are</span><span><em>Chapter III</em> — The extended Kalman filter</span></div>
+  <div class="chap-open">
+    <div class="chap-num">III</div>
+    <h2 class="chap-title">
+      <span class="kicker">Chapter three</span>
+      <span class="name">The EKF: pretend it is a straight line</span>
+    </h2>
+  </div>
+
+  <div class="body-col">
+    <p class="lede">Reality curves. Rotations compose multiplicatively, a camera projects by dividing by depth, range to a beacon is a square root of a sum of squares. None of these is linear, so the Kalman filter's guarantee evaporates. The extended Kalman filter's answer is the most obvious one an engineer could give: if the function is curved, replace it with its tangent and carry on as though nothing happened.</p>
+
+    <h3 class="sub">3.1 · The first-order Taylor expansion</h3>
+
+    <p>Expand \(f\) about the current estimate \(\hat{x}_{k-1}\) and throw away everything past the linear term:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ f(x) \;\approx\; f(\hat{x}_{k-1}) + F_k\,(x - \hat{x}_{k-1}), \qquad F_k = \left.\frac{\partial f}{\partial x}\right|_{\hat{x}_{k-1},\,u_k} \]</div>
+      <div class="eq-num">(3.1)</div>
+    </div>
+
+    <aside class="note"><b>Jacobian</b> The <i>n×n</i> matrix of every partial derivative of every output with respect to every input. It is the best linear approximation of <i>f</i> at one specific point.</aside>
+
+    <p>Likewise \(H_k = \partial h / \partial x\) evaluated at the predicted state \(\hat{x}_k^-\). Now substitute those Jacobians into the Kalman equations wherever \(F\) and \(H\) appeared. One subtlety matters enormously and is the source of most EKF bugs:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ \underbrace{\hat{x}_k^- = f(\hat{x}_{k-1}, u_k)}_{\text{use the true nonlinear } f}, \qquad \underbrace{P_k^- = F_k P_{k-1} F_k^\top + Q}_{\text{use the Jacobian}} \]</div>
+      <div class="eq-num">(3.2)</div>
+    </div>
+
+    <p>The <em>mean</em> travels through the real function; only the <em>covariance</em> is transported by the linear approximation. The update step follows the same pattern:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ y_k = z_k - h(\hat{x}_k^-), \qquad K_k = P_k^- H_k^\top \left( H_k P_k^- H_k^\top + R \right)^{-1} \]</div>
+      <div class="eq-num">(3.3)</div>
+    </div>
+
+    <figure class="rise">
+      <svg viewBox="0 0 560 250" role="img" aria-label="A curved function with its tangent line at the linearisation point; the two diverge as you move away.">
+        <line x1="52" y1="216" x2="524" y2="216" stroke="var(--rule)" stroke-width="1"/>
+        <line x1="52" y1="24" x2="52" y2="216" stroke="var(--rule)" stroke-width="1"/>
+        <path d="M60 206 C 150 200, 208 132, 292 100 S 452 62, 516 56" fill="none" stroke="var(--ink)" stroke-width="2"/>
+        <line x1="170" y1="142" x2="500" y2="35" stroke="var(--red)" stroke-width="1.6" stroke-dasharray="7 4"/>
+        <line x1="292" y1="100" x2="292" y2="216" stroke="var(--blue)" stroke-width="1" stroke-dasharray="3 3"/>
+        <circle cx="292" cy="100" r="4.5" fill="var(--blue)"/>
+        <path d="M470 47 L470 63" stroke="var(--red)" stroke-width="1.2"/>
+        <path d="M466 47 L474 47 M466 63 L474 63" stroke="var(--red)" stroke-width="1.2"/>
+        <text class="fx-lab" x="392" y="112">true f(x)</text>
+        <text class="fx-lab-r" x="196" y="120">tangent used by the EKF</text>
+        <text class="fx-lab-b" x="256" y="236">x̂ (linearisation point)</text>
+        <text class="fx-lab-r" x="482" y="59">error</text>
+        <text class="fx-lab" x="58" y="36">f(x)</text>
+      </svg>
+      <figcaption><b>Figure 3.1</b> — At the estimate the tangent is perfect. Away from it the error grows with the curvature and with the width of your uncertainty. An EKF is accurate exactly in proportion to how confident and how correct it already was.</figcaption>
+    </figure>
+
+    <h3 class="sub">3.2 · What goes wrong</h3>
+
+    <p><strong>You linearise about a guess.</strong> If \(\hat{x}\) is off, the Jacobian is evaluated at the wrong point, the covariance update is wrong, the gain is wrong, and the next estimate is worse. The error compounds. This is <em class="term">divergence</em>, and it is the classic EKF failure.</p>
+
+    <p><strong>The covariance becomes a lie.</strong> Truncating the Taylor series discards real uncertainty, so \(P\) reports more confidence than is warranted. An overconfident filter down-weights good measurements, which makes it more wrong, which makes it more overconfident.</p>
+
+    <p><strong>You must supply Jacobians.</strong> By hand, for a sixteen-dimensional state, with quaternions in it. They are tedious, error-prone, and silently wrong when you get a sign backwards.</p>
+
+    <aside class="note"><b>Still everywhere</b> ArduPilot, PX4 and almost every flight controller run an EKF. It is <i>O</i>(n<sup>3</sup>) at worst, needs no iteration, and hits a hard 400 Hz deadline on a microcontroller. Correctness is not the only axis.</aside>
+
+    <p>And yet the EKF remains the workhorse of embedded state estimation, because it is cheap, deterministic, single-pass, and — when the sampling rate is high enough that the state barely moves between steps — the linearisation error is genuinely small.</p>
+  </div>
+  <div class="folio">9</div>
+</section>
+
+<!-- ══ CHAPTER IV ══════════════════════════════════ -->
+<section class="chapter" id="ch4">
+  <div class="running"><span>Three ways to know where you are</span><span><em>Chapter IV</em> — The unscented Kalman filter</span></div>
+  <div class="chap-open">
+    <div class="chap-num">IV</div>
+    <h2 class="chap-title">
+      <span class="kicker">Chapter four</span>
+      <span class="name">The UKF: do not differentiate, sample</span>
+    </h2>
+  </div>
+
+  <div class="body-col">
+    <p class="lede">Julier and Uhlmann began from an observation that sounds almost too simple: it is easier to approximate a probability distribution than to approximate an arbitrary nonlinear function. So do not linearise the function at all. Instead choose a small, deliberate set of points that carry the mean and covariance exactly, push each one through the <em>real</em> nonlinear function, and fit a Gaussian to wherever they land.</p>
+
+    <p>This is the <em class="term">unscented transform</em>, and the UKF is what you get when you use it in place of the Jacobians in Chapter III.</p>
+
+    <h3 class="sub">4.1 · Choosing the sigma points</h3>
+
+    <p>For an \(n\)-dimensional state you need \(2n+1\) points. One sits at the mean; the rest are placed symmetrically along the principal axes of the covariance, at a distance set by a scaling parameter:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ \mathcal{X}^{(0)} = \hat{x}, \qquad \mathcal{X}^{(i)} = \hat{x} \pm \left( \sqrt{(n+\lambda)P} \right)_i, \quad i = 1 \dots n \]</div>
+      <div class="eq-num">(4.1)</div>
+    </div>
+
+    <aside class="note"><b>Matrix square root</b> Take the Cholesky factor <i>L</i> with <i>LL</i><sup>⊤</sup> = <i>P</i>. Column <i>i</i> of <i>L</i> is the <i>i</i>-th axis of the uncertainty ellipsoid.</aside>
+
+    <p>where \(\lambda = \alpha^2(n+\kappa) - n\) controls the spread. Typical settings are \(\alpha \approx 10^{-3}\), \(\kappa = 0\), and \(\beta = 2\) which is optimal when the true distribution really is Gaussian. Each point carries two weights, one for reconstructing the mean and one for the covariance:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ W_m^{(0)} = \frac{\lambda}{n+\lambda}, \quad W_c^{(0)} = \frac{\lambda}{n+\lambda} + (1 - \alpha^2 + \beta), \quad W_m^{(i)} = W_c^{(i)} = \frac{1}{2(n+\lambda)} \]</div>
+      <div class="eq-num">(4.2)</div>
+    </div>
+
+    <h3 class="sub">4.2 · Propagate and recombine</h3>
+
+    <p>Push every point through the true function — no derivatives anywhere — then take the weighted mean and weighted scatter of the results:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ \mathcal{Y}^{(i)} = f\!\left(\mathcal{X}^{(i)}\right), \qquad \hat{x}^- = \sum_{i=0}^{2n} W_m^{(i)} \mathcal{Y}^{(i)} \]</div>
+      <div class="eq-num">(4.3)</div>
+    </div>
+
+    <div class="eq">
+      <div class="eq-body">\[ P^- = \sum_{i=0}^{2n} W_c^{(i)} \left( \mathcal{Y}^{(i)} - \hat{x}^- \right)\left( \mathcal{Y}^{(i)} - \hat{x}^- \right)^\top + Q \]</div>
+      <div class="eq-num">(4.4)</div>
+    </div>
+
+    <figure class="rise">
+      <svg viewBox="0 0 560 230" role="img" aria-label="Sigma points on an input covariance ellipse are pushed through a nonlinear map and refitted with a new ellipse.">
+        <ellipse cx="112" cy="118" rx="66" ry="42" fill="none" stroke="var(--blue)" stroke-width="1.3"/>
+        <circle cx="112" cy="118" r="4" fill="var(--ink)"/>
+        <circle cx="178" cy="118" r="4" fill="var(--red)"/>
+        <circle cx="46"  cy="118" r="4" fill="var(--red)"/>
+        <circle cx="112" cy="76"  r="4" fill="var(--red)"/>
+        <circle cx="112" cy="160" r="4" fill="var(--red)"/>
+        <text class="fx-lab-b" x="60" y="42">P (input)</text>
+        <text class="fx-lab-r" x="30" y="204">2n+1 sigma points</text>
+        <path d="M214 118 L318 118" stroke="var(--ink)" stroke-width="1.3"/>
+        <path d="M310 113 L320 118 L310 123" fill="none" stroke="var(--ink)" stroke-width="1.3"/>
+        <text class="fx-lab" x="240" y="106">f( · )</text>
+        <ellipse cx="440" cy="112" rx="70" ry="34" fill="none" stroke="var(--blue)" stroke-width="1.3" transform="rotate(-24 440 112)"/>
+        <circle cx="446" cy="106" r="4" fill="var(--ink)"/>
+        <circle cx="504" cy="72"  r="4" fill="var(--red)"/>
+        <circle cx="378" cy="150" r="4" fill="var(--red)"/>
+        <circle cx="418" cy="66"  r="4" fill="var(--red)"/>
+        <circle cx="470" cy="150" r="4" fill="var(--red)"/>
+        <text class="fx-lab-b" x="380" y="204">refitted Gaussian</text>
+      </svg>
+      <figcaption><b>Figure 4.1</b> — The unscented transform. Nothing is differentiated; the points themselves do the work. The output ellipse has rotated and stretched because the map was nonlinear — an EKF, transporting the covariance through a single tangent plane, cannot represent that as faithfully.</figcaption>
+    </figure>
+
+    <p>The measurement step is identical in spirit. Push the sigma points through \(h\), get \(\hat{z}^-\) and the innovation covariance \(P_{zz}\), and additionally form the <em class="term">cross-covariance</em> between state and measurement:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ P_{xz} = \sum_{i=0}^{2n} W_c^{(i)} \left( \mathcal{X}^{(i)} - \hat{x}^- \right)\left( \mathcal{Z}^{(i)} - \hat{z}^- \right)^\top, \qquad K = P_{xz}\,P_{zz}^{-1} \]</div>
+      <div class="eq-num">(4.5)</div>
+    </div>
+
+    <p>Compare (4.5) with the EKF's \(K = P^-H^\top S^{-1}\). They are the same formula: \(P^-H^\top\) <em>is</em> the linear estimate of the cross-covariance. The UKF simply computes it by sampling instead of by differentiating.</p>
+
+    <div class="prop">
+      <b>Accuracy claim</b>
+      For a Gaussian input the unscented transform captures the true posterior mean and covariance correctly to third order in the Taylor expansion, whereas the EKF is correct only to first order in the mean and second order in the covariance. It buys this for roughly \(2n+1\) evaluations of \(f\) instead of one, and no Jacobians at all.
+    </div>
+
+    <p>The catch is that the UKF is still a filter. It still assumes the posterior is Gaussian, it still processes measurements once and forgets them, and it still cannot go back and revise a state it committed to ten seconds ago. For that you need to abandon filtering altogether.</p>
+  </div>
+  <div class="folio">15</div>
+</section>
+
+<!-- ══ CHAPTER V ═══════════════════════════════════ -->
+<section class="chapter" id="ch5">
+  <div class="running"><span>Three ways to know where you are</span><span><em>Chapter V</em> — Factor graphs</span></div>
+  <div class="chap-open">
+    <div class="chap-num">V</div>
+    <h2 class="chap-title">
+      <span class="kicker">Chapter five</span>
+      <span class="name">Factor graphs: keep everything, solve it all</span>
+    </h2>
+  </div>
+
+  <div class="body-col">
+    <p class="lede">A filter is a machine that forgets. It compresses the entire past into one mean and one covariance, and once that compression has happened the information is gone for good. The factor graph refuses to compress. It writes down every unknown and every measurement as a graph, and treats estimation as one large optimisation problem rather than a recursion.</p>
+
+    <h3 class="sub">5.1 · The graph</h3>
+
+    <p>A factor graph is a bipartite graph with two kinds of node. <em class="term">Variable nodes</em> are the things you do not know: robot poses at each time, IMU biases, landmark positions, camera calibration. <em class="term">Factor nodes</em> are the things you measured, and each one connects only to the variables it actually constrains.</p>
+
+    <aside class="note"><b>Why bipartite</b> A GPS factor touches one pose. An odometry or preintegrated-IMU factor touches two consecutive poses. A visual observation touches one pose and one landmark. Almost nothing touches everything — that is the sparsity the solver exploits.</aside>
+
+    <p>The joint posterior over the whole trajectory \(X = \{x_0 \dots x_K\}\) factorises exactly along the graph:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ p(X \mid Z) \;\propto\; \prod_{i} \phi_i\!\left( X_i \right) \]</div>
+      <div class="eq-num">(5.1)</div>
+    </div>
+
+    <p>where \(X_i\) is the small subset of variables that factor \(i\) touches. Assume each factor is Gaussian in its residual, take the negative logarithm, and the product becomes a sum. Maximising the posterior turns into minimising a sum of squares:</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ X^\star = \arg\min_{X} \sum_i \left\lVert h_i(X_i) - z_i \right\rVert^2_{\Sigma_i} \]</div>
+      <div class="eq-num">(5.2)</div>
+    </div>
+
+    <p>The notation \(\lVert e \rVert^2_{\Sigma} = e^\top \Sigma^{-1} e\) is the <em class="term">Mahalanobis norm</em> — squared error, weighted by how much you trust that sensor. This single equation is the whole of modern SLAM, bundle adjustment and visual-inertial odometry.</p>
+
+    <h3 class="sub">5.2 · Solving it</h3>
+
+    <p>Equation (5.2) is a nonlinear least-squares problem, so solve it the standard way. Linearise every residual about the current estimate, stack them into one tall sparse matrix \(A\) and one vector \(b\), and solve for a correction \(\delta\):</p>
+
+    <div class="eq">
+      <div class="eq-body">\[ \delta^\star = \arg\min_{\delta} \lVert A\delta - b \rVert^2 \quad \Longleftrightarrow \quad \left(A^\top A\right)\delta^\star = A^\top b \]</div>
+      <div class="eq-num">(5.3)</div>
+    </div>
+
+    <div class="eq">
+      <div class="eq-body">\[ X \leftarrow X \oplus \delta^\star, \qquad \text{repeat until } \lVert\delta^\star\rVert < \varepsilon \]</div>
+      <div class="eq-num">(5.4)</div>
+    </div>
+
+    <aside class="note"><b>The key word is <i>repeat</i></b> The EKF linearises once, at a guess it can never revisit. Gauss–Newton linearises again and again, each time at a better point. That difference alone removes the EKF's main failure mode.</aside>
+
+    <p>That is Gauss–Newton; adding a damping term \((A^\top A + \mu I)\) gives Levenberg–Marquardt, which is what you actually use in practice. \(A^\top A\) is the <em class="term">information matrix</em>, and it is extremely sparse because each factor touches only a couple of variables. Sparse Cholesky or QR factorisation exploits that, which is the only reason solving for ten thousand poses at once is feasible at all.</p>
+
+    <figure class="rise">
+      <svg viewBox="0 0 560 300" role="img" aria-label="Top: a filter chain where only the newest state survives. Bottom: a factor graph retaining all poses with a loop closure constraint.">
+        <text class="fx-lab-r" x="0" y="16">FILTER — the past is marginalised away</text>
+        <line x1="60" y1="62" x2="128" y2="62" stroke="var(--ink)" stroke-width="1.2" opacity=".3"/>
+        <line x1="172" y1="62" x2="240" y2="62" stroke="var(--ink)" stroke-width="1.2" opacity=".3"/>
+        <line x1="284" y1="62" x2="352" y2="62" stroke="var(--ink)" stroke-width="1.2"/>
+        <circle cx="40"  cy="62" r="19" fill="none" stroke="var(--ink)" stroke-width="1.2" opacity=".28"/>
+        <circle cx="150" cy="62" r="19" fill="none" stroke="var(--ink)" stroke-width="1.2" opacity=".28"/>
+        <circle cx="262" cy="62" r="19" fill="none" stroke="var(--ink)" stroke-width="1.2" opacity=".28"/>
+        <circle cx="372" cy="62" r="21" fill="none" stroke="var(--red)" stroke-width="2"/>
+        <text class="fx-lab" x="33" y="66" opacity=".45">x₀</text>
+        <text class="fx-lab" x="143" y="66" opacity=".45">x₁</text>
+        <text class="fx-lab" x="255" y="66" opacity=".45">x₂</text>
+        <text class="fx-lab-r" x="365" y="66">x₃</text>
+        <text class="fx-lab" x="404" y="58">only this survives;</text>
+        <text class="fx-lab" x="404" y="74">memory is O(1)</text>
+        <line x1="0" y1="118" x2="560" y2="118" stroke="var(--rule)" stroke-width="1" stroke-dasharray="4 4"/>
+        <text class="fx-lab-r" x="0" y="152">FACTOR GRAPH — everything is retained</text>
+        <path d="M40 176 C 130 128, 282 128, 372 176" fill="none" stroke="var(--red)" stroke-width="1.5" stroke-dasharray="6 4"/>
+        <rect x="199" y="140" width="13" height="13" fill="var(--red)"/>
+        <text class="fx-lab-r" x="222" y="151">loop closure — also corrects x₀</text>
+        <line x1="60" y1="212" x2="128" y2="212" stroke="var(--ink)" stroke-width="1.2"/>
+        <line x1="172" y1="212" x2="240" y2="212" stroke="var(--ink)" stroke-width="1.2"/>
+        <line x1="284" y1="212" x2="352" y2="212" stroke="var(--ink)" stroke-width="1.2"/>
+        <circle cx="40"  cy="212" r="19" fill="none" stroke="var(--blue)" stroke-width="1.6"/>
+        <circle cx="150" cy="212" r="19" fill="none" stroke="var(--blue)" stroke-width="1.6"/>
+        <circle cx="262" cy="212" r="19" fill="none" stroke="var(--blue)" stroke-width="1.6"/>
+        <circle cx="372" cy="212" r="19" fill="none" stroke="var(--blue)" stroke-width="1.6"/>
+        <text class="fx-lab-b" x="33" y="216">x₀</text>
+        <text class="fx-lab-b" x="143" y="216">x₁</text>
+        <text class="fx-lab-b" x="255" y="216">x₂</text>
+        <text class="fx-lab-b" x="365" y="216">x₃</text>
+        <rect x="88" y="206" width="13" height="13" fill="var(--ink)"/>
+        <rect x="199" y="206" width="13" height="13" fill="var(--ink)"/>
+        <rect x="311" y="206" width="13" height="13" fill="var(--ink)"/>
+        <line x1="40" y1="231" x2="40" y2="262" stroke="var(--ink)" stroke-width="1.2"/>
+        <line x1="262" y1="231" x2="262" y2="262" stroke="var(--ink)" stroke-width="1.2"/>
+        <rect x="34" y="262" width="13" height="13" fill="var(--ink)"/>
+        <rect x="256" y="262" width="13" height="13" fill="var(--ink)"/>
+        <text class="fx-lab" x="56" y="274">prior</text>
+        <text class="fx-lab" x="284" y="274">GPS fix</text>
+        <text class="fx-lab" x="404" y="208">circles = unknowns</text>
+        <text class="fx-lab" x="404" y="224">squares = measurements</text>
+      </svg>
+      <figcaption><b>Figure 5.1</b> — The structural difference. A filter is a chain that consumes itself. A factor graph is a record that can be re-solved, which is why a loop closure detected now can retroactively fix a pose from five minutes ago.</figcaption>
+    </figure>
+
+    <h3 class="sub">5.3 · Paying for the memory</h3>
+
+    <p>Keeping everything cannot be free, and three techniques make it practical.</p>
+
+    <p><strong>Marginalisation.</strong> Drop old variables but keep their information as a dense prior on whatever they touched, via the Schur complement. Marginalise <em>everything</em> except the newest pose and you have — precisely — a filter.</p>
+
+    <p><strong>Fixed-lag smoothing.</strong> Keep a sliding window of the last few seconds, marginalise anything older. This is the pragmatic middle ground, and what most production visual-inertial systems actually run.</p>
+
+    <p><strong>Incremental solving.</strong> iSAM2 and the Bayes tree notice that a new measurement disturbs only a small part of the graph, and re-factorise only that part. You get near-batch accuracy at near-filter cost, which is why GTSAM-based systems can run in real time.</p>
+  </div>
+  <div class="folio">22</div>
+</section>
+
+<!-- ══ CHAPTER VI ══════════════════════════════════ -->
+<section class="chapter" id="ch6">
+  <div class="running"><span>Three ways to know where you are</span><span><em>Chapter VI</em> — Compared and unified</span></div>
+  <div class="chap-open">
+    <div class="chap-num">VI</div>
+    <h2 class="chap-title">
+      <span class="kicker">Chapter six</span>
+      <span class="name">The three compared, and unified</span>
+    </h2>
+  </div>
+
+  <div class="body-col">
+    <p class="lede">Now that each method has been built from its own starting point, the differences are easy to state, because they all reduce to two decisions: how do you handle the curve, and how much of the past do you keep?</p>
+
+    <div class="tbl-wrap">
+      <table>
+        <thead>
+          <tr><th scope="col"></th><th scope="col">EKF</th><th scope="col">UKF</th><th scope="col">Factor graph</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">Handles the curve by</th><td>One tangent, at the current guess</td><td>Sampling 2n+1 points through the true function</td><td>Re-linearising repeatedly at improving guesses</td></tr>
+          <tr><th scope="row">Needs Jacobians</th><td>Yes, analytic, by hand</td><td>No</td><td>Yes, but frameworks autodiff them</td></tr>
+          <tr><th scope="row">Accuracy order</th><td>1st (mean), 2nd (covariance)</td><td>3rd for Gaussian inputs</td><td>Local optimum of the true cost</td></tr>
+          <tr><th scope="row">Cost per step</th><td>Lowest, one pass</td><td>≈ 2n+1 model evaluations</td><td>Highest, tunable by window size</td></tr>
+          <tr><th scope="row">Memory</th><td>O(1)</td><td>O(1)</td><td>O(window) or O(trajectory)</td></tr>
+          <tr><th scope="row">Can revise the past</th><td>No</td><td>No</td><td>Yes — this is the point</td></tr>
+          <tr><th scope="row">Loop closure</th><td>Cannot use it properly</td><td>Cannot use it properly</td><td>Native</td></tr>
+          <tr><th scope="row">Typical home</th><td>Flight controllers, INS/GNSS fusion</td><td>Nonlinear models with ugly or absent derivatives</td><td>SLAM, VIO, bundle adjustment, calibration</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3 class="sub">6.1 · The unifying statement</h3>
+
+    <div class="prop">
+      <b>Proposition</b>
+      An extended Kalman filter is a factor graph in which every variable except the newest one has been marginalised out, and in which each factor is linearised exactly once, at the estimate available when it first arrived.
+    </div>
+
+    <aside class="note"><b>Worth memorising</b> Marginalise the past → you get a filter. Keep the past and re-linearise → you get a smoother. Everything else is implementation.</aside>
+
+    <p>Once you see this, the whole taxonomy collapses into a single axis. Filtering and smoothing are not rival theories; they are the two ends of a spectrum, and fixed-lag smoothing is the dial in between. The UKF sits off to one side of that axis entirely — it is a filter, at the same point on the spectrum as the EKF, differing only in how it moves a Gaussian through a curve.</p>
+
+    <h3 class="sub">6.2 · How to choose</h3>
+
+    <p><strong>Reach for an EKF</strong> when you have a hard real-time deadline on constrained hardware, a high update rate that keeps the linearisation error small, and no need to ever revisit the past. Attitude and position estimation on a flight controller is the archetype.</p>
+
+    <p><strong>Reach for a UKF</strong> when the nonlinearity is strong enough that a tangent misleads you, or when \(f\) is a lookup table, a simulation, or something else you cannot differentiate cleanly. It is a drop-in replacement with the same interface and a modest constant-factor cost.</p>
+
+    <p><strong>Reach for a factor graph</strong> whenever the same place can be observed twice. Loop closures, multi-sensor calibration, offline trajectory refinement, anything where a measurement arriving now should be allowed to change your opinion about an hour ago. This is why every serious SLAM and visual-inertial system built in the last decade is a graph optimiser and not a filter.</p>
+
+    <p>In a real robot these coexist rather than compete. The autopilot runs an EKF at hundreds of hertz because it must. The companion computer runs a factor graph at a lazier rate because it can afford to think. Choosing between them is usually not a question of which is better, but of which layer of the stack you are standing in.</p>
+  </div>
+  <div class="folio">31</div>
+</section>
+
+<div class="colophon">
+  End of the six chapters<br>
+  <span>Kalman 1960</span> · <span>Julier &amp; Uhlmann 1997</span> · <span>Dellaert &amp; Kaess 2006</span><br>
+  Set in Bodoni Moda, Spectral and IBM Plex Mono
+</div>
+
+</div><!-- /leaf -->
+</div><!-- /book -->
+
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"></script>
+<script>
+window.addEventListener("DOMContentLoaded", function () {
+  function typeset() {
+    if (!window.renderMathInElement) { setTimeout(typeset, 120); return; }
+    renderMathInElement(document.body, {
+      delimiters: [
+        { left: "\\[", right: "\\]", display: true },
+        { left: "\\(", right: "\\)", display: false }
+      ],
+      throwOnError: false
+    });
+  }
+  typeset();
+
+  var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var targets = document.querySelectorAll(".rise");
+  if (reduce || !("IntersectionObserver" in window)) {
+    targets.forEach(function (t) { t.classList.add("in"); });
+  } else {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (e) {
+        if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); }
+      });
+    }, { rootMargin: "0px 0px -12% 0px" });
+    targets.forEach(function (t) { io.observe(t); });
+  }
+});
+</script>
