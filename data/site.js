@@ -27,6 +27,17 @@ const SITE = {
       ]
     },
     {
+      file: 'autonomous-mobile-robot-navigation/index.html',
+      title: 'Autonomous Mobile Robot Navigation — A Field Book',
+      desc: 'The full navigation stack in eight deep-dive chapters — math and optimization, odometry, SLAM, relocalization, planning and control, ROS-free infrastructure, outdoor navigation, and learning-based methods. Equations, diagrams, and runnable C++ in every chapter.',
+      meta: [
+        { label: 'NEW', hot: true },
+        { label: 'robotics' },
+        { label: '8 chapters' },
+        { label: 'updated Jul 2026' }
+      ]
+    },
+    {
       file: 'reading/slam/index.html',
       title: 'SLAM: Zero to Hero — A Field Book',
       desc: 'A field book on SLAM: foundations, estimation math, sensors and calibration, lidar and visual SLAM, RTAB-Map, learned methods, evaluation, and navigation on top of the map. Worked setups in every chapter.',

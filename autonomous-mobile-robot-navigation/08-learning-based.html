@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 8 · Learning-Based Methods · Autonomous Mobile Robot Navigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">08</div>
+  <div class="chapter-kicker">Phase Eight · Where the Networks Actually Plug In</div>
+  <h1>Learning-Based Methods (AI Navigation)</h1>
+  <p class="chapter-sub">Seven phases built the classical machine. This one asks, module by module, whether a neural network does the job better — and keeps score honestly: some answers are "yes, shipped years ago", some are "promising", and some are "not without a classical safety net".</p>
+</header>
+
+<h2><span class="sec-no">8.1</span>Where Learning Plugs In</h2>
+<p>"AI navigation" is not one idea; it is five distinct surgeries on the classical pipeline, each replacing a different organ. Sorting any paper or product claim into the right slot is half the literacy this phase teaches:</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">FIVE SURGERIES ON THE CLASSICAL PIPELINE</text>
+  <!-- classical row -->
+  <rect x="40" y="70" width="120" height="48" rx="7" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="52" y="90" font-size="11" fill="#23201a">features &amp;</text>
+  <text x="52" y="105" font-size="11" fill="#23201a">odometry (Ph 2)</text>
+  <rect x="185" y="70" width="110" height="48" rx="7" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="197" y="90" font-size="11" fill="#23201a">mapping</text>
+  <text x="197" y="105" font-size="11" fill="#23201a">(Ph 3)</text>
+  <rect x="320" y="70" width="120" height="48" rx="7" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="332" y="90" font-size="11" fill="#23201a">localization</text>
+  <text x="332" y="105" font-size="11" fill="#23201a">(Ph 4)</text>
+  <rect x="465" y="70" width="110" height="48" rx="7" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="477" y="90" font-size="11" fill="#23201a">planning</text>
+  <text x="477" y="105" font-size="11" fill="#23201a">(Ph 5)</text>
+  <rect x="600" y="70" width="120" height="48" rx="7" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="612" y="90" font-size="11" fill="#23201a">local control</text>
+  <text x="612" y="105" font-size="11" fill="#23201a">(Ph 5)</text>
+  <!-- learned row -->
+  <rect x="40" y="190" width="120" height="52" rx="7" fill="#0e5f5b" fill-opacity="0.07" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="52" y="210" font-size="10.5" fill="#0e5f5b">SuperPoint·LightGlue</text>
+  <text x="52" y="226" font-size="10.5" fill="#0e5f5b">DROID-SLAM (8.2)</text>
+  <rect x="185" y="190" width="110" height="52" rx="7" fill="#0e5f5b" fill-opacity="0.07" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="197" y="210" font-size="10.5" fill="#0e5f5b">NeRF · 3DGS</text>
+  <text x="197" y="226" font-size="10.5" fill="#0e5f5b">SLAM (8.3)</text>
+  <rect x="320" y="190" width="120" height="52" rx="7" fill="#0e5f5b" fill-opacity="0.07" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="332" y="210" font-size="10.5" fill="#0e5f5b">NetVLAD · CosPlace</text>
+  <text x="332" y="226" font-size="10.5" fill="#0e5f5b">(done — Ph 4.5)</text>
+  <rect x="465" y="190" width="110" height="52" rx="7" fill="#0e5f5b" fill-opacity="0.07" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="477" y="210" font-size="10.5" fill="#0e5f5b">MPNet · Neural A*</text>
+  <text x="477" y="226" font-size="10.5" fill="#0e5f5b">VIN (8.5)</text>
+  <rect x="600" y="190" width="120" height="52" rx="7" fill="#0e5f5b" fill-opacity="0.07" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="612" y="210" font-size="10.5" fill="#0e5f5b">DRL policies (8.4)</text>
+  <text x="612" y="226" font-size="10.5" fill="#0e5f5b">VLA agents (8.6)</text>
+  <!-- swap arrows -->
+  <line x1="100" y1="122" x2="100" y2="186" stroke="#0e5f5b" stroke-width="2"/>
+  <polygon points="100,186 95,176 105,176" fill="#0e5f5b"/>
+  <line x1="240" y1="122" x2="240" y2="186" stroke="#0e5f5b" stroke-width="2"/>
+  <polygon points="240,186 235,176 245,176" fill="#0e5f5b"/>
+  <line x1="380" y1="122" x2="380" y2="186" stroke="#0e5f5b" stroke-width="2"/>
+  <polygon points="380,186 375,176 385,176" fill="#0e5f5b"/>
+  <line x1="520" y1="122" x2="520" y2="186" stroke="#0e5f5b" stroke-width="2"/>
+  <polygon points="520,186 515,176 525,176" fill="#0e5f5b"/>
+  <line x1="660" y1="122" x2="660" y2="186" stroke="#0e5f5b" stroke-width="2"/>
+  <polygon points="660,186 655,176 665,176" fill="#0e5f5b"/>
+  <text x="200" y="278" font-size="11.5" fill="#4d463a">each swap is independent — and each keeps the classical version as its benchmark</text>
+</svg>
+</div>
+<figcaption>Fig 8.1: the five learned surgeries, mapped onto the phases they operate on. Note the middle column: learned place recognition was so decisively better that Phase 4 already treated it as standard — the pattern every other column is trying to repeat.</figcaption>
+</figure>
+<div class="keypoint">The question is never "learned or classical?" — it is "which <em>module</em>, and what happens when the network is wrong?" Learned perception failed gracefully (a bad match is vetoed by RANSAC) and shipped a decade ago. Learned control fails at 2 m/s with no veto — which is why it arrives last, wrapped in classical safety nets.</div>
+
+<h2><span class="sec-no">8.2</span>Learned Front-Ends: SuperPoint, LightGlue, DROID-SLAM</h2>
+<p>Phase 2&rsquo;s visual front-end had two handcrafted organs — detect features, match features — and both fell to networks first. <strong>SuperPoint</strong> detects interest points and descriptors in one forward pass, trained by <em>self-supervision</em>: synthetic corners bootstrap a detector, then "homographic adaptation" (aggregating detections over many random warps of real images) labels its own training data — no human annotation, and dramatically better repeatability than ORB under lighting and viewpoint change. <strong>SuperGlue</strong> replaced nearest-neighbor descriptor matching with a graph neural network doing cross-image attention — matching becomes a joint assignment problem informed by geometry-ish context — and <strong>LightGlue</strong> made it fast enough for real-time SLAM by letting easy pairs exit early. The pragmatic 2026 recipe for a robust visual front-end is literally: ORB-SLAM3&rsquo;s architecture, SuperPoint + LightGlue features, classical RANSAC verification unchanged.</p>
+<p><strong>DROID-SLAM</strong> goes deeper: instead of replacing pieces, it makes the whole visual-SLAM loop <em>differentiable</em>. A recurrent GRU repeatedly predicts dense optical-flow <em>revisions</em> between keyframes, and each iteration ends in a <strong>dense bundle adjustment layer</strong> — a real Gauss-Newton solve over poses and per-pixel depth, implemented as a differentiable operator, so the network learns flow that makes geometry converge:</p>
+<pre><code class="language-text">DROID-SLAM update, per iteration:
+  flow revision + confidence  ←  GRU(correlation features, current estimate)
+  poses, depths  ←  dense BA:  argmin Σ ‖ predicted_flow − flow(T, d) ‖²_Σ
+                    (a real damped Gauss-Newton step — Phase 1.8 as a layer)
+
+the network never outputs poses; it outputs measurements FOR the optimizer.
+that division of labor is why it generalizes across cameras and datasets.</code></pre>
+<p><strong>DeepMapping 2.0</strong> applies the same philosophy to lidar: registration of large point-cloud collections as self-supervised optimization, with networks providing the data association that classical ICP guesses by proximity. The pattern across all of these — <em>networks propose, optimizers dispose</em> — is Phase 4&rsquo;s funnel again, and it is the single most reliable design rule in learned robotics.</p>
+<table>
+  <tr><th>System</th><th>Replaces</th><th>Trained by</th><th>Classical part kept</th></tr>
+  <tr><td>SuperPoint</td><td>ORB/SIFT detection</td><td>self-supervision (homographic adaptation)</td><td>everything downstream</td></tr>
+  <tr><td>SuperGlue / LightGlue</td><td>NN descriptor matching</td><td>supervised matches, attention GNN</td><td>RANSAC + pose solvers</td></tr>
+  <tr><td>DROID-SLAM</td><td>the whole VO/VSLAM front half</td><td>end-to-end through a differentiable BA layer</td><td>bundle adjustment itself — as a layer</td></tr>
+  <tr><td>DeepMapping 2.0</td><td>ICP&rsquo;s data association at map scale</td><td>self-supervised registration objectives</td><td>the optimization backbone</td></tr>
+</table>
+
+<h2><span class="sec-no">8.3</span>Neural Maps: NeRF and 3D Gaussian Splatting SLAM</h2>
+<p>Phase 3 stored the world as grids and distance fields. The neural alternative stores it as <em>a function you can render</em>: give me a camera pose, I give you the photograph. <strong>NeRF</strong> represents the scene as an MLP mapping position and view direction to density and color, rendered by integrating along rays; <strong>3D Gaussian Splatting</strong> represents it as millions of explicit anisotropic Gaussians, rendered by <em>rasterizing</em> them — orders of magnitude faster, which is what made real-time SLAM on these representations plausible:</p>
+<pre><code class="language-text">NeRF render (per pixel, sample points along the ray):
+  C = Σᵢ Tᵢ·(1 − exp(−σᵢδᵢ))·cᵢ,     Tᵢ = exp(−Σ_{j&lt;i} σⱼδⱼ)
+  → tens–hundreds of MLP queries per pixel: photoreal, slow
+
+3DGS render: project each Gaussian, sort, alpha-composite front-to-back
+  → pure rasterization: real-time, and the map is explicit and editable
+
+neural SLAM = tracking (optimize T against the render: "photometric ICP")
+            + mapping (optimize the representation from posed views)</code></pre>
+<p>The SLAM systems: <strong>Nice-SLAM</strong> and <strong>Vox-Fusion</strong> anchor neural implicit features in voxel grids for RGB-D dense mapping (the hierarchical-grid trick that made implicit SLAM tractable at room scale); <strong>SplaTAM</strong> and <strong>GS-SLAM</strong> do tracking-and-mapping directly on Gaussian splats, exploiting rasterization speed and per-Gaussian silhouette masks to know what the map does and doesn&rsquo;t yet explain. What these buy over TSDF maps: photorealism (sim-and-rehearse anywhere, appearance-based relocalization for free) and continuous, differentiable geometry. What they still owe: mature loop-closure handling (deforming a splat field after Phase 3&rsquo;s jump is an open craft), large-scale memory management, and the honest admission that for a planner&rsquo;s "how far is the wall", Phase 3&rsquo;s ESDF remains the cleaner answer. Watch this space per quarter, not per decade.</p>
+
+<h2><span class="sec-no">8.4</span>Deep RL for Local Navigation</h2>
+<p>Phase 5&rsquo;s local planners optimize a hand-written cost at runtime. Deep reinforcement learning moves the optimization <em>offline</em>: train a policy π(action | observation) across millions of simulated episodes, then run it as a cheap forward pass. The formulation is the standard MDP, and two algorithms carry the field — <strong>PPO</strong>, whose clipped objective keeps policy updates conservatively close to the data-collecting policy (stable, forgiving, the default), and <strong>SAC</strong>, whose entropy bonus keeps exploration alive (sample-efficient off-policy learning):</p>
+<pre><code class="language-text">objective:  max_θ  E[ Σₜ γᵗ r(sₜ, aₜ) ]        reward: progress − collision
+                                                − jerk − social margins…
+PPO:  maximize  E[ min( ρₜAₜ,  clip(ρₜ, 1±ε)·Aₜ ) ],   ρₜ = π_θ/π_old
+      → never trust one batch enough to leap far. boring. works.
+
+the real enabler is the simulator: Isaac Gym/Lab runs 10,000+ environments
+on one GPU — months of robot-time per wall-clock hour — and sim-to-real is
+bridged by domain randomization: train across randomized physics, sensor
+noise, and layouts until reality is just another sample.</code></pre>
+<p>Where DRL genuinely earns its complexity in navigation: <strong>dense dynamic crowds</strong>, where costmap-based planners freeze (Phase 5&rsquo;s warfield) but a policy trained among simulated pedestrians learns anticipatory, socially-plausible motion; <strong>mapless goal-seeking</strong> from raw sensors when maps are unavailable; and legged locomotion (adjacent, and the field&rsquo;s clearest DRL success). Where it doesn&rsquo;t: anywhere a Phase 5 stack already meets spec — the classical planner is debuggable, verifiable, and parameter-changeable in the field, and a policy is none of those. Production deployments therefore wrap policies in classical clothing: a safety monitor (velocity limits, lidar-based emergency stop) that the network cannot override, and a fallback planner when the policy&rsquo;s inputs go out of distribution.</p>
+
+<h2><span class="sec-no">8.5</span>Neural Planners: MPNet, Neural A*, VIN</h2>
+<p>Between "hand-written planner" and "end-to-end policy" sits the most transferable idea of this phase: <strong>learn the proposal, keep the guarantee</strong>. <strong>MPNet</strong> trains a network to propose the next configuration toward the goal, plugged into a classical framework that collision-checks every proposed segment and falls back to sampling when the network stalls — so it inherits RRT-grade completeness while cutting planning time by large factors in learned domains. <strong>Neural A*</strong> learns the <em>guidance map</em> (effectively a heuristic field) through a differentiable A* relaxation, so search effort concentrates where paths actually go — the trained heuristic pays for itself in expansion counts, exactly the currency Setup A of Phase 5 measured. <strong>Value Iteration Networks</strong> made the founding observation: value iteration on a grid <em>is</em> a convolution (each cell&rsquo;s value updates from its neighbors) iterated k times, so a planner can live <em>inside</em> a network as a differentiable module and be trained through:</p>
+<pre><code class="language-text">value iteration (what VIN unrolls as conv layers):
+  V_{k+1}(s) = min_a [ cost(s, a) + V_k(next(s, a)) ]
+  → k sweeps of a 3×3 min-convolution ≈ shortest-path field
+  → Setup A implements the real thing; VIN learns cost(s,a) end-to-end</code></pre>
+<div class="keypoint">Learned planning&rsquo;s honest scorecard: heuristics, samplers, and cost maps — learn them, they fail soft (worst case: a slower classical search). Feasibility, collision checking, and optimality certificates — keep them classical, they must not fail at all. Every credible neural planner in the literature respects this line; every embarrassing demo crossed it.</div>
+
+<div class="setup">
+<p><strong>Setup A: value iteration, the algorithm VIN bakes into a network — one evening, zero dependencies.</strong> Goal: run real value iteration on a gridworld, watch the cost-to-go field flow around obstacles, and extract the greedy policy — the exact computation VIN&rsquo;s conv layers approximate. Save as <code>vi.cc</code>, compile with <code>g++ -O2 -std=c++17 vi.cc -o vi</code>:</p>
+<pre><code class="language-cpp">// vi.cc — value iteration on a grid: the planner inside VIN, run honestly.
+#include &lt;algorithm&gt;
+#include &lt;iostream&gt;
+#include &lt;vector&gt;
+
+int main() {
+  std::vector&lt;std::string&gt; map = {
+    "........................",
+    "..####......##########..",
+    "..#..........#.......#..",
+    "..#..######..#..####..#..",
+    "..#..#....#..#..#..#..#..",
+    "S.#..#.G..#.....#..#....",
+    "..#..#....#######..#..#..",
+    "..#..######........#..#..",
+    "..#.........########..#..",
+    "..####................#..",
+    "........................",
+  };
+  const int H = map.size(), W = map[0].size();
+  int gx, gy, sx, sy;
+  for (int y = 0; y &lt; H; ++y) for (int x = 0; x &lt; W; ++x) {
+    if (map[y][x] == 'G') { gx = x; gy = y; }
+    if (map[y][x] == 'S') { sx = x; sy = y; }
+  }
+  const double INF = 1e9;
+  std::vector&lt;double&gt; V(W * H, INF);
+  V[gy * W + gx] = 0.0;
+  const int DX[4] = {1, -1, 0, 0}, DY[4] = {0, 0, 1, -1};
+
+  int sweeps = 0;
+  for (bool changed = true; changed; ++sweeps) {          // V ← min(1 + V')
+    changed = false;
+    for (int y = 0; y &lt; H; ++y) for (int x = 0; x &lt; W; ++x) {
+      if (map[y][x] == '#') continue;
+      for (int a = 0; a &lt; 4; ++a) {
+        const int nx = x + DX[a], ny = y + DY[a];
+        if (nx &lt; 0 || ny &lt; 0 || nx &gt;= W || ny &gt;= H || map[ny][nx] == '#') continue;
+        if (1.0 + V[ny * W + nx] &lt; V[y * W + x] - 1e-12) {
+          V[y * W + x] = 1.0 + V[ny * W + nx];
+          changed = true;
+        }
+      }
+    }
+  }
+  std::cout &lt;&lt; "converged after " &lt;&lt; sweeps &lt;&lt; " sweeps (VIN: k conv layers)\n\n";
+
+  auto shade = [&amp;](double v) {                            // render the field
+    const char* ramp = "@%#*+=-:. ";
+    return (v &gt;= INF) ? '#' : ramp[std::min(9, int(v / 5))];
+  };
+  auto shown = map;                                        // greedy rollout
+  for (int x = sx, y = sy; !(x == gx &amp;&amp; y == gy);) {
+    int ba = -1; double bv = INF;
+    for (int a = 0; a &lt; 4; ++a) {
+      const int nx = x + DX[a], ny = y + DY[a];
+      if (nx &lt; 0 || ny &lt; 0 || nx &gt;= W || ny &gt;= H || map[ny][nx] == '#') continue;
+      if (V[ny * W + nx] &lt; bv) { bv = V[ny * W + nx]; ba = a; }
+    }
+    x += DX[ba]; y += DY[ba];
+    if (shown[y][x] == '.') shown[y][x] = 'o';
+  }
+  for (int y = 0; y &lt; H; ++y) {
+    for (int x = 0; x &lt; W; ++x) std::cout &lt;&lt; shade(V[y * W + x]);
+    std::cout &lt;&lt; "   " &lt;&lt; shown[y] &lt;&lt; "\n";
+  }
+}</code></pre>
+<p>Expected: the left field renders cost-to-go flowing outward from G like heat — around walls, through gaps, brightest far away — and the right map shows the greedy path S→G descending that field. Note the sweep count: information propagates one cell per sweep, which is exactly why VIN needs k conv layers to plan k steps deep, and why VIN-style planners struggle on large maps — the depth of the network <em>is</em> the planning horizon. That single observation is the honest summary of neural planning&rsquo;s scaling problem.</p>
+<p>Sanity checks: (1) close the lower gap in the wall and rerun — the field re-routes and the sweep count grows: horizon follows geometry. (2) Make diagonal moves legal at cost 1.4 and watch the field turn from diamonds to circles — the cost model shapes everything (Phase 5&rsquo;s lesson, recurring). (3) Add a "mud" cell type with step cost 3 — this per-cell cost field is precisely what Neural A* learns from data instead of being told.</p>
+</div>
+
+<h2><span class="sec-no">8.6</span>Vision-Language-Action: Navigation You Can Talk To</h2>
+<p>The newest surgery replaces the <em>goal specification</em>. Classical stacks navigate to coordinates; VLA-era systems navigate to <em>meaning</em>: "find the office coffee machine" with no coordinate, no prior detection class list, often no prior map. The enabling artifact is the pretrained vision-language embedding (CLIP and descendants): images and text in one space, so "does this camera view contain a coffee machine" becomes a dot product — zero-shot, no robot-specific training. <strong>CLIP on Wheels</strong> established the recipe: classical exploration (frontier-based, Phase 3&rsquo;s unknown-space logic) + CLIP saliency deciding <em>which</em> frontier smells like the target. <strong>VLFM</strong> matured it: build the occupancy map as usual, score each frontier with a vision-language model&rsquo;s similarity between the view toward it and the query, and go — zero-shot semantic navigation that wins ObjectNav benchmarks while remaining, structurally, a Phase 3+5 stack with a learned scoring function:</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 310" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">VLFM: FRONTIERS, SCORED BY LANGUAGE</text>
+  <text x="46" y="60" font-size="12" fill="#23201a">query: "find the coffee machine"</text>
+  <!-- map -->
+  <rect x="40" y="80" width="420" height="200" rx="8" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <path d="M 40 80 L 300 80 L 300 170 L 460 170 L 460 280 L 40 280 Z" fill="#a97b1f" fill-opacity="0.10"/>
+  <text x="60" y="262" font-size="11" fill="#4d463a">explored (occupancy, Phase 3)</text>
+  <!-- walls -->
+  <line x1="150" y1="80" x2="150" y2="200" stroke="#23201a" stroke-width="4"/>
+  <line x1="150" y1="200" x2="240" y2="200" stroke="#23201a" stroke-width="4"/>
+  <!-- robot -->
+  <polygon points="210,240 194,252 202,228" fill="#b3401e"/>
+  <text x="222" y="250" font-size="11" fill="#b3401e">robot</text>
+  <!-- frontiers -->
+  <path d="M 300 88 Q 316 124 300 162" fill="none" stroke="#0e5f5b" stroke-width="3.5" stroke-dasharray="6 4"/>
+  <text x="316" y="130" font-size="11" fill="#0e5f5b">frontier A · 0.71</text>
+  <path d="M 348 170 Q 380 186 452 176" fill="none" stroke="#0e5f5b" stroke-width="3.5" stroke-dasharray="6 4"/>
+  <text x="340" y="210" font-size="11" fill="#0e5f5b">frontier B · 0.22</text>
+  <path d="M 62 84 Q 96 96 132 86" fill="none" stroke="#0e5f5b" stroke-width="3.5" stroke-dasharray="6 4"/>
+  <text x="58" y="112" font-size="11" fill="#0e5f5b">frontier C · 0.09</text>
+  <!-- decision -->
+  <rect x="520" y="112" width="210" height="120" rx="8" fill="#0e5f5b" fill-opacity="0.06" stroke="#0e5f5b" stroke-width="2"/>
+  <text x="538" y="140" font-size="11.5" fill="#0e5f5b">VLM scores each frontier's</text>
+  <text x="538" y="158" font-size="11.5" fill="#0e5f5b">view against the query —</text>
+  <text x="538" y="176" font-size="11.5" fill="#23201a">plan to argmax (A), rescore</text>
+  <text x="538" y="194" font-size="11.5" fill="#23201a">as the map grows. Detector</text>
+  <text x="538" y="212" font-size="11.5" fill="#23201a">confirms → Phase 5 drives.</text>
+  <line x1="306" y1="120" x2="330" y2="108" stroke="#b3401e" stroke-width="2.5"/>
+  <polygon points="330,108 319,109 323,117" fill="#b3401e"/>
+</svg>
+</div>
+<figcaption>Fig 8.2: VLFM keeps the entire classical machine — occupancy map, frontiers, A* — and lets a vision-language model answer the one question classics never could: which unknown is most likely to contain a "coffee machine"? Semantics as a scoring function, not a new stack.</figcaption>
+</figure>
+<p>Beyond navigation-specific systems sit the <strong>generalist robot policies</strong>: <strong>OpenVLA</strong> and <strong>Octo</strong>, transformers pretrained on hundreds of thousands of robot episodes, mapping images + language directly to actions, fine-tunable to new embodiments. Today their center of gravity is manipulation; their trajectory matters to navigation because the interface — "language in, behavior out, one model across robots" — is a plausible endgame for the whole goal-specification layer. The literate position: track them, benchmark them, and hold them to the same standard as everything else in this chapter — what happens when they&rsquo;re wrong, and who catches it?</p>
+<table>
+  <tr><th>System</th><th>Kind</th><th>What it does zero-shot</th><th>Classical spine kept</th></tr>
+  <tr><td>CLIP on Wheels (CoW)</td><td>zero-shot object nav</td><td>find category X in a novel scene</td><td>frontier exploration, classical planner</td></tr>
+  <tr><td>VLFM</td><td>VL frontier scoring</td><td>semantic goal-seeking, SOTA ObjectNav</td><td>occupancy map, frontiers, A*</td></tr>
+  <tr><td>Octo</td><td>generalist policy (open)</td><td>manipulation from language + images</td><td>none — policy is the stack</td></tr>
+  <tr><td>OpenVLA</td><td>7B open VLA</td><td>fine-tunable manipulation skills</td><td>none — policy is the stack</td></tr>
+</table>
+
+<h2><span class="sec-no">8.7</span>What Survives Contact With Reality</h2>
+<p>The deployment scorecard, module by module, as of this book&rsquo;s writing:</p>
+<table>
+  <tr><th>Learned component</th><th>Status</th><th>Failure containment</th></tr>
+  <tr><td>Features &amp; matching (8.2)</td><td><strong>shipped</strong> — use by default where compute allows</td><td>RANSAC/optimizer vetoes bad proposals — fails soft</td></tr>
+  <tr><td>Place recognition (Ph 4.5)</td><td><strong>shipped</strong></td><td>geometric verification gate — fails soft</td></tr>
+  <tr><td>Semantic segmentation for dynamics (Ph 7.6)</td><td><strong>shipped</strong></td><td>missed detections degrade, not break</td></tr>
+  <tr><td>Neural maps (8.3)</td><td>promising — real products emerging</td><td>keep a classical ESDF beside it for planning</td></tr>
+  <tr><td>DRL local policies (8.4)</td><td>niche-proven (crowds, legs)</td><td>hard safety monitor + classical fallback, non-negotiable</td></tr>
+  <tr><td>Neural planners (8.5)</td><td>research-mature, deployment-rare</td><td>classical collision checking on every proposal</td></tr>
+  <tr><td>VLA / generalist policies (8.6)</td><td>frontier</td><td>an open research question — treat accordingly</td></tr>
+</table>
+<div class="warfield">The failure mode all learned modules share is <strong>distribution shift</strong>: the network is confidently wrong precisely where its training data ran out — a lighting condition, a floor texture, a crowd density, a sensor degradation it never saw. Classical algorithms fail loudly (residuals explode, fitness collapses); networks fail <em>smoothly</em>, which is worse. Deployment discipline: out-of-distribution monitors on inputs (not just outputs), shadow-mode evaluation against the classical baseline before any takeover, staged rollouts, and logging rich enough to retrain on every disagreement. If you cannot answer "how will we know when it&rsquo;s wrong?", the module is not ready, whatever the benchmark says.</div>
+
+<div class="setup">
+<p><strong>Setup B: REINFORCE on a gridworld — one evening, zero dependencies.</strong> Goal: train a navigation policy from scratch with vanilla policy-gradient RL — reward in, behavior out, no labels — and watch both the magic (it learns) and the pathologies (variance, seed-sensitivity) that PPO exists to tame. Save as <code>pg.cc</code>, compile with <code>g++ -O2 -std=c++17 pg.cc -o pg</code>:</p>
+<pre><code class="language-cpp">// pg.cc — REINFORCE with a baseline on a walled gridworld. Pure C++.
+#include &lt;algorithm&gt;
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+#include &lt;random&gt;
+#include &lt;vector&gt;
+
+const int N = 8;                                 // 8×8 world
+bool blocked(int x, int y) {                     // a wall with one gap
+  return x == 4 &amp;&amp; y != 6 &amp;&amp; y &gt;= 2;
+}
+
+int main() {
+  std::mt19937 rng(2);
+  std::uniform_real_distribution&lt;double&gt; U(0.0, 1.0);
+  // tabular policy: logits[state][action], actions = E,W,N,S
+  std::vector&lt;std::array&lt;double, 4&gt;&gt; th(N * N, {0, 0, 0, 0});
+  const int DX[4] = {1, -1, 0, 0}, DY[4] = {0, 0, 1, -1};
+  const double alpha = 0.05, gamma = 0.98;
+  double baseline = 0.0;
+
+  for (int ep = 1; ep &lt;= 4000; ++ep) {
+    int x = 0, y = 0;
+    std::vector&lt;int&gt; S, A;  std::vector&lt;double&gt; R;
+    for (int t = 0; t &lt; 60; ++t) {               // rollout
+      const int s = y * N + x;
+      double e[4], z = 0.0;                      // softmax over logits
+      for (int a = 0; a &lt; 4; ++a) z += (e[a] = std::exp(th[s][a]));
+      double u = U(rng) * z;  int a = 0;
+      while (a &lt; 3 &amp;&amp; u &gt; e[a]) u -= e[a], ++a;
+      int nx = x + DX[a], ny = y + DY[a];
+      double r = -0.05;                          // small step penalty
+      if (nx &lt; 0 || ny &lt; 0 || nx &gt;= N || ny &gt;= N || blocked(nx, ny)) {
+        nx = x; ny = y; r = -0.25;               // bump
+      }
+      S.push_back(s); A.push_back(a);
+      x = nx; y = ny;
+      if (x == N - 1 &amp;&amp; y == N - 1) { R.push_back(10.0); break; }
+      R.push_back(r);
+    }
+    double G = 0.0;  std::vector&lt;double&gt; Gs(R.size());
+    for (int t = int(R.size()) - 1; t &gt;= 0; --t) Gs[t] = G = R[t] + gamma * G;
+    baseline += 0.01 * (Gs[0] - baseline);       // running-mean baseline
+    for (size_t t = 0; t &lt; S.size(); ++t) {      // ∇ log π · (G − b)
+      double e[4], z = 0.0;
+      for (int a = 0; a &lt; 4; ++a) z += (e[a] = std::exp(th[S[t]][a]));
+      for (int a = 0; a &lt; 4; ++a) {
+        const double grad = (a == A[t] ? 1.0 : 0.0) - e[a] / z;
+        th[S[t]][a] += alpha * grad * (Gs[t] - baseline);
+      }
+    }
+    if (ep % 500 == 0) {                         // evaluate greedily
+      int gx = 0, gy = 0, steps = 0;
+      while (!(gx == N - 1 &amp;&amp; gy == N - 1) &amp;&amp; steps &lt; 64) {
+        const int s = gy * N + gx;
+        const int a = std::max_element(th[s].begin(), th[s].end()) - th[s].begin();
+        const int nx = gx + DX[a], ny = gy + DY[a];
+        if (nx &lt; 0 || ny &lt; 0 || nx &gt;= N || ny &gt;= N || blocked(nx, ny)) break;
+        gx = nx; gy = ny; ++steps;
+      }
+      std::cout &lt;&lt; "ep " &lt;&lt; ep &lt;&lt; "  baseline " &lt;&lt; baseline
+                &lt;&lt; "  greedy: " &lt;&lt; (gx == N - 1 &amp;&amp; gy == N - 1 ?
+                   "reaches goal in " + std::to_string(steps) + " steps"
+                   : "stuck") &lt;&lt; "\n";
+    }
+  }
+}</code></pre>
+<p>Expected: for the first ~1000 episodes the baseline crawls and greedy rollouts get stuck at the wall; then the gap is discovered, returns jump, and by episode 2500–4000 the greedy policy runs start → gap → goal in the optimal ~16 steps. You have trained a navigator from a scalar reward — the entire conceptual content of 8.4 in one file. Now the pathologies: change the seed and watch discovery happen thousands of episodes earlier or later (variance is the disease; PPO&rsquo;s clipping and batched advantage estimation are the treatment), and note the world is 64 states — Isaac Gym&rsquo;s 10,000 parallel environments exist because real observation spaces are 10⁶× bigger.</p>
+<p>Sanity checks: (1) remove the baseline (use raw G) — learning gets visibly noisier and often slower: variance reduction is not a nicety. (2) Set the bump penalty to 0 — the policy happily grinds against walls en route; reward shaping <em>is</em> behavior specification, which is exactly how sim-trained robots learn to exploit simulator quirks. (3) After training, wall off the gap and watch the greedy policy march into the wall forever — distribution shift in eight lines, and the whole argument for the safety monitors of 8.7.</p>
+</div>
+
+<h2><span class="sec-no">8.8</span>Reading List</h2>
+<a class="paper" href="https://arxiv.org/abs/1712.07629"><span class="p-title">SuperPoint: Self-Supervised Interest Point Detection and Description</span><span class="p-meta">DeTone, Malisiewicz &amp; Rabinovich · CVPR Workshops 2018</span><span class="p-why">Homographic adaptation — the self-labeling trick that ended a decade of handcrafted detectors.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2306.13643"><span class="p-title">LightGlue: Local Feature Matching at Light Speed</span><span class="p-meta">Lindenberger, Sarlin &amp; Pollefeys · ICCV 2023</span><span class="p-why">SuperGlue&rsquo;s attention matching with adaptive early exit — the version fast enough to live inside a real-time front-end.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2108.10869"><span class="p-title">DROID-SLAM: Deep Visual SLAM for Monocular, Stereo, and RGB-D Cameras</span><span class="p-meta">Teed &amp; Deng · NeurIPS 2021</span><span class="p-why">The differentiable dense-BA design of 8.2 — networks proposing, optimizers disposing, end to end.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2003.08934"><span class="p-title">NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis</span><span class="p-meta">Mildenhall, Srinivasan, Tancik, Barron, Ramamoorthi &amp; Ng · ECCV 2020</span><span class="p-why">The volume-rendering equation that launched neural mapping — and the speed problem 3DGS was built to solve.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2308.04079"><span class="p-title">3D Gaussian Splatting for Real-Time Radiance Field Rendering</span><span class="p-meta">Kerbl, Kopanas, Leimkühler &amp; Drettakis · SIGGRAPH 2023</span><span class="p-why">Explicit Gaussians + rasterization: photorealism at frame rate, and the representation behind splat-SLAM.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2312.02126"><span class="p-title">SplaTAM: Splat, Track &amp; Map 3D Gaussians for Dense RGB-D SLAM</span><span class="p-meta">Keetha, Karhade, Jatavallabhula, Yang, Scherer, Ramanan &amp; Luiten · CVPR 2024</span><span class="p-why">Tracking and mapping directly on splats, with silhouette masks telling the system what its map doesn&rsquo;t know yet.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2112.12130"><span class="p-title">NICE-SLAM: Neural Implicit Scalable Encoding for SLAM</span><span class="p-meta">Zhu, Peng, Larsson, Xu, Bao, Cui, Oswald &amp; Pollefeys · CVPR 2022</span><span class="p-why">Hierarchical voxel-anchored features — the design that made implicit dense SLAM work beyond a single desk.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1707.06347"><span class="p-title">Proximal Policy Optimization Algorithms</span><span class="p-meta">Schulman, Wolski, Dhariwal, Radford &amp; Klimov · 2017</span><span class="p-why">The clipped objective that made deep RL boring enough to use. The default trainer for every navigation policy in 8.4.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2108.10470"><span class="p-title">Isaac Gym: High Performance GPU-Based Physics Simulation for Robot Learning</span><span class="p-meta">Makoviychuk et al. · NeurIPS 2021 Datasets &amp; Benchmarks</span><span class="p-why">10,000 environments on one GPU — the infrastructure paper that turned sim-to-real from patience into engineering.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1907.06013"><span class="p-title">Motion Planning Networks (MPNet)</span><span class="p-meta">Qureshi, Miao, Simeonov &amp; Yip · IEEE TRO 2020</span><span class="p-why">Learned proposals inside a completeness-preserving classical wrapper — the template for trustworthy neural planning.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1602.02867"><span class="p-title">Value Iteration Networks</span><span class="p-meta">Tamar, Wu, Thomas, Levine &amp; Abbeel · NIPS 2016</span><span class="p-why">Planning as a differentiable module — the observation Setup A makes concrete, and its scaling limit.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2312.03275"><span class="p-title">VLFM: Vision-Language Frontier Maps for Zero-Shot Semantic Navigation</span><span class="p-meta">Yokoyama, Ha, Batra, Wang &amp; Bucher · ICRA 2024</span><span class="p-why">Fig 8.2 in full: classical frontiers scored by a vision-language model — zero-shot ObjectNav with a classical spine.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2406.09246"><span class="p-title">OpenVLA: An Open-Source Vision-Language-Action Model</span><span class="p-meta">Kim et al. · CoRL 2024</span><span class="p-why">The open 7B generalist policy — where the "language in, behavior out" endgame currently stands, honestly documented.</span></a>
+
+<h2><span class="sec-no">8.9</span>Interview Questions</h2>
+<details class="qa"><summary>Why did learned features (SuperPoint + LightGlue) displace ORB, and where does ORB still win?</summary><div class="a"><p>Learned detectors are trained for repeatability under the exact nuisances that kill handcrafted ones — lighting change, viewpoint change, weak texture, blur — and attention-based matchers use cross-image context instead of per-descriptor nearest neighbors, surviving repetitive structure that fools Hamming distance. The system-level win: fewer tracking losses and far more robust relocalization, with RANSAC unchanged as the safety gate. ORB still wins on CPU-only and embedded platforms (it costs microseconds), in controlled lighting where its weaknesses don&rsquo;t bind, and wherever the marginal robustness isn&rsquo;t worth a GPU in the power budget — which is a real fraction of deployed indoor robots.</p></div></details>
+<details class="qa"><summary>What is the key architectural idea of DROID-SLAM, and why does it generalize so well?</summary><div class="a"><p>It never lets the network output poses. A recurrent unit predicts dense flow <em>revisions</em> and per-pixel confidences — measurements — and a differentiable dense bundle-adjustment layer solves for poses and depths that best explain them, every iteration, with gradients flowing through the solver during training. Geometry is enforced by construction rather than hoped for from data, so the learned part only has to be good at what networks are good at (correspondence under nuisance), while the optimizer does what optimizers are good at (consistent state estimation). Result: trained on synthetic data, it transfers across cameras and datasets — the "networks propose, optimizers dispose" pattern at its purest.</p></div></details>
+<details class="qa"><summary>NeRF vs 3D Gaussian Splatting as a SLAM map — what actually decides between them?</summary><div class="a"><p>Rendering mechanics. NeRF answers a pixel by querying an MLP at tens-to-hundreds of samples along the ray — photoreal but brutally slow, and "where is the surface" requires marching the density field. 3DGS renders by projecting and alpha-compositing explicit Gaussians — rasterization-fast, which makes per-frame tracking (optimize pose against the render) and mapping (optimize Gaussians) feasible in real time; the map is also explicit, hence editable, prunable, and semantically taggable. That is why the real-time dense-SLAM wave (SplaTAM, GS-SLAM) rides splats, while implicit-grid hybrids (NICE-SLAM, Vox-Fusion) were the transitional RGB-D form. Shared open problems: loop-closure deformation of the map and honest distance queries for planners — where Phase 3&rsquo;s ESDF still rules.</p></div></details>
+<details class="qa"><summary>What breaks when you move a sim-trained navigation policy to a real robot, and what actually helps?</summary><div class="a"><p>The gaps: dynamics (friction, motor lag, battery sag), perception (real sensor noise, materials, lighting), and layout distribution (real clutter isn&rsquo;t procedurally generated). The policy exploits simulator regularities you didn&rsquo;t know existed — reward hacking against physics bugs is a genre. What helps, in rough order of leverage: domain randomization broad enough that reality is inside the training distribution (physics, sensor noise, layouts, textures); training on abstracted observations that transfer (lidar scans and ESDF patches transfer far better than RGB); system identification to center the randomization; and short fine-tuning on-robot when feasible. What helps most of all: a deployment wrapper — safety monitor, OOD detection, classical fallback — because some gap always survives.</p></div></details>
+<details class="qa"><summary>Why do MPNet-style planners keep a classical algorithm in the loop, and what guarantee does that preserve?</summary><div class="a"><p>The network proposes waypoints; classical machinery collision-checks every proposed segment against the real map, repairs locally when a proposal is infeasible, and falls back to uniform sampling (plain RRT-style) when the network stalls. That wrapper restores probabilistic completeness: the system finds a path if one exists, regardless of how wrong the network is — the network only modulates <em>speed</em>, cutting search time dramatically in-domain and degrading to baseline out-of-domain. This is the general contract for trustworthy learned planning: learn the proposal distribution (fails soft), never the feasibility check (must not fail). A learned component whose failure mode is "slower" is deployable; one whose failure mode is "through the wall" is not.</p></div></details>
+<details class="qa"><summary>How does zero-shot semantic navigation (CoW, VLFM) find objects it was never trained to find?</summary><div class="a"><p>It borrows the semantics from a web-pretrained vision-language embedding. CLIP-style models place images and text in one space, so "does the view toward this frontier look like it leads to a coffee machine" is a similarity score — no robot data, no category list, no fine-tuning. The navigation itself stays classical: build occupancy (Phase 3), extract frontiers, plan with A* (Phase 5); the VLM only replaces the frontier-selection heuristic (nearest/biggest) with a semantic score, plus a detector to confirm arrival. It inherits VLM failure modes — spatial reasoning is weak, uncommon objects and paraphrases confuse it, scores are uncalibrated — which is why the classical spine, which guarantees coverage eventually, is what makes the system safe to run.</p></div></details>
+<details class="qa"><summary>When is a DRL local planner actually justified over DWA/TEB/MPPI, and what must ship around it?</summary><div class="a"><p>Justified where the classical cost function is the bottleneck, not the optimizer: dense human crowds (anticipation and social compliance are learnable but nearly unwritable as costs), recovery-rich cluttered spaces, and platforms whose dynamics defeat simple models. Not justified where Phase 5 already meets spec — the classical stack is debuggable, certifiable, and field-tunable, and a policy is none of those. The mandatory wrapper: a hard safety monitor the policy cannot override (lidar-based velocity limiting and e-stop, geometric last-resort checks), out-of-distribution detection on the policy&rsquo;s inputs, a classical fallback planner on OOD or watchdog trip, and shadow-mode statistics proving the policy beats the baseline on <em>your</em> site before it ever controls the robot. The policy is an optimization; the wrapper is the product.</p></div></details>
+<details class="qa"><summary>Your team wants to "add AI" to a working classical navigation stack. Sequence the adoptions by risk-adjusted return.</summary><div class="a"><p>(1) Learned place recognition and features (Phases 4.5, 8.2): biggest robustness win, fails soft behind geometric verification — do first, it&rsquo;s 2020s-standard. (2) Semantic segmentation for dynamic filtering (Phase 7.6): keeps people and vehicles out of maps and registration — shipped tech, contained failure. (3) Learned traversability / cost layers from experience (feeding Phase 5&rsquo;s planners): improves route quality; wrong costs mean suboptimal, not unsafe, paths. (4) MPPI with learned cost terms, then guarded DRL for specific pain points like crowded lobbies — with the full 8.7 wrapper. (5) Neural dense mapping where photorealism or appearance-relocalization pays its GPU rent. (6) VLA-style language goals last — the interface is transformative, the reliability envelope is still being mapped. At every step the classical stack stays as shadow baseline and fallback — the moment you can&rsquo;t answer "how do we know when it&rsquo;s wrong", stop.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

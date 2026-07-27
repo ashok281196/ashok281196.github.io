@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 4 · Global Localization &amp; Relocalization · Autonomous Mobile Robot Navigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">04</div>
+  <div class="chapter-kicker">Phase Four · Waking Up Lost, Efficiently</div>
+  <h1>Global Localization &amp; Relocalization</h1>
+  <p class="chapter-sub">Phase 3 built the map. This phase answers the question a deployed robot faces every single morning: given that map and no idea where I am, find me — and find me again after every tracking failure, kidnap, and elevator ride.</p>
+</header>
+
+<h2><span class="sec-no">4.1</span>The Kidnapped Robot Problem</h2>
+<p>Localization against a known map comes in three regimes of increasing cruelty. <strong>Tracking</strong>: the pose is approximately known and each update is a small correction — Phase 2&rsquo;s Gaussian filters handle this natively. <strong>Global localization</strong>: the robot wakes with <em>no</em> pose prior; the belief must start spread over the entire map, and in any building with repeated structure it will be genuinely <strong>multimodal</strong> — "I am in one of these four identical aisles" is the honest answer for a while. <strong>Kidnapped robot</strong>: hardest of all, the robot is <em>confidently wrong</em> — it was carried, the wheels slipped on a dolly, the elevator opened on a different floor — and it must first discover that its tight, self-assured belief is fiction before it can rebuild one. A unimodal Gaussian is structurally incapable of the last two: it has exactly one bump and no mechanism to say "or, entirely elsewhere".</p>
+<table>
+  <tr><th>Regime</th><th>Prior</th><th>Belief shape</th><th>Right tool</th></tr>
+  <tr><td>Tracking</td><td>good pose estimate</td><td>unimodal, tight</td><td>EKF / scan matching (Phase 2)</td></tr>
+  <tr><td>Global localization</td><td>none</td><td>spread, multimodal</td><td>particle filter (4.2), place recognition (4.4)</td></tr>
+  <tr><td>Kidnapped robot</td><td>a confident lie</td><td>wrong mode must die first</td><td>particle filter + recovery injection, place recognition restart</td></tr>
+</table>
+<div class="keypoint">The kidnapped-robot test is not academic paranoia — it is Tuesday. Tracking loss, wheel slip on a trolley, a reboot in a new dock, an elevator: every deployed robot relocalizes routinely, and a stack is only as reliable as its worst recovery. Design for the third row and the first two come free.</div>
+
+<h2><span class="sec-no">4.2</span>Monte Carlo Localization</h2>
+<p><strong>MCL</strong> represents the belief as N weighted samples — <strong>particles</strong>, each a full pose hypothesis — and runs the Bayes filter on the swarm. Multimodality costs nothing: four plausible aisles simply means four clusters of particles. The loop is Phase 1&rsquo;s heartbeat with a population:</p>
+<pre><code class="language-text">predict:   move every particle through the motion model + sampled noise
+weight:    wᵢ ∝ p(z | xᵢ, map)          how well does the scan fit HERE?
+resample:  draw N new particles ∝ wᵢ    (low-variance/systematic sampler)
+           … but only when N_eff = 1 / Σ wᵢ² drops below ~N/2
+
+global init: particles uniform over free space
+recovery (Augmented MCL): track fast/slow averages of the mean weight —
+  w_fast ← w_fast + α_fast(w̄ − w_fast)        α_fast ≈ 0.1
+  w_slow ← w_slow + α_slow(w̄ − w_slow)        α_slow ≈ 0.01
+  inject uniform random particles with probability max(0, 1 − w_fast/w_slow)
+  → when observations suddenly stop fitting (kidnap!), w_fast dives below
+    w_slow and the filter automatically re-seeds hypotheses everywhere</code></pre>
+<p>The measurement likelihood p(z | x, map) is where lidar MCL earns its keep, and two models dominate. The <strong>beam model</strong> raycasts the map from the hypothesis pose and compares each predicted range to the measured one — physically faithful (it models max-range misses and unexpected obstacles explicitly) but expensive and brittle: a hypothesis one cell off a doorway predicts a wildly different ray. The <strong>likelihood field</strong> model precomputes a distance transform of the map and scores each scan <em>endpoint</em> by its distance to the nearest obstacle — smoother, faster, forgiving of small pose errors, blind to the free-space information along the ray. Production 2D stacks almost universally run likelihood fields, with the smoothing that makes the posterior well-behaved being exactly why.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">MCL CONVERGING IN A CORRIDOR WITH THREE DOORS</text>
+  <!-- corridor rows: line with door marks, particle density below -->
+  <!-- row 1 -->
+  <line x1="60" y1="80" x2="700" y2="80" stroke="#23201a" stroke-width="2.5"/>
+  <rect x="180" y="70" width="26" height="10" fill="#a97b1f"/>
+  <rect x="390" y="70" width="26" height="10" fill="#a97b1f"/>
+  <rect x="560" y="70" width="26" height="10" fill="#a97b1f"/>
+  <line x1="60" y1="98" x2="700" y2="98" stroke="#b3401e" stroke-width="7" stroke-dasharray="3 10"/>
+  <text x="60" y="126" font-size="11.5" fill="#4d463a">t₀ — no prior: particles uniform over the corridor</text>
+  <!-- row 2 -->
+  <line x1="60" y1="170" x2="700" y2="170" stroke="#23201a" stroke-width="2.5"/>
+  <rect x="180" y="160" width="26" height="10" fill="#a97b1f"/>
+  <rect x="390" y="160" width="26" height="10" fill="#a97b1f"/>
+  <rect x="560" y="160" width="26" height="10" fill="#a97b1f"/>
+  <line x1="168" y1="188" x2="222" y2="188" stroke="#b3401e" stroke-width="7" stroke-dasharray="3 4"/>
+  <line x1="378" y1="188" x2="432" y2="188" stroke="#b3401e" stroke-width="7" stroke-dasharray="3 4"/>
+  <line x1="548" y1="188" x2="602" y2="188" stroke="#b3401e" stroke-width="7" stroke-dasharray="3 4"/>
+  <text x="60" y="216" font-size="11.5" fill="#4d463a">t₁ — robot sees a door: three surviving hypotheses (honest multimodality)</text>
+  <!-- row 3 -->
+  <line x1="60" y1="260" x2="700" y2="260" stroke="#23201a" stroke-width="2.5"/>
+  <rect x="180" y="250" width="26" height="10" fill="#a97b1f"/>
+  <rect x="390" y="250" width="26" height="10" fill="#a97b1f"/>
+  <rect x="560" y="250" width="26" height="10" fill="#a97b1f"/>
+  <line x1="428" y1="278" x2="470" y2="278" stroke="#b3401e" stroke-width="7" stroke-dasharray="3 2"/>
+  <polygon points="449,252 441,242 457,242" fill="#0e5f5b"/>
+  <text x="60" y="306" font-size="11.5" fill="#4d463a">t₂ — drove 3 m, saw a second door at the wrong spacing for two modes: unique fix</text>
+</svg>
+</div>
+<figcaption>Fig 4.1: belief density (rust) along a corridor with three identical doors (gold). One door observation cannot disambiguate — and must not: the honest posterior has three modes. Motion plus a second observation kills the impostors. Setup A reproduces this exact behavior, kidnap included.</figcaption>
+</figure>
+<div class="warfield">Resampling&rsquo;s dark side is <strong>particle deprivation</strong>: every resample deletes diversity, and in a symmetric building each resample slightly favors whichever mode the last scan flattered. Twenty eager resamples later the filter is certain — about aisle 3, while the robot sits in aisle 6, and no surviving particle can ever say otherwise. Defenses: resample only on the N_eff test, keep the motion noise honest (it is the only force re-spreading collapsed clusters), and keep the Augmented-MCL injection on in production. If localization in a repetitive building converges suspiciously fast, distrust it until the robot has passed something unique.</div>
+
+<div class="setup">
+<p><strong>Setup A: MCL in a corridor, kidnap included — one evening, zero dependencies.</strong> Goal: a complete particle filter in ~90 lines of plain C++: uniform initialization, door-sensor weighting, N_eff-gated systematic resampling, Augmented-MCL recovery — then a kidnap at step 90 to prove the recovery works. This is Fig 4.1 as a program.</p>
+<p>Save as <code>mcl1d.cc</code>, compile with <code>g++ -O2 -std=c++17 mcl1d.cc -o mcl1d</code>:</p>
+<pre><code class="language-cpp">// mcl1d.cc — Monte Carlo localization on a 20 m circular corridor.
+#include &lt;algorithm&gt;
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+#include &lt;random&gt;
+#include &lt;vector&gt;
+
+const double L = 20.0;                          // corridor length (wraps)
+bool at_door(double x) {                        // doors at 3, 9, 15 (1 m wide)
+  for (double d : {3.0, 9.0, 15.0})
+    if (std::abs(std::fmod(x - d + L, L)) &lt; 0.5) return true;
+  return false;
+}
+
+int main() {
+  std::mt19937 rng(3);
+  std::uniform_real_distribution&lt;double&gt; U(0.0, 1.0);
+  auto gauss = [&amp;](double s) {
+    return std::normal_distribution&lt;double&gt;(0.0, s)(rng); };
+
+  const int N = 1000;
+  std::vector&lt;double&gt; p(N), w(N, 1.0 / N);
+  for (auto&amp; x : p) x = U(rng) * L;             // global init: uniform
+
+  double robot = 6.2;                            // true pose (unknown to filter)
+  double w_slow = 0, w_fast = 0;                 // augmented-MCL averages
+
+  for (int step = 1; step &lt;= 160; ++step) {
+    if (step == 90) robot = std::fmod(robot + 7.0, L);   // KIDNAP!
+
+    robot = std::fmod(robot + 0.25 + gauss(0.02), L);    // truth moves
+    const bool z = (U(rng) &lt; 0.9) == at_door(robot);     // noisy door sensor
+
+    double w_sum = 0.0;
+    for (int i = 0; i &lt; N; ++i) {                        // predict + weight
+      p[i] = std::fmod(p[i] + 0.25 + gauss(0.05) + L, L);
+      w[i] *= (z == at_door(p[i])) ? 0.9 : 0.1;
+      w_sum += w[i];
+    }
+    double w_avg = w_sum / N, neff = 0.0;
+    for (auto&amp; wi : w) { wi /= w_sum; neff += wi * wi; }
+    neff = 1.0 / neff;
+
+    w_fast += 0.10 * (w_avg - w_fast);                   // recovery bookkeeping
+    w_slow += 0.01 * (w_avg - w_slow);
+    const double p_inject = std::max(0.0, 1.0 - w_fast / std::max(w_slow, 1e-12));
+
+    if (neff &lt; N / 2.0) {                                // systematic resample
+      std::vector&lt;double&gt; np(N);
+      double c = w[0], r = U(rng) / N;
+      for (int i = 0, j = 0; i &lt; N; ++i) {
+        const double u = r + double(i) / N;
+        while (u &gt; c) c += w[++j];
+        np[i] = (U(rng) &lt; p_inject) ? U(rng) * L : p[j]; // inject when lost
+      }
+      p = np;  std::fill(w.begin(), w.end(), 1.0 / N);
+    }
+
+    if (step % 10 == 0) {                                // ASCII belief map
+      std::vector&lt;int&gt; hist(40, 0);
+      for (double x : p) hist[int(x / L * 40)]++;
+      std::cout &lt;&lt; "step " &lt;&lt; step &lt;&lt; (step == 90 ? " [KIDNAPPED]" : "")
+                &lt;&lt; "  inject=" &lt;&lt; p_inject &lt;&lt; "\n  ";
+      for (int h : hist) std::cout &lt;&lt; " .:-=+*#@"[std::min(8, h / 12)];
+      std::cout &lt;&lt; "\n  robot at column " &lt;&lt; int(robot / L * 40) &lt;&lt; "\n";
+    }
+  }
+}</code></pre>
+<p>Expected, reading the ASCII histograms: at step 10 the belief is a fuzz across the corridor; once the robot has passed a door it collapses to three clusters (the honest three-mode posterior of Fig 4.1); by step 40–60 the door <em>spacing</em> has killed two impostors and one tight cluster tracks the robot&rsquo;s column. At step 90 the kidnap teleports the robot 7 m: the cluster keeps tracking the <em>old</em> pose, observations stop fitting, <code>inject</code> climbs off zero within a few steps, random particles re-seed the corridor, and by step 130–150 a new cluster has locked onto the true column. That inject number rising exactly when the world betrays the filter is Augmented MCL earning its two lines of code.</p>
+<p>Sanity checks: (1) set <code>p_inject</code> to 0 permanently — after the kidnap the filter never recovers, tracking a ghost forever: deprivation in its purest form. (2) Resample every step regardless of N_eff — convergence gets brittler and occasionally snaps to a wrong door early. (3) Make the sensor near-perfect (0.99) — faster convergence but <em>harder</em> kidnap recovery, because wrong particles die before injection can build a rival cluster: better sensors are not uniformly better for recovery.</p>
+</div>
+
+<h2><span class="sec-no">4.3</span>Scan Matching Against a Known Map</h2>
+<p>Particles get you a coarse, possibly multimodal fix; finishing the job — and staying localized cheaply afterwards — is registration against the map, which is Phase 2&rsquo;s machinery pointed at a prior map instead of the previous scan. Two regimes matter. With a <strong>decent initial guess</strong> (a converged particle cluster, or last frame&rsquo;s pose), ICP/NDT refine to centimetres in a few iterations. With <strong>no guess</strong>, gradient methods fall into the nearest local minimum, and the honest tool is exhaustive: <strong>correlative scan matching</strong> scores <em>every</em> pose in a search window against the map&rsquo;s likelihood field, made real-time by branch and bound — evaluate coarse map resolutions first, and prune whole branches whose upper bound already loses to the best fine-resolution candidate. This is precisely Cartographer&rsquo;s loop-closure searcher from Phase 3, reused here as a global localizer: deterministic, no learning, and guaranteed to find the window&rsquo;s best pose.</p>
+<pre><code class="language-text">correlative search:  score(x, y, θ) = Σᵢ likelihood_field( map, endpointᵢ(x,y,θ) )
+                     over a window, e.g. ±5 m × ±5 m × 360°
+
+branch &amp; bound: coarse-to-fine map pyramid; a coarse cell's score upper-bounds
+all its children → prune losing branches wholesale. Exhaustive answer,
+logarithmic-ish cost. (Hess et al., Phase 3 reading list.)</code></pre>
+
+<h2><span class="sec-no">4.4</span>Place Recognition: Localization as Retrieval</h2>
+<p>Correlative search saturates at building scale, and cameras don&rsquo;t raycast. At scale, global localization becomes a <strong>retrieval problem</strong>: during mapping, compress every place into a compact <strong>descriptor</strong> and index it; at wake-up (or at every frame, hunting loop closures for Phase 3), compress the current view the same way and search the index. The pipeline is always the same four boxes, and the last one is not optional:</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">THE PLACE RECOGNITION PIPELINE</text>
+  <rect x="40" y="70" width="150" height="56" rx="8" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="58" y="94" font-size="12" fill="#23201a">query</text>
+  <text x="58" y="110" font-size="11" fill="#4d463a">image / scan</text>
+  <rect x="240" y="70" width="160" height="56" rx="8" fill="#faf7f0" stroke="#b3401e" stroke-width="2.5"/>
+  <text x="258" y="94" font-size="12" fill="#b3401e">descriptor</text>
+  <text x="258" y="110" font-size="11" fill="#4d463a">BoW / VLAD / polar grid</text>
+  <rect x="450" y="70" width="160" height="56" rx="8" fill="#faf7f0" stroke="#0e5f5b" stroke-width="2.5"/>
+  <text x="468" y="94" font-size="12" fill="#0e5f5b">index search</text>
+  <text x="468" y="110" font-size="11" fill="#4d463a">inverted file / kd / ANN</text>
+  <rect x="450" y="200" width="160" height="56" rx="8" fill="#faf7f0" stroke="#a97b1f" stroke-width="2.5"/>
+  <text x="468" y="224" font-size="12" fill="#a97b1f">top-k candidates</text>
+  <text x="468" y="240" font-size="11" fill="#4d463a">plausible, unproven</text>
+  <rect x="180" y="200" width="200" height="56" rx="8" fill="#23201a" stroke="#23201a" stroke-width="2"/>
+  <text x="198" y="224" font-size="12" fill="#f7f2e7">geometric verification</text>
+  <text x="198" y="240" font-size="11" fill="#d8cdb4">PnP-RANSAC / ICP fitness</text>
+  <line x1="190" y1="98" x2="236" y2="98" stroke="#23201a" stroke-width="2"/>
+  <polygon points="236,98 226,93 226,103" fill="#23201a"/>
+  <line x1="400" y1="98" x2="446" y2="98" stroke="#b3401e" stroke-width="2"/>
+  <polygon points="446,98 436,93 436,103" fill="#b3401e"/>
+  <line x1="530" y1="126" x2="530" y2="196" stroke="#0e5f5b" stroke-width="2"/>
+  <polygon points="530,196 525,186 535,186" fill="#0e5f5b"/>
+  <line x1="446" y1="228" x2="384" y2="228" stroke="#a97b1f" stroke-width="2"/>
+  <polygon points="384,228 394,223 394,233" fill="#a97b1f"/>
+  <line x1="176" y1="228" x2="110" y2="228" stroke="#23201a" stroke-width="2"/>
+  <polygon points="110,228 120,223 120,233" fill="#23201a"/>
+  <text x="46" y="222" font-size="12" fill="#23201a">pose</text>
+  <text x="46" y="238" font-size="11" fill="#4d463a">(or reject)</text>
+</svg>
+</div>
+<figcaption>Fig 4.2: retrieval proposes, geometry disposes. The descriptor index answers "what does this look like" in milliseconds over millions of places; only geometric verification (PnP for images, ICP fitness for scans) is allowed to say "and therefore I am here". Skipping the last box is how Phase 3&rsquo;s corridor-folding disasters begin.</figcaption>
+</figure>
+<dl class="jargon">
+  <dt>Descriptor</dt><dd>A compact vector (or small matrix) summarizing a whole image or scan, built to be near its twins and far from everything else under some cheap distance.</dd>
+  <dt>Perceptual aliasing</dt><dd>Different places that produce near-identical descriptors — office corridors, warehouse aisles, tree lines. The central failure mode of this entire phase.</dd>
+  <dt>Inverted index</dt><dd>Word → list of images containing it. Makes BoW search cost proportional to shared vocabulary, not database size.</dd>
+  <dt>Geometric verification</dt><dd>Proving a candidate with geometry: enough RANSAC-consistent feature matches (PnP) or a high ICP fitness. The gate between "similar" and "same".</dd>
+</dl>
+
+<h2><span class="sec-no">4.5</span>Visual Place Recognition: DBoW3, NetVLAD, CosPlace</h2>
+<p>The classical engine is <strong>bag of visual words</strong>. Offline, cluster millions of local feature descriptors (ORB) into a <strong>vocabulary tree</strong> — words are cluster centers, the tree makes lookup logarithmic. Online, quantize each image&rsquo;s features into words and represent the image as a sparse TF-IDF-weighted histogram; two images are compared by histogram similarity, and the inverted index finds sharers without scanning the database:</p>
+<pre><code class="language-text">TF-IDF weight of word i in image:   tf(i) · log( N_images / N_images_containing_i )
+   → words that are common everywhere (floor texture) count for nearly nothing;
+     rare words (that one exit sign) dominate the vote
+
+score(v₁, v₂) = 1 − ½‖ v₁/‖v₁‖ − v₂/‖v₂‖ ‖₁      then: candidates → verify</code></pre>
+<p><a href="https://github.com/rmsalinas/DBow3">DBoW3</a> (successor of DBoW2, which sits inside ORB-SLAM3) is the standalone C++ library for exactly this: binary-descriptor vocabularies, inverted index, direct index for later feature matching — CPU-only, milliseconds per query, and still the default relocalizer of the classical stack. Its weakness is inherited from its features: ORB words describe <em>texture</em>, and texture changes with light, weather, and season.</p>
+<p>The learned generation attacks that. <a href="https://github.com/Relja/netvlad">NetVLAD</a> (CVPR 2016) bolts a differentiable VLAD-pooling layer onto a CNN and trains end-to-end on street-view imagery with a weakly-supervised triplet loss ("same place under different conditions must be closer than different places"), producing a single global vector per image whose nearest neighbors survive day/night and seasonal change that kills BoW. <a href="https://github.com/gmberton/CosPlace">CosPlace</a> (CVPR 2022) got the same robustness cheaper by reframing training as classification over geographic cells on a city-scale dataset — no triplet mining — yielding compact descriptors (as small as 512-D) that set retrieval benchmarks with a fraction of the compute. The practical stack in 2026: CosPlace-style global descriptors for candidates, local-feature verification (ORB, or Phase 8&rsquo;s SuperPoint+LightGlue) for the geometry gate.</p>
+<table>
+  <tr><th></th><th>DBoW3</th><th>NetVLAD</th><th>CosPlace</th></tr>
+  <tr><td>Type</td><td>handcrafted BoW over ORB</td><td>CNN + learned VLAD pooling</td><td>CNN trained as geo-cell classification</td></tr>
+  <tr><td>Descriptor</td><td>sparse word histogram</td><td>dense, 4096-D (typ.)</td><td>dense, 512-D (typ.)</td></tr>
+  <tr><td>Compute</td><td>CPU, ms</td><td>GPU preferred</td><td>GPU for extraction, tiny index</td></tr>
+  <tr><td>Survives lighting/season</td><td>poorly</td><td>well</td><td>well, at lower cost</td></tr>
+  <tr><td>Natural home</td><td>ORB-SLAM-style relocalization, loop proposal</td><td>city-scale geo-localization</td><td>large-scale, resource-conscious retrieval</td></tr>
+</table>
+
+<h2><span class="sec-no">4.6</span>LiDAR Place Recognition: Scan Context++, OverlapNet, LiDAR-Iris</h2>
+<p>Lidar descriptors get one enormous gift: geometry doesn&rsquo;t care about lighting. Their enemy is viewpoint — revisit a place facing the other way and a naive descriptor sees nothing familiar — so every serious design builds in <strong>rotation invariance</strong> explicitly.</p>
+<p><a href="https://github.com/gisbi-kim/scancontext_tro">Scan Context++</a> is the classical reference. Flatten the scan into a polar bird&rsquo;s-eye grid — rings (range bins) × sectors (azimuth bins), each cell keeping the max point height — giving a small 2D matrix that reads like a fingerprint of the surrounding structure. A yaw change of the robot is a pure <em>column shift</em> of that matrix, so matching scores the minimum distance over all shifts — and the best shift itself is a free yaw estimate, exactly the initial guess registration wants. Candidate search stays sub-linear via a <strong>ring key</strong> (a rotation-invariant per-ring summary) in a kd-tree; the ++ version adds lateral-shift robustness for revisits in adjacent lanes. Setup B builds the 2D miniature of this.</p>
+<pre><code class="language-text">scan context:  M[r][s] = max height of points in ring r, sector s
+distance(A, B) = min over column shifts k of  Σ_cols cosine_dist(A_col, B_col(+k))
+best k · (360°/N_sectors)  =  relative yaw  →  free initial guess for ICP</code></pre>
+<p><a href="https://github.com/PRBonn/OverlapNet">OverlapNet</a> is the learned counterpoint: render scans as range images, feed pairs through a siamese network that predicts both their <em>overlap fraction</em> (how much they see the same structure — a direct loop-closure confidence) and their relative yaw. <a href="https://github.com/JoestarK/LiDAR-Iris">LiDAR-Iris</a> borrows iris recognition from biometrics: expand the bird&rsquo;s-eye view into a binary "iris" image whose Fourier-aligned Hamming distance is fast and rotation-invariant. The selection logic mirrors vision: Scan Context++ as the CPU-cheap default with a free yaw, OverlapNet where training data exists and confidence calibration matters, LiDAR-Iris where binary compactness and speed dominate.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">SCAN CONTEXT: A SCAN BECOMES A MATRIX, YAW BECOMES A SHIFT</text>
+  <!-- polar grid -->
+  <circle cx="180" cy="180" r="100" fill="none" stroke="#23201a" stroke-width="2"/>
+  <circle cx="180" cy="180" r="66" fill="none" stroke="#23201a" stroke-width="1.2"/>
+  <circle cx="180" cy="180" r="33" fill="none" stroke="#23201a" stroke-width="1.2"/>
+  <line x1="180" y1="80" x2="180" y2="280" stroke="#23201a" stroke-width="1.2"/>
+  <line x1="80" y1="180" x2="280" y2="180" stroke="#23201a" stroke-width="1.2"/>
+  <line x1="110" y1="110" x2="250" y2="250" stroke="#23201a" stroke-width="1.2"/>
+  <line x1="250" y1="110" x2="110" y2="250" stroke="#23201a" stroke-width="1.2"/>
+  <!-- one shaded sector wedge (between 0° and 45°) -->
+  <path d="M 180 180 L 280 180 A 100 100 0 0 0 250.7 109.3 Z" fill="#b3401e" fill-opacity="0.18" stroke="#b3401e" stroke-width="1.5"/>
+  <circle cx="180" cy="180" r="5" fill="#0e5f5b"/>
+  <text x="128" y="304" font-size="11.5" fill="#4d463a">rings × sectors around the robot</text>
+  <!-- arrow -->
+  <line x1="312" y1="180" x2="392" y2="180" stroke="#23201a" stroke-width="2.5"/>
+  <polygon points="392,180 381,174 381,186" fill="#23201a"/>
+  <text x="316" y="166" font-size="11" fill="#23201a">encode max</text>
+  <text x="316" y="180" font-size="11" fill="#23201a" dy="14">height per cell</text>
+  <!-- matrix -->
+  <g stroke="#23201a" stroke-width="1">
+    <rect x="420" y="110" width="300" height="140" fill="#faf7f0"/>
+    <line x1="420" y1="145" x2="720" y2="145"/><line x1="420" y1="180" x2="720" y2="180"/><line x1="420" y1="215" x2="720" y2="215"/>
+    <line x1="470" y1="110" x2="470" y2="250"/><line x1="520" y1="110" x2="520" y2="250"/><line x1="570" y1="110" x2="570" y2="250"/><line x1="620" y1="110" x2="620" y2="250"/><line x1="670" y1="110" x2="670" y2="250"/>
+  </g>
+  <rect x="470" y="110" width="50" height="140" fill="#b3401e" fill-opacity="0.18" stroke="#b3401e" stroke-width="1.5"/>
+  <text x="430" y="100" font-size="11.5" fill="#4d463a">columns: sectors · rows: rings</text>
+  <!-- shift arrow -->
+  <path d="M 495 262 Q 570 292 645 262" fill="none" stroke="#a97b1f" stroke-width="2"/>
+  <polygon points="645,262 634,264 639,272" fill="#a97b1f"/>
+  <text x="430" y="304" font-size="11.5" fill="#a97b1f">match over shifts → best = yaw estimate</text>
+</svg>
+</div>
+<figcaption>Fig 4.3: Scan Context flattens the scan into a rings-by-sectors matrix; turning in place permutes columns without changing content. Matching over circular shifts buys rotation invariance and hands registration its initial yaw for free.</figcaption>
+</figure>
+
+<h2><span class="sec-no">4.7</span>Relocalization Inside Real Systems</h2>
+<p>Assembled, the production relocalization pipeline is a funnel of cheap-to-expensive filters, and it is worth knowing how the reference systems walk it. <strong>ORB-SLAM3</strong>, on tracking loss: query DBoW2 over keyframes → for each candidate, PnP-RANSAC on ORB matches → guided re-matching and pose refinement → resume tracking; the same funnel with stricter thresholds proposes loop closures, and Atlas decides "known map, merge" versus "new map, explore". <strong>Lidar stacks</strong>: Scan Context++ (or correlative search at modest scale) proposes pose + yaw → point-to-plane ICP against the map refines → <em>fitness gate</em> (inlier fraction, residual RMS) accepts or rejects → the accepted pose seeds MCL or the Phase 2 filter for continuous tracking. Note the division of labor: descriptors handle the combinatorial explosion, geometry handles the truth, and the probabilistic filter handles time. No single stage is trusted alone.</p>
+<div class="keypoint">Retrieval proposes, geometry disposes, the filter endures. Every reliable relocalization system in this book is those three verbs in that order — and every infamous localization failure is a system that let stage one speak directly to the map.</div>
+
+<div class="setup">
+<p><strong>Setup B: a miniature Scan Context — one evening, zero dependencies.</strong> Goal: implement the sector-encoding + shift-matching idea in 2D, retrieve a revisited place from a 200-pose database despite a 137° heading change, recover the yaw from the best shift, and then watch perceptual aliasing produce a near-tie between two identical rooms.</p>
+<p>Save as <code>minisc.cc</code>, compile with <code>g++ -O2 -std=c++17 minisc.cc -o minisc</code>:</p>
+<pre><code class="language-cpp">// minisc.cc — a 2D miniature of Scan Context: polar signature + shift match.
+#include &lt;algorithm&gt;
+#include &lt;array&gt;
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+#include &lt;random&gt;
+#include &lt;vector&gt;
+
+// world: 20×10 outer walls, two IDENTICAL rooms + one distinctive pillar room
+bool occupied(double x, double y) {
+  auto box = [&amp;](double x0, double y0, double x1, double y1) {
+    return x &gt;= x0 &amp;&amp; x &lt;= x1 &amp;&amp; y &gt;= y0 &amp;&amp; y &lt;= y1; };
+  if (x &lt; 0 || x &gt; 20 || y &lt; 0 || y &gt; 10) return true;         // outer walls
+  if (box(6.0, 0.0, 6.2, 7.0) || box(13.0, 3.0, 13.2, 10.0)) return true;
+  if (box(16.5, 1.5, 17.5, 2.5)) return true;                   // the pillar
+  return false;
+}
+
+using Sig = std::array&lt;double, 72&gt;;                             // 5° sectors
+Sig signature(double x, double y, double yaw) {                 // range per sector
+  Sig s{};
+  for (int k = 0; k &lt; 72; ++k) {
+    const double a = yaw + k * (2 * M_PI / 72);
+    double r = 0.0;
+    while (r &lt; 12.0 &amp;&amp; !occupied(x + r * std::cos(a), y + r * std::sin(a)))
+      r += 0.02;
+    s[k] = r;
+  }
+  return s;
+}
+double dist_shift(const Sig&amp; a, const Sig&amp; b, int&amp; best_k) {    // min over shifts
+  double best = 1e18;
+  for (int k = 0; k &lt; 72; ++k) {
+    double d = 0.0;
+    for (int i = 0; i &lt; 72; ++i) d += std::abs(a[i] - b[(i + k) % 72]);
+    if (d &lt; best) { best = d; best_k = k; }
+  }
+  return best / 72.0;
+}
+
+int main() {
+  std::mt19937 rng(5);
+  std::uniform_real_distribution&lt;double&gt; ux(0.5, 19.5), uy(0.5, 9.5);
+
+  std::vector&lt;std::array&lt;double, 2&gt;&gt; poses;                     // database
+  std::vector&lt;Sig&gt; db;
+  while (poses.size() &lt; 200) {
+    const double x = ux(rng), y = uy(rng);
+    if (occupied(x, y)) continue;
+    poses.push_back({x, y});
+    db.push_back(signature(x, y, 0.0));                         // canonical yaw
+  }
+
+  // query: revisit database place #17, heading rotated by 137°
+  const double qyaw = 137.0 * M_PI / 180.0;
+  const Sig q = signature(poses[17][0], poses[17][1], qyaw);
+
+  int best = -1, k_at_best = 0;
+  double d1 = 1e18, d2 = 1e18;
+  for (int i = 0; i &lt; 200; ++i) {
+    int k;  const double d = dist_shift(q, db[i], k);
+    if (d &lt; d1) { d2 = d1; d1 = d; best = i; k_at_best = k; }
+    else d2 = std::min(d2, d);
+  }
+  std::cout &lt;&lt; "retrieved place " &lt;&lt; best &lt;&lt; " (truth: 17), "
+            &lt;&lt; "yaw from shift: " &lt;&lt; k_at_best * 5 &lt;&lt; "° (truth: 137°)\n"
+            &lt;&lt; "best distance " &lt;&lt; d1 &lt;&lt; "  runner-up " &lt;&lt; d2
+            &lt;&lt; "  margin " &lt;&lt; d2 / d1 &lt;&lt; "×\n";
+}</code></pre>
+<p>Expected: place 17 retrieved, yaw recovered to 135° (the nearest 5° bin to 137°), with a comfortable margin over the runner-up. Then the aliasing experiment: change the query to a pose in the middle of one of the two <em>identical rooms</em> (say near (3, 8) and its twin near (10, 1.5) — mirror-ish layouts around the interior walls) and watch the top two candidates come back with margins near 1.0×. The descriptor is not wrong — those places really do look alike from a lidar&rsquo;s point of view. It is the downstream gate&rsquo;s job (ICP fitness at both candidates, or just driving three metres and re-querying, as in Setup A) to refuse the coin flip.</p>
+<p>Sanity checks: (1) add range noise (±5 cm) to the query signature — retrieval barely notices; coarse structure carries the match, which is why these descriptors compress so well. (2) Reduce sectors from 72 to 12 — yaw resolution and margins degrade together; descriptor size is a real design dial. (3) Query from a pose 0.5 m off any database pose — still retrieved, margin thinner: place recognition is deliberately coarse, and that coarseness is what the refinement stage (4.3) exists to absorb.</p>
+</div>
+
+<h2><span class="sec-no">4.8</span>Reading List</h2>
+<a class="paper" href="https://www.cs.cmu.edu/~thrun/papers/thrun.robust-mcl.pdf"><span class="p-title">Robust Monte Carlo Localization for Mobile Robots</span><span class="p-meta">Thrun, Fox, Burgard &amp; Dellaert · Artificial Intelligence 2001</span><span class="p-why">MCL from its authors: the particle machinery of 4.2, mixture proposals, and the kidnapped-robot experiments that defined the benchmark.</span></a>
+<a class="paper" href="https://mitpress.mit.edu/9780262201629/probabilistic-robotics/"><span class="p-title">Probabilistic Robotics — chapters 7 &amp; 8</span><span class="p-meta">Thrun, Burgard &amp; Fox · MIT Press 2005</span><span class="p-why">Beam vs likelihood-field measurement models, Augmented MCL&rsquo;s w_fast/w_slow, and KLD-sampling, all with pseudocode.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/6202705"><span class="p-title">Bags of Binary Words for Fast Place Recognition in Image Sequences</span><span class="p-meta">Gálvez-López &amp; Tardós · IEEE TRO 2012</span><span class="p-why">The DBoW paper: binary vocabularies, inverted + direct indices — the relocalizer ORB-SLAM3 still ships.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1511.07247"><span class="p-title">NetVLAD: CNN Architecture for Weakly Supervised Place Recognition</span><span class="p-meta">Arandjelović, Gronat, Torii, Pajdla &amp; Sivic · CVPR 2016</span><span class="p-why">The learned-descriptor watershed: differentiable VLAD pooling and training from street-view time machines.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2204.02287"><span class="p-title">Rethinking Visual Geo-localization for Large-Scale Applications (CosPlace)</span><span class="p-meta">Berton, Masone &amp; Caputo · CVPR 2022</span><span class="p-why">Classification-style training on city-scale data: NetVLAD-class robustness at a fraction of the descriptor size and training cost.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2109.13494"><span class="p-title">Scan Context++: Structural Place Recognition Robust to Rotation and Lateral Variations</span><span class="p-meta">Kim, Choi &amp; Kim · IEEE TRO 2022</span><span class="p-why">The polar-matrix descriptor of Fig 4.3 and Setup B, matured: ring keys, lateral robustness, and the free yaw estimate.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2105.11344"><span class="p-title">OverlapNet: Loop Closing for LiDAR-based SLAM</span><span class="p-meta">Chen, Läbe, Milioto, Röhling, Vysotska, Haag, Behley &amp; Stachniss · RSS 2020</span><span class="p-why">A siamese network predicting scan overlap and yaw — learned loop-closure confidence you can threshold honestly.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1912.03825"><span class="p-title">LiDAR Iris for Loop-Closure Detection</span><span class="p-meta">Wang, Wang, Chen &amp; Xie · IROS 2020</span><span class="p-why">Biometrics borrowed for robots: binary iris images and Hamming distance — the compact, fast corner of the design space.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/7339473"><span class="p-title">Visual Place Recognition: A Survey</span><span class="p-meta">Lowry, Sünderhauf, Newman, Leonard, Cox, Corke &amp; Milford · IEEE TRO 2016</span><span class="p-why">The map of the whole territory: appearance change, viewpoint change, and why perceptual aliasing is the boss enemy.</span></a>
+
+<h2><span class="sec-no">4.9</span>Interview Questions</h2>
+<details class="qa"><summary>Why does global localization demand a particle filter when tracking is happy with an EKF?</summary><div class="a"><p>Tracking&rsquo;s belief is unimodal and tight, exactly what a Gaussian represents. Global localization&rsquo;s belief starts uniform over the map and, in any building with repeated structure, passes through genuinely multimodal stages — "one of these four aisles". A Gaussian has one mode by construction; forced to cover four hypotheses it either straddles them (its mean in a wall between aisles) or collapses onto one prematurely. Particles represent arbitrary distributions: multimodality is just multiple clusters, global init is just uniform sampling, and at 3-DoF pose dimensionality the particle count stays affordable.</p></div></details>
+<details class="qa"><summary>Explain particle deprivation and how Augmented MCL fixes it.</summary><div class="a"><p>Resampling duplicates heavy particles and kills light ones; every pass deletes diversity that only motion noise slowly restores. In symmetric environments the filter can converge onto a wrong mode with zero survivors near the truth — after which no amount of good data helps, because the truth has no particle to reweight. Augmented MCL tracks a fast and a slow exponential average of mean particle weight; when observations suddenly stop fitting the belief (a kidnap), w_fast dives below w_slow, and the filter injects uniform random particles with probability 1 − w_fast/w_slow. The injected seeds give the true pose a foothold, and normal weighting does the rest. The elegant part: injection self-throttles to zero when tracking is healthy.</p></div></details>
+<details class="qa"><summary>Beam model vs likelihood field for lidar MCL — trade-offs?</summary><div class="a"><p>The beam model raycasts the map from each particle and compares predicted to measured ranges per beam: physically faithful, models unexpected obstacles and max-range readings explicitly, but expensive (raycast × beams × particles) and brittle — the likelihood is spiky, so a particle a few centimetres wrong at a doorway scores as badly as one metres wrong. The likelihood field precomputes a distance transform and scores each scan endpoint by distance to the nearest obstacle: no raycasting at query time, smooth well-behaved likelihood that forgives small pose errors, but it ignores free-space evidence along the ray and can be fooled by scans through glass or clutter. Production 2D MCL default: likelihood field, with the beam model kept for when free-space reasoning matters.</p></div></details>
+<details class="qa"><summary>What is perceptual aliasing, and what actually mitigates it?</summary><div class="a"><p>Different places producing near-identical observations — identical corridors, aisles, cubicle farms — so any descriptor honestly reports high similarity for the wrong place. Mitigations stack: geometric verification rejects candidates whose fine structure disagrees (aliased places are rarely identical to RANSAC); sequence matching requires several consecutive queries to agree with the map&rsquo;s spatial ordering, which single impostors rarely sustain; temporal filtering (MCL) demands consistency with motion — two aliased rooms 40 m apart cannot both be reachable; and margin gating simply refuses to decide when the top two scores are close, which Setup B shows is the honest reading of a near-tie. What does not work is tuning the descriptor harder: aliasing is a property of the world.</p></div></details>
+<details class="qa"><summary>How does bag-of-words search stay fast over a million-image database?</summary><div class="a"><p>Two structures. The vocabulary tree quantizes each feature by descending k branches per level — cost logarithmic in vocabulary size, independent of database size. The inverted index maps each word to the list of images containing it, so scoring touches only images sharing words with the query — cost proportional to overlap, not to N; TF-IDF weighting simultaneously mutes ubiquitous words so the shared-word lists that matter stay short. Add-ons: a direct index accelerates the later feature-matching stage, and binary descriptors (ORB) make per-feature quantization a few XORs. The net effect is millisecond queries at scales where linear scan would take seconds.</p></div></details>
+<details class="qa"><summary>How does Scan Context achieve rotation invariance, and what does it hand downstream for free?</summary><div class="a"><p>The descriptor is a polar matrix — rings (range) × sectors (azimuth), max height per cell — anchored to the robot&rsquo;s current heading. Rotating in place permutes the columns circularly without changing their content, so matching computes the distance at all N_sector column shifts and keeps the minimum: the descriptor is compared in every orientation at matrix-shift cost. The arg-min shift times the sector width <em>is</em> the relative yaw between query and candidate — which downstream registration (ICP) receives as its initial guess, converting a would-be local-minimum trap into a two-iteration refinement. Candidate search stays sub-linear via rotation-invariant ring keys in a kd-tree.</p></div></details>
+<details class="qa"><summary>Learned place recognition (NetVLAD/CosPlace) vs classical (DBoW): when does each win?</summary><div class="a"><p>Learned global descriptors win when appearance changes between mapping and query — day/night, weather, seasons — because they were trained to be invariant to exactly that; they also compress a whole image into one dense vector, making city-scale ANN search trivial. They cost GPU inference, and they inherit their training distribution: a model trained on street scenes can underperform in a warehouse. DBoW wins on CPU-only platforms, indoors where lighting is controlled, and when the same ORB features are already being extracted for SLAM anyway — the marginal cost is near zero, and it integrates natively with feature-level verification. Production systems increasingly run learned retrieval with classical geometric verification — the robustness of one, the honesty of the other.</p></div></details>
+<details class="qa"><summary>Design the full recovery pipeline for a warehouse robot that just woke up somewhere unknown.</summary><div class="a"><p>Stage 0, admit ignorance: no tracking, no control decisions that assume a pose. Stage 1, propose: query the place-recognition index (Scan Context++ for lidar) with the current scan for top-k candidates plus yaw estimates. Stage 2, verify: run point-to-plane ICP against the map at each candidate; gate on fitness (inlier fraction, residual RMS); require the best candidate to beat the runner-up by a margin — near-ties in an aisle warehouse mean "drive and re-query", not "guess". Stage 3, seed time: initialize MCL with particles at the accepted pose (plus a dusting of uniform particles for humility) and require consistency over several metres of motion before declaring localized. Stage 4, resume: hand the pose to the Phase 2 filter, re-enable the planner, log the event. The design rule throughout: every stage can say "not sure yet", and only agreement across all of them ends the recovery.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

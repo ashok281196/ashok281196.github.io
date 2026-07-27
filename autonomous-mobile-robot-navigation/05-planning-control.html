@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 5 · Path Planning &amp; Motion Control · Autonomous Mobile Robot Navigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">05</div>
+  <div class="chapter-kicker">Phase Five · Deciding Where to Go, and Actually Going</div>
+  <h1>Path Planning &amp; Motion Control</h1>
+  <p class="chapter-sub">Four phases of estimation and mapping earn their keep here: turning a pose and a map into motor commands. Three layers — global route, local trajectory, tracking control — each running at its own rate, each failing its own way.</p>
+</header>
+
+<h2><span class="sec-no">5.1</span>The Three-Layer Stack</h2>
+<p>Navigation is a hierarchy because no single algorithm can be simultaneously globally optimal, dynamically feasible, and fast enough to dodge a pedestrian. So the field splits the problem by horizon: a <strong>global planner</strong> finds a route through the whole map and can afford to be slow; a <strong>local planner</strong> turns the next few metres of that route into a dynamically feasible trajectory around fresh obstacles, fast; a <strong>tracking controller</strong> turns the trajectory into wheel commands at control rate. Each layer trusts the one above for direction and the one below for execution, and every layer reads Phase 2&rsquo;s state estimate.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">THE NAVIGATION HIERARCHY</text>
+  <rect x="40" y="60" width="190" height="56" rx="8" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="56" y="84" font-size="12" fill="#23201a">global costmap / ESDF</text>
+  <text x="56" y="100" font-size="11" fill="#4d463a">Phase 3's map, inflated</text>
+  <rect x="40" y="210" width="190" height="56" rx="8" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="56" y="234" font-size="12" fill="#23201a">local costmap</text>
+  <text x="56" y="250" font-size="11" fill="#4d463a">rolling window, sensor-fresh</text>
+  <rect x="300" y="60" width="180" height="56" rx="8" fill="#faf7f0" stroke="#b3401e" stroke-width="2.5"/>
+  <text x="316" y="84" font-size="12" fill="#b3401e">global planner</text>
+  <text x="316" y="100" font-size="11" fill="#4d463a">A* / RRT* · ~0.1–1 Hz</text>
+  <rect x="300" y="210" width="180" height="56" rx="8" fill="#faf7f0" stroke="#0e5f5b" stroke-width="2.5"/>
+  <text x="316" y="234" font-size="12" fill="#0e5f5b">local planner</text>
+  <text x="316" y="250" font-size="11" fill="#4d463a">DWA / TEB / MPPI · 10–50 Hz</text>
+  <rect x="550" y="132" width="180" height="64" rx="8" fill="#faf7f0" stroke="#a97b1f" stroke-width="2.5"/>
+  <text x="566" y="156" font-size="12" fill="#a97b1f">tracking controller</text>
+  <text x="566" y="172" font-size="11" fill="#4d463a">pure pursuit / MPC</text>
+  <text x="566" y="186" font-size="11" fill="#4d463a">50–200 Hz → v, ω</text>
+  <line x1="230" y1="88" x2="296" y2="88" stroke="#23201a" stroke-width="2"/>
+  <polygon points="296,88 286,83 286,93" fill="#23201a"/>
+  <line x1="230" y1="238" x2="296" y2="238" stroke="#23201a" stroke-width="2"/>
+  <polygon points="296,238 286,233 286,243" fill="#23201a"/>
+  <line x1="390" y1="116" x2="390" y2="206" stroke="#b3401e" stroke-width="2"/>
+  <polygon points="390,206 385,196 395,196" fill="#b3401e"/>
+  <text x="400" y="166" font-size="11" fill="#b3401e">path</text>
+  <line x1="480" y1="238" x2="560" y2="188" stroke="#0e5f5b" stroke-width="2"/>
+  <polygon points="560,188 550,190 555,198" fill="#0e5f5b"/>
+  <text x="490" y="222" font-size="11" fill="#0e5f5b">trajectory</text>
+  <line x1="60" y1="300" x2="700" y2="300" stroke="#4d463a" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="150" y="292" font-size="11" fill="#4d463a">Phase 2's state estimate feeds every layer, at that layer's rate</text>
+</svg>
+</div>
+<figcaption>Fig 5.1: horizon decreases left to right, rate increases. The global layer is allowed to be slow and optimal; the local layer must be feasible and fast; the controller must be simple and relentless. Most navigation bugs are one layer doing another layer&rsquo;s job.</figcaption>
+</figure>
+<p>The planner&rsquo;s world model is the <strong>costmap</strong>: the Phase 3 map with obstacles <em>inflated</em>. Planning treats the robot as a point, so every obstacle grows by the robot&rsquo;s radius (the configuration-space trick), then by a decaying safety margin — cost falls off from lethal at the obstacle through "inscribed" (guaranteed collision for the footprint) to a soft exponential buffer that makes planners prefer the middle of corridors. The ESDF of Phase 3.4 is this idea done continuously: distance <em>is</em> the cost, and its gradient points to safety.</p>
+<dl class="jargon">
+  <dt>Configuration space (C-space)</dt><dd>The space of robot configurations. Inflating obstacles by the robot radius turns "will this footprint collide" into "is this point in collision" — planning&rsquo;s favorite simplification.</dd>
+  <dt>Kinodynamic feasibility</dt><dd>Whether a trajectory respects the robot&rsquo;s motion limits — velocity, acceleration, turning radius. Global paths usually aren&rsquo;t; local trajectories must be.</dd>
+  <dt>Anytime planner</dt><dd>Returns a valid (suboptimal) solution fast, then improves it while time remains. RRT* and weighted-A* variants are the classic examples.</dd>
+  <dt>Recovery behavior</dt><dd>What runs when planning fails: rotate in place, back up, clear the costmap. Unsexy, and the difference between a stuck robot and a support ticket.</dd>
+</dl>
+
+<h2><span class="sec-no">5.2</span>Graph Search: A*, D* Lite, JPS</h2>
+<p>On a grid costmap, planning is shortest-path search, and <strong>A*</strong> is the reference algorithm: expand nodes in order of f = (cost so far) + (heuristic cost to go), and the heuristic&rsquo;s honesty is the entire contract:</p>
+<pre><code class="language-text">f(n) = g(n) + h(n)          g: best known cost from start
+                            h: estimated cost to goal
+
+h admissible  (never overestimates)           → A* returns the optimal path
+h consistent  (h(n) ≤ c(n,n') + h(n'))        → each node expanded only once
+h = 0                                          → Dijkstra (blind, fat search)
+f = g + w·h,  w &gt; 1  ("weighted A*")           → faster, cost ≤ w × optimal
+
+grids: octile heuristic for 8-connected — max+min formula of |Δx|,|Δy|</code></pre>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 260" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">WHAT EACH SEARCH EXPLORES</text>
+  <!-- panel 1: Dijkstra -->
+  <circle cx="130" cy="130" r="72" fill="#b3401e" fill-opacity="0.12" stroke="#b3401e" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <circle cx="130" cy="130" r="4.5" fill="#23201a"/>
+  <circle cx="202" cy="130" r="4.5" fill="#0e5f5b"/>
+  <text x="70" y="238" font-size="11.5" fill="#4d463a">Dijkstra (h=0): a disc</text>
+  <!-- panel 2: A* -->
+  <ellipse cx="430" cy="130" rx="76" ry="40" fill="#b3401e" fill-opacity="0.12" stroke="#b3401e" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <circle cx="366" cy="130" r="4.5" fill="#23201a"/>
+  <circle cx="500" cy="130" r="4.5" fill="#0e5f5b"/>
+  <text x="366" y="238" font-size="11.5" fill="#4d463a">A* (h honest): an ellipse</text>
+  <!-- panel 3: weighted -->
+  <ellipse cx="660" cy="130" rx="66" ry="16" fill="#b3401e" fill-opacity="0.12" stroke="#b3401e" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <circle cx="600" cy="130" r="4.5" fill="#23201a"/>
+  <circle cx="722" cy="130" r="4.5" fill="#0e5f5b"/>
+  <text x="588" y="238" font-size="11.5" fill="#4d463a">w·h: a corridor (≤ w·optimal)</text>
+  <text x="118" y="118" font-size="11" fill="#23201a">S</text>
+  <text x="208" y="118" font-size="11" fill="#0e5f5b">G</text>
+</svg>
+</div>
+<figcaption>Fig 5.2: the explored region shrinks as the heuristic gets bolder. Dijkstra pays for ignorance with a disc of expansions; admissible A* focuses toward the goal at no cost in optimality; weighted A* buys speed with a bounded-suboptimality corridor. Setup A measures all three.</figcaption>
+</figure>
+<p>Two SOTA refinements matter on real robots. <strong>D* Lite</strong> solves the <em>replanning</em> problem: mid-route, a door turns out closed — a fresh A* from scratch wastes everything learned. D* Lite searches backward from the goal (so cost-to-goal values stay valid as the robot moves) and, when edge costs change, repairs only the <em>locally inconsistent</em> nodes — those where the one-step lookahead rhs(u) = min over successors of c(u,s&rsquo;) + g(s&rsquo;) disagrees with g(u). Typical repairs touch a few percent of the map. <strong>Jump Point Search</strong> attacks uniform grids&rsquo; symmetry: a thousand equal-cost staircase paths cross an open room, and plain A* dutifully expands them all. JPS proves that only <em>jump points</em> (where an optimal path is forced to turn, at obstacle corners) need expansion, and leaps straight lines between them — order-of-magnitude speedups, exact same optimal path, zero preprocessing; JPS+ precomputes the jump distances for another large factor.</p>
+
+<div class="setup">
+<p><strong>Setup A: A* with a tunable heuristic — one evening, zero dependencies.</strong> Goal: one grid, one concave trap, three heuristic weights — and the expansion counts that make Fig 5.2 empirical. Save as <code>astar.cc</code>, compile with <code>g++ -O2 -std=c++17 astar.cc -o astar</code>:</p>
+<pre><code class="language-cpp">// astar.cc — A* on a grid; w=0 Dijkstra, w=1 optimal, w&gt;1 bounded-suboptimal.
+#include &lt;algorithm&gt;
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+#include &lt;queue&gt;
+#include &lt;vector&gt;
+
+int main() {
+  std::vector&lt;std::string&gt; map = {          // S start, G goal, # wall
+    "..................................................",
+    "..................................................",
+    "......S...............#..........................",
+    ".......................#.........................",
+    "........................#........................",
+    ".........########################.................",
+    ".........#......................#.................",
+    ".........#......................#.................",
+    ".........#........########......#.................",
+    ".........#........#......#......#.................",
+    ".........#........#..G...#......#.................",
+    ".........#........#......#......#.................",
+    ".........#........#......#####..#.................",
+    ".........#........#..............#................",
+    ".........##########...............#...............",
+    "..................................................",
+    "..................................................",
+  };
+  const int H = map.size(), W = map[0].size();
+  int sx, sy, gx, gy;
+  for (int y = 0; y &lt; H; ++y) for (int x = 0; x &lt; W; ++x) {
+    if (map[y][x] == 'S') { sx = x; sy = y; }
+    if (map[y][x] == 'G') { gx = x; gy = y; }
+  }
+  const int DX[8] = {1,-1,0,0,1,1,-1,-1}, DY[8] = {0,0,1,-1,1,-1,1,-1};
+
+  for (double w : {0.0, 1.0, 2.5}) {
+    std::vector&lt;double&gt; g(W * H, 1e18);
+    std::vector&lt;int&gt; par(W * H, -1);
+    auto h = [&amp;](int x, int y) {              // octile distance (admissible)
+      double dx = std::abs(x - gx), dy = std::abs(y - gy);
+      return std::max(dx, dy) + 0.41421356 * std::min(dx, dy);
+    };
+    using QE = std::pair&lt;double, int&gt;;        // (f, index)
+    std::priority_queue&lt;QE, std::vector&lt;QE&gt;, std::greater&lt;&gt;&gt; open;
+    g[sy * W + sx] = 0.0;
+    open.push({w * h(sx, sy), sy * W + sx});
+    long expanded = 0;
+
+    while (!open.empty()) {
+      auto [f, id] = open.top(); open.pop();
+      const int x = id % W, y = id / W;
+      if (f &gt; g[id] + w * h(x, y) + 1e-9) continue;   // stale entry
+      ++expanded;
+      if (x == gx &amp;&amp; y == gy) break;
+      for (int k = 0; k &lt; 8; ++k) {
+        const int nx = x + DX[k], ny = y + DY[k];
+        if (nx &lt; 0 || ny &lt; 0 || nx &gt;= W || ny &gt;= H || map[ny][nx] == '#') continue;
+        const double nc = g[id] + ((k &lt; 4) ? 1.0 : 1.41421356);
+        if (nc &lt; g[ny * W + nx]) {
+          g[ny * W + nx] = nc;  par[ny * W + nx] = id;
+          open.push({nc + w * h(nx, ny), ny * W + nx});
+        }
+      }
+    }
+    auto shown = map;                          // overlay the path
+    for (int id = gy * W + gx; id != -1; id = par[id])
+      if (shown[id / W][id % W] == '.') shown[id / W][id % W] = 'o';
+    std::cout &lt;&lt; "w = " &lt;&lt; w &lt;&lt; "   expanded " &lt;&lt; expanded
+              &lt;&lt; " nodes   path cost " &lt;&lt; g[gy * W + gx] &lt;&lt; "\n";
+    for (auto&amp; row : shown) std::cout &lt;&lt; "  " &lt;&lt; row &lt;&lt; "\n";
+  }
+}</code></pre>
+<p>Expected: all three find the goal inside the concave pocket, but the ledger differs — w = 0 (Dijkstra) expands the most nodes, w = 1 expands markedly fewer at the <em>same</em> path cost, and w = 2.5 expands the fewest while returning a slightly longer path (never more than 2.5× optimal, usually far closer). The trap is the teaching device: the heuristic confidently pulls the search into the pocket&rsquo;s mouth, and the search must flood back out — heuristics help exactly as much as the world cooperates.</p>
+<p>Sanity checks: (1) make the heuristic inadmissible by doubling it inside <code>h()</code> at w=1 and find a map where the returned path is visibly not optimal. (2) Change the diagonal cost to 1.0 and watch paths develop unrealistic staircase kinks — cost models leak into behavior. (3) Count re-expansions with an inconsistent heuristic — the "each node once" guarantee is the consistency clause, not the admissibility one.</p>
+</div>
+
+<h2><span class="sec-no">5.3</span>Sampling-Based Planning: RRT*, PRM, and the Informed Trick</h2>
+<p>Grids die of dimensionality: fine discretization in 6-DoF (an arm, a drone in SE(3)) is astronomically many cells. <strong>Sampling-based planners</strong> skip the discretization: draw random configurations, keep the collision-free ones, connect near neighbors, and let the graph <em>emerge</em>. <strong>PRM</strong> builds that roadmap offline for many queries (LazyPRM* defers expensive collision checks until a candidate path actually proposes an edge, validating lazily); <strong>RRT</strong> grows a tree online from the start, pulled toward unexplored space; and <strong>RRT*</strong> adds the two moves that buy <em>asymptotic optimality</em> — as samples n → ∞, the best path in the tree converges to the true optimum:</p>
+<pre><code class="language-text">RRT* per sample x_new:
+  1. choose parent: among tree nodes within radius r_n, wire x_new
+     to the neighbor minimizing (cost-to-come + edge cost)
+  2. rewire: for each neighbor, if routing THROUGH x_new is cheaper,
+     swap its parent — the tree continuously repairs itself
+
+  r_n = γ · (log n / n)^(1/d)        shrinks as the tree densifies
+
+Informed RRT*: once any solution of cost c_best exists, the only samples
+that can improve it lie in the ellipsoid  ‖x−x_start‖ + ‖x−x_goal‖ ≤ c_best
+→ sample only there; the ellipse shrinks with every improvement.</code></pre>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">INFORMED RRT*: WHERE BETTER PATHS CAN LIVE</text>
+  <ellipse cx="380" cy="180" rx="240" ry="92" fill="#0e5f5b" fill-opacity="0.07" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="7 5"/>
+  <!-- tree -->
+  <polyline points="200,180 250,150 300,164 350,140 410,150 470,170 540,176" fill="none" stroke="#b3401e" stroke-width="2.5"/>
+  <polyline points="250,150 280,120 330,112" fill="none" stroke="#b3401e" stroke-width="1.5"/>
+  <polyline points="300,164 320,206 380,224" fill="none" stroke="#b3401e" stroke-width="1.5"/>
+  <polyline points="410,150 440,118" fill="none" stroke="#b3401e" stroke-width="1.5"/>
+  <circle cx="200" cy="180" r="6" fill="#23201a"/>
+  <circle cx="540" cy="176" r="6" fill="#0e5f5b"/>
+  <text x="168" y="212" font-size="12" fill="#23201a">start</text>
+  <text x="552" y="204" font-size="12" fill="#0e5f5b">goal</text>
+  <text x="290" y="96" font-size="11.5" fill="#b3401e">current best path: cost c_best</text>
+  <!-- wasted samples -->
+  <circle cx="96" cy="60" r="3" fill="#4d463a" fill-opacity="0.5"/>
+  <circle cx="660" cy="52" r="3" fill="#4d463a" fill-opacity="0.5"/>
+  <circle cx="700" cy="290" r="3" fill="#4d463a" fill-opacity="0.5"/>
+  <circle cx="70" cy="280" r="3" fill="#4d463a" fill-opacity="0.5"/>
+  <text x="560" y="300" font-size="11" fill="#4d463a">samples out here cannot help</text>
+  <text x="238" y="296" font-size="11.5" fill="#0e5f5b">the informed ellipse — shrinks as c_best improves</text>
+</svg>
+</div>
+<figcaption>Fig 5.3: after a first solution exists, uniform sampling wastes almost everything — only the ellipse with the start and goal as foci can contain an improvement. Informed RRT* samples it directly, converging orders of magnitude faster in cluttered or long-thin problems.</figcaption>
+</figure>
+<div class="keypoint">Search and sampling are the same bet placed differently: A*-family methods buy optimality with structure (grids, heuristics) and die of dimension; RRT*-family methods buy dimension-independence with randomness and pay in convergence time. Ground robots on 2D costmaps mostly search; arms, drones, and kinodynamic problems mostly sample.</div>
+
+<h2><span class="sec-no">5.4</span>Local Planning: DWA and TEB</h2>
+<p>The global path ignores dynamics and fresh obstacles; the local planner owns both. <strong>DWA</strong> — the dynamic window approach — is honest brute force in <em>velocity</em> space: consider only the (v, ω) pairs reachable within one control cycle under acceleration limits (the "dynamic window"), forward-simulate each for a couple of seconds through the local costmap, score, pick the best, repeat at 20 Hz:</p>
+<pre><code class="language-text">window:  V = { (v, ω) :  |v − v_now| ≤ v̇_max·Δt,  |ω − ω_now| ≤ ω̇_max·Δt }
+         ∩ { admissible: can still stop before the nearest obstacle }
+
+score:   G(v, ω) = α·heading(goal alignment) + β·clearance + γ·velocity
+→ simulate every candidate, take argmax, emit one (v, ω), repeat</code></pre>
+<p>DWA&rsquo;s weakness is myopia: it commits to one arc at a time, so a robot facing a U-shaped obstacle happily maximizes progress into the pocket, then oscillates. <strong>TEB</strong> — timed elastic band — plans a whole <em>trajectory</em> instead: take the global path&rsquo;s next stretch as a band of poses with time intervals, and optimize band and times jointly (a sparse graph problem, solved with g2o — Phase 1&rsquo;s loop yet again) under objectives for time-optimality, obstacle clearance, and kinodynamic limits; the standalone C++ library plans in several path topologies in parallel (left of the pillar vs right) and picks the best, which is exactly the decision DWA cannot represent. The price of both: tuning. Weights α, β, γ and their TEB equivalents are robot- and site-specific, and every practitioner has a scar story.</p>
+
+<h2><span class="sec-no">5.5</span>Path Tracking: Pure Pursuit and Stanley</h2>
+<p>Below planning sits the controller — given the trajectory, produce commands <em>now</em>. Two geometric controllers own the classical tier. <strong>Pure pursuit</strong>: pick the point on the path one <em>lookahead distance</em> L<sub>d</sub> ahead, and command the unique circular arc that passes through it:</p>
+<pre><code class="language-text">pure pursuit:  α = bearing of lookahead point in the robot frame
+               κ = 2·sin(α) / L_d          curvature of the joining arc
+               ω = v·κ                      (L_d often scheduled: L_d = k·v)
+
+Stanley:       δ = θ_e + arctan( k·e_fa / (k_s + v) )
+               heading error + cross-track correction at the front axle</code></pre>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">PURE PURSUIT: CHASE A POINT, DRIVE AN ARC</text>
+  <!-- path -->
+  <path d="M 80 250 C 260 240 420 200 660 90" fill="none" stroke="#23201a" stroke-width="2.5"/>
+  <text x="640" y="130" font-size="12" fill="#23201a">path</text>
+  <!-- robot -->
+  <polygon points="220,236 196,250 204,224" fill="#b3401e"/>
+  <text x="160" y="278" font-size="12" fill="#b3401e">robot, speed v</text>
+  <!-- lookahead circle -->
+  <circle cx="212" cy="238" r="150" fill="none" stroke="#4d463a" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text x="86" y="120" font-size="11.5" fill="#4d463a">circle of radius L_d</text>
+  <!-- lookahead point: intersection of circle & path (approx) -->
+  <circle cx="358" cy="212" r="6.5" fill="#0e5f5b"/>
+  <text x="348" y="192" font-size="12" fill="#0e5f5b">lookahead point</text>
+  <!-- chord -->
+  <line x1="212" y1="238" x2="358" y2="212" stroke="#0e5f5b" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <!-- commanded arc -->
+  <path d="M 212 238 Q 290 232 358 212" fill="none" stroke="#a97b1f" stroke-width="3"/>
+  <text x="238" y="216" font-size="12" fill="#a97b1f">commanded arc: κ = 2 sin α / L_d</text>
+</svg>
+</div>
+<figcaption>Fig 5.4: the controller aims not at the path but at a point sliding along it. L<sub>d</sub> is the single personality knob — small chases the path aggressively and oscillates, large smooths everything and cuts corners. Setup B lets you feel both failure modes.</figcaption>
+</figure>
+<p>Pure pursuit is beloved because it is ten lines, has one knob, and degrades gracefully. <strong>Stanley</strong> (the controller that won the DARPA Grand Challenge aboard the eponymous VW) instead regulates the <em>cross-track error</em> at the front axle directly, plus heading alignment — it converges to the path exactly rather than orbiting it, at the cost of more sensitivity to noise at speed. Beyond both sits full <strong>MPC</strong> tracking, which is the next section wearing its controller hat.</p>
+
+<h2><span class="sec-no">5.6</span>MPC and MPPI: Optimization at Control Rate</h2>
+<p><strong>Model predictive control</strong> collapses the planner/controller boundary: at every tick, solve a short optimal-control problem — minimize tracking error plus effort over the next N steps, subject to the robot&rsquo;s actual dynamics and constraints — apply the first control, shift the horizon, repeat:</p>
+<pre><code class="language-text">MPC, each tick:   min_{u₀..u_{N−1}}  Σₖ ℓ(xₖ, uₖ) + ℓ_f(x_N)
+                  s.t.  xₖ₊₁ = f(xₖ, uₖ),   uₖ ∈ U,   xₖ ∈ X_free
+
+nonlinear f → NMPC: transcribe (multiple shooting) and solve the NLP with
+CasADi (+IPOPT) or ACADO's code-generated fast solvers — kHz-rate on ARM.
+
+MPPI (sampling instead of gradients):
+  draw K control sequences  uₖ + εₖ,   rollout each on the GPU, cost Sₖ
+  wₖ = exp(−(Sₖ − min S)/λ)             softmin weighting
+  u  ← Σ wₖ(uₖ + εₖ) / Σ wₖ             the noise-weighted average, repeat</code></pre>
+<p>The two branches split on differentiability. <strong>NMPC</strong> (via <a href="https://web.casadi.org/">CasADi</a> or <a href="https://acado.github.io/">ACADO</a>) wants smooth dynamics and costs, and repays them with tight constraint handling and mature solvers. <strong>MPPI</strong> — model predictive path integral control — asks nothing of the cost function: sample thousands of trajectories, weight by exponentiated cost, average. Collision indicators, discrete gates, learned costs — all legal, because nothing is differentiated; a modern GPU rolls out 10,000 samples of a 2 s horizon fast enough for 30–50 Hz control, which is why GPU-MPPI has become the SOTA local planner for aggressive ground robots and the default advanced controller in modern navigation stacks. Its failure mode is its honesty: with too few samples or too-cold λ it averages between modes ("half left, half right of the pillar") — the same multimodality TEB solves with parallel topologies.</p>
+<table>
+  <tr><th>Local planner / controller</th><th>Mechanism</th><th>Strengths</th><th>Watch out for</th></tr>
+  <tr><td>DWA</td><td>sample (v,ω) window, simulate, score</td><td>simple, cheap, predictable</td><td>myopic; U-shaped traps; tuning</td></tr>
+  <tr><td>TEB (standalone C++)</td><td>optimize a timed pose band (g2o), parallel topologies</td><td>kinodynamic, anticipates, chooses sides</td><td>heavier; needs a sane global path</td></tr>
+  <tr><td>NMPC (CasADi/ACADO)</td><td>solve an NLP each tick</td><td>constraints honored exactly, elegant tracking</td><td>needs differentiable models; solver latency tails</td></tr>
+  <tr><td>GPU MPPI</td><td>10k sampled rollouts, softmin average</td><td>arbitrary costs, dynamics as-is, embarrassingly parallel</td><td>sample starvation; mode averaging; needs a GPU</td></tr>
+</table>
+
+<div class="setup">
+<p><strong>Setup B: pure pursuit end to end — one evening, zero dependencies.</strong> Goal: a unicycle robot tracking a square path at three lookahead distances, with the cross-track ledger that turns Fig 5.4&rsquo;s "one knob" claim into numbers. Save as <code>pursuit.cc</code>, compile with <code>g++ -O2 -std=c++17 pursuit.cc -o pursuit</code>:</p>
+<pre><code class="language-cpp">// pursuit.cc — pure pursuit on a 4×4 m square path, unicycle model.
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+#include &lt;vector&gt;
+
+struct P { double x, y; };
+
+int main() {
+  std::vector&lt;P&gt; path;                       // dense square, 5 cm spacing
+  auto edge = [&amp;](P a, P b) {
+    const int n = 80;
+    for (int i = 0; i &lt; n; ++i)
+      path.push_back({a.x + (b.x - a.x) * i / n, a.y + (b.y - a.y) * i / n});
+  };
+  edge({0,0},{4,0}); edge({4,0},{4,4}); edge({4,4},{0,4}); edge({0,4},{0,0});
+
+  for (double Ld : {0.15, 0.6, 1.8}) {
+    double x = 0.2, y = -0.3, th = 0.3;      // start off-path, misaligned
+    const double v = 0.5, dt = 0.02;
+    double sum_e = 0.0, max_e = 0.0;  int steps = 0;
+
+    for (double t = 0.0; t &lt; 40.0; t += dt, ++steps) {
+      size_t near = 0;  double dbest = 1e18;  // nearest path sample
+      for (size_t i = 0; i &lt; path.size(); ++i) {
+        const double d = std::hypot(path[i].x - x, path[i].y - y);
+        if (d &lt; dbest) { dbest = d; near = i; }
+      }
+      sum_e += dbest;  max_e = std::max(max_e, dbest);
+
+      size_t tgt = near;                      // walk forward to lookahead
+      while (std::hypot(path[tgt].x - x, path[tgt].y - y) &lt; Ld)
+        tgt = (tgt + 1) % path.size();
+
+      const double ax = path[tgt].x - x, ay = path[tgt].y - y;
+      const double alpha = std::atan2(ay, ax) - th;      // bearing in body
+      const double kappa = 2.0 * std::sin(alpha) / Ld;   // the whole law
+      const double w = std::max(-2.5, std::min(2.5, v * kappa));
+
+      th += w * dt;                           // unicycle integration
+      x  += v * std::cos(th) * dt;
+      y  += v * std::sin(th) * dt;
+    }
+    std::cout &lt;&lt; "Ld = " &lt;&lt; Ld &lt;&lt; " m   mean cross-track "
+              &lt;&lt; sum_e / steps &lt;&lt; " m   max " &lt;&lt; max_e &lt;&lt; " m\n";
+  }
+}</code></pre>
+<p>Expected: L<sub>d</sub> = 0.6 wins the ledger — small mean error, modest corner overshoot. L<sub>d</sub> = 0.15 hunts: the robot overreacts to the nearest path points, ω saturates, and the max error spikes from oscillation. L<sub>d</sub> = 1.8 glides — beautiful mean behavior between corners, but every corner is cut by tens of centimetres because the controller was already chasing the next edge. That triangle — stability, accuracy, anticipation, pick two — is the entire tuning experience of geometric tracking, in three printed lines.</p>
+<p>Sanity checks: (1) schedule L<sub>d</sub> = 0.4 + 0.8·v with varying v and watch both failure modes soften — gain scheduling is the standard production answer. (2) Start the robot at heading th = 2.5 (nearly backwards): pure pursuit recovers, one of the reasons it is loved. (3) Log ω and plot its variance vs L<sub>d</sub> — actuator wear is a tuning criterion too, and this is where you see it.</p>
+</div>
+
+<h2><span class="sec-no">5.7</span>Choosing the Stack, and How It Fails</h2>
+<table>
+  <tr><th>Situation</th><th>Global</th><th>Local / control</th></tr>
+  <tr><td>Indoor 2D, static-ish world</td><td>A* (JPS+ if maps are big)</td><td>DWA or TEB + pure pursuit</td></tr>
+  <tr><td>Frequent map changes en route</td><td>D* Lite</td><td>TEB / MPPI</td></tr>
+  <tr><td>High-DoF or kinodynamic (drone, arm, car-like)</td><td>Informed RRT* / LazyPRM*</td><td>NMPC (CasADi/ACADO)</td></tr>
+  <tr><td>Aggressive offroad / dense dynamics, GPU aboard</td><td>A* seed</td><td>GPU MPPI</td></tr>
+  <tr><td>Crowds of people (see Phase 8)</td><td>A*</td><td>MPPI or a learned policy with a classical fallback</td></tr>
+</table>
+<div class="warfield">Three classic planning failures. <strong>The oscillating doorway</strong>: global path through a door the robot&rsquo;s inflated footprint barely fits; the local planner alternately commits and aborts — fix the inflation radius and give the local planner the corridor <em>width</em>, not just lethal cells. <strong>The dynamic-obstacle freeze</strong>: costmaps treat a walking human as a static wall recomputed 10× a second, so the robot brakes forever — velocity-aware costs (or MPPI/DRL with predictive models) are the real fix. <strong>The stale-map lie</strong>: global plans through a door that closed an hour ago; D* Lite repairs cheaply, but only if the map layer actually admits the change — clamped occupancy (Phase 3.2) is what makes that possible. All three share a moral: the stack fails at the <em>seams</em> between layers, so log every layer&rsquo;s input when debugging, not just the final command.</div>
+<div class="keypoint">Plan globally with relaxed dynamics, locally with real dynamics, and control with almost none — then spend your engineering budget on the seams: inflation radii, replan triggers, and recovery behaviors. A mediocre planner in a well-tuned stack beats a brilliant one in a badly stitched stack, every time.</div>
+
+<h2><span class="sec-no">5.8</span>Reading List</h2>
+<a class="paper" href="https://ieeexplore.ieee.org/document/4082128"><span class="p-title">A Formal Basis for the Heuristic Determination of Minimum Cost Paths</span><span class="p-meta">Hart, Nilsson &amp; Raphael · IEEE Trans. SSC 1968</span><span class="p-why">A*. Fifty-plus years old, still the first algorithm every navigation stack runs.</span></a>
+<a class="paper" href="http://idm-lab.org/bib/abstracts/papers/aaai02b.pdf"><span class="p-title">D* Lite</span><span class="p-meta">Koenig &amp; Likhachev · AAAI 2002</span><span class="p-why">Incremental replanning done right: repair only the locally inconsistent nodes when the world disagrees with the map.</span></a>
+<a class="paper" href="https://ojs.aaai.org/index.php/AAAI/article/view/7994"><span class="p-title">Online Graph Pruning for Pathfinding on Grid Maps (Jump Point Search)</span><span class="p-meta">Harabor &amp; Grastien · AAAI 2011</span><span class="p-why">Grid symmetry, executed: same optimal paths as A*, an order of magnitude fewer expansions, no preprocessing.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1105.1186"><span class="p-title">Sampling-Based Algorithms for Optimal Motion Planning</span><span class="p-meta">Karaman &amp; Frazzoli · IJRR 2011</span><span class="p-why">RRT* and PRM*: the paper that separated probabilistic completeness from asymptotic optimality and gave the r_n radius its form.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1404.2334"><span class="p-title">Informed RRT*</span><span class="p-meta">Gammell, Srinivasa &amp; Barfoot · IROS 2014</span><span class="p-why">The ellipsoid of Fig 5.3: direct sampling of the only region that can improve the incumbent solution.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/580977"><span class="p-title">The Dynamic Window Approach to Collision Avoidance</span><span class="p-meta">Fox, Burgard &amp; Thrun · IEEE RAM 1997</span><span class="p-why">The local planner that outlived its decade: velocity-space sampling under acceleration limits, scored by simulation.</span></a>
+<a class="paper" href="https://www.sciencedirect.com/science/article/abs/pii/S0921889016300495"><span class="p-title">Integrated Online Trajectory Planning and Optimization in Distinctive Topologies</span><span class="p-meta">Rösmann, Hoffmann &amp; Bertram · Robotics and Autonomous Systems 2017</span><span class="p-why">TEB matured: timed elastic bands optimized in parallel homotopy classes — the "left or right of the pillar" decision made explicit.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/7989202"><span class="p-title">Information Theoretic MPC for Model-Based Reinforcement Learning (MPPI)</span><span class="p-meta">Williams, Wagener, Goldfain, Drews, Rehg, Boots &amp; Theodorou · ICRA 2017</span><span class="p-why">Sampling-based MPC with the softmin update — the math behind GPU-MPPI local planners and aggressive offroad driving.</span></a>
+<a class="paper" href="https://www.ri.cmu.edu/pub_files/pub3/coulter_r_craig_1992_1/coulter_r_craig_1992_1.pdf"><span class="p-title">Implementation of the Pure Pursuit Path Tracking Algorithm</span><span class="p-meta">Coulter · CMU-RI-TR-92-01</span><span class="p-why">Ten pages, one arc formula, thirty years of deployed robots. Setup B is this memo, runnable.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/4282788"><span class="p-title">Autonomous Automobile Trajectory Tracking for Off-Road Driving (Stanley)</span><span class="p-meta">Hoffmann, Tomlin, Montemerlo &amp; Thrun · ACC 2007</span><span class="p-why">The DARPA-winning cross-track controller, with the stability analysis pure pursuit never had.</span></a>
+<a class="paper" href="https://link.springer.com/article/10.1007/s12532-018-0139-4"><span class="p-title">CasADi: A Software Framework for Nonlinear Optimization and Optimal Control</span><span class="p-meta">Andersson, Gillis, Horn, Rawlings &amp; Diehl · Mathematical Programming Computation 2019</span><span class="p-why">The tool that made writing an NMPC controller a weekend project instead of a thesis.</span></a>
+
+<h2><span class="sec-no">5.9</span>Interview Questions</h2>
+<details class="qa"><summary>What do admissibility and consistency of a heuristic actually buy you?</summary><div class="a"><p>Admissibility (h never overestimates the true cost-to-go) guarantees A* returns an optimal path: the goal cannot be popped with a suboptimal cost while a cheaper route&rsquo;s frontier node still has lower f. Consistency (the triangle inequality h(n) ≤ c(n,n&rsquo;) + h(n&rsquo;)) additionally guarantees each node is expanded at most once, so no re-expansion bookkeeping is needed. An inadmissible heuristic — including any weighted heuristic w·h — trades optimality for speed with the bound cost ≤ w·optimal, which is often exactly the right trade on a robot that needs an answer in 10 ms.</p></div></details>
+<details class="qa"><summary>Why is D* Lite preferred over re-running A* when the map changes mid-route?</summary><div class="a"><p>Because most edge-cost changes invalidate almost none of the previous search. D* Lite searches backward from the goal, so its g-values are costs-to-goal — still meaningful as the robot moves — and maintains a one-step lookahead value rhs(u); when an edge changes, only nodes where g ≠ rhs (locally inconsistent) enter the queue, and repair propagates only as far as the inconsistency does. A closed door typically touches a few percent of the state space; A*-from-scratch pays for all of it, every time, at every one of the potentially hundreds of replans in a long mission.</p></div></details>
+<details class="qa"><summary>RRT finds paths — what exactly do RRT*&rsquo;s two extra steps add, and at what cost?</summary><div class="a"><p>Plain RRT is probabilistically complete but converges to a suboptimal path almost surely — early wiring is frozen forever. RRT* adds choose-parent (wire each new sample to the ball neighbor minimizing total cost-to-come) and rewire (re-parent ball neighbors through the new sample when cheaper), so path quality improves monotonically and asymptotically reaches the optimum; the ball radius shrinks as γ(log n/n)^{1/d} to keep expected work per sample logarithmic. Costs: more nearest-neighbor queries and collision checks per sample (the practical bottleneck), and slower early progress — hence anytime use: take RRT&rsquo;s first answer, spend remaining budget on RRT*&rsquo;s improvement, ideally inside the informed ellipsoid.</p></div></details>
+<details class="qa"><summary>Your DWA robot drives into a U-shaped obstacle and oscillates. Why, and what fixes it?</summary><div class="a"><p>DWA optimizes one short arc at a time: heading-to-goal dominates the score, and every step into the pocket genuinely improves it until the pocket closes. At the dead end, no arc scores well, and the tie-breaking flips between turn-left/turn-right — oscillation. Fixes by layer: make the global planner&rsquo;s path (which sees the pocket in the costmap) a stronger attractor than the raw goal heading; use a local planner with a horizon — TEB&rsquo;s band or MPPI&rsquo;s rollouts see the dead end before entering; and have a recovery behavior (back out, replan) as the honest last resort. The lesson generalizes: local minima are escaped by information from a longer horizon, never by re-tuning the myopic scorer.</p></div></details>
+<details class="qa"><summary>Pure pursuit&rsquo;s lookahead distance: what exactly does it trade?</summary><div class="a"><p>L<sub>d</sub> is a low-pass filter on the path expressed in metres. Small L<sub>d</sub>: the target point is nearly the closest path point, curvature commands are large and reactive — tight tracking, but oscillation and actuator chatter as the robot orbits the path; the κ = 2sinα/L<sub>d</sub> gain literally diverges as L<sub>d</sub> → 0. Large L<sub>d</sub>: commands are smooth and stable, but the controller aims past corners and cuts them — geometric error proportional to path curvature. Production answer: schedule L<sub>d</sub> with speed (L<sub>d</sub> = k·v + floor), because the stability requirement scales with v while the corner-cutting penalty doesn&rsquo;t.</p></div></details>
+<details class="qa"><summary>When does MPPI beat gradient-based NMPC, and what is its characteristic failure?</summary><div class="a"><p>MPPI wins when the cost or dynamics are non-differentiable, discontinuous, or learned — collision indicators, terrain classes, neural network costs — because it only ever <em>evaluates</em> rollouts, never differentiates them; and it parallelizes perfectly on a GPU, so horizon×samples scale with hardware, not with solver cleverness. NMPC wins on tight constraint satisfaction (exact bounds, terminal sets) and on CPUs. MPPI&rsquo;s characteristic failure is averaging across modes: half the samples pass a pillar left, half right, and the softmin average drives at the pillar. Mitigations: lower temperature λ, warm-start from the previous solution, or maintain separate topological candidates TEB-style.</p></div></details>
+<details class="qa"><summary>Why do costmaps inflate obstacles, and what breaks if inflation is wrong?</summary><div class="a"><p>Inflation converts footprint collision checking into point checking: grow every obstacle by the robot&rsquo;s inscribed radius and the planner may treat the robot as a point — the C-space transform, precomputed. The decaying cost skirt beyond the lethal core additionally biases plans toward clearance. Too small: the point-robot assumption is false and the robot clips corners it "legally" planned through. Too large: doorways and aisles close in the costmap while remaining physically passable — the planner reports "no path" through a door the robot fits; asymmetric footprints (long robots) make single-radius inflation wrong in yaw-dependent ways, which is when you graduate to footprint-aware or lattice planners. Inflation radius is the single most consequential number in a 2D nav stack.</p></div></details>
+<details class="qa"><summary>Design the planning stack for a hospital delivery robot: corridors, elevators, beds on wheels, people.</summary><div class="a"><p>Global: A* (JPS+ for large floors) on the Phase 3 occupancy map with conservative inflation; D* Lite mode for en-route changes like closed fire doors; elevator transitions as graph edges with their own logic. Local: TEB or MPPI at 20 Hz on a 6–8 m rolling costmap fused from lidar + depth (beds and IV stands are lidar-sparse — Phase 2&rsquo;s complementary-sensor lesson); velocity-aware human costs so walkers aren&rsquo;t treated as walls, with speed caps near people from a semantic layer. Control: pure pursuit with speed-scheduled lookahead — hospitals reward smoothness over agility. Seams: recovery behaviors that never reverse blindly (people stand behind robots), replan triggers on local/global divergence, and the two-frame contract from Phase 3.8 so loop-closure jumps never yank a robot mid-corridor. Then spend a week tuning inflation and DWA/TEB weights on site, because you will.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

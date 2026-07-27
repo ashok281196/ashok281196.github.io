@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 1 · Mathematical Foundations &amp; Optimization · Autonomous Mobile Robot Navigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">01</div>
+  <div class="chapter-kicker">Phase One · The Language Everything Else Is Written In</div>
+  <h1>Mathematical Foundations &amp; Optimization</h1>
+  <p class="chapter-sub">Poses and how to compose them, rotations and how to differentiate them, and the one optimization loop that calibration, SLAM, and planning all secretly are. Nothing in the next seven phases is new math — it is this math, re-applied.</p>
+</header>
+
+<h2><span class="sec-no">1.1</span>Frames and Rigid Transformations</h2>
+<p>Every quantity a robot cares about — a lidar return, a wheel tick, a goal, gravity — is a set of numbers <em>measured with respect to something</em>. That something is a <strong>coordinate frame</strong>: an origin plus axes. A mobile robot drags a small zoo of them around: a fixed <code>world</code> (or <code>map</code>) frame, a <code>base</code> frame bolted to the chassis, and one frame per sensor. The same physical point has different coordinates in each, and the entire discipline of not confusing them is one object: the rigid transformation.</p>
+<p>A rigid transformation is a rotation R plus a translation t. Applied to a point it rotates first, then translates. Packing both into a single matrix using homogeneous coordinates turns "rotate then translate" into one multiplication, which is what makes chains of frames manageable:</p>
+<pre><code class="language-text">p_w = R_wb · p_b + t_wb                      rotate, then translate
+
+homogeneous form:   p̃ = [p; 1]
+
+T_wb = [ R_wb   t_wb ]        p̃_w = T_wb · p̃_b
+       [  0       1  ]
+
+SE(2), planar pose, 3 DoF (x, y, θ):        SE(3), 3D pose, 6 DoF:
+
+T = [ cos θ   −sin θ   x ]                  T = [ R₃ₓ₃   t₃ₓ₁ ]
+    [ sin θ    cos θ   y ]                      [  0       1  ]
+    [   0        0     1 ]
+
+composition:   T_wl = T_wb · T_bl            adjacent subscripts cancel
+inverse:       T_wb⁻¹ = [ Rᵀ  −Rᵀt ]  =  T_bw
+                        [ 0     1  ]</code></pre>
+<p>The subscript convention carries more weight than it looks. Read <strong>T_wb</strong> as "the pose of frame b expressed in frame w", or equivalently "the matrix that maps coordinates <em>from</em> b <em>into</em> w". Written that way, correctness becomes typography: in T_wb · T_bl the two b&rsquo;s touch and cancel, leaving T_wl. If the inner subscripts don&rsquo;t match, the expression is wrong before you evaluate a single number. The diagram below is the whole idea:</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 310" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">ONE POINT, THREE FRAMES</text>
+  <!-- world frame -->
+  <line x1="80" y1="260" x2="150" y2="260" stroke="#23201a" stroke-width="2.5"/>
+  <polygon points="150,260 141,256 141,264" fill="#23201a"/>
+  <line x1="80" y1="260" x2="80" y2="190" stroke="#23201a" stroke-width="2.5"/>
+  <polygon points="80,190 76,199 84,199" fill="#23201a"/>
+  <text x="60" y="284" font-size="12" fill="#23201a">world (w)</text>
+  <!-- robot body -->
+  <rect x="300" y="180" width="120" height="56" rx="8" fill="#faf7f0" stroke="#23201a" stroke-width="2.5"/>
+  <circle cx="322" cy="242" r="9" fill="none" stroke="#23201a" stroke-width="2.5"/>
+  <circle cx="398" cy="242" r="9" fill="none" stroke="#23201a" stroke-width="2.5"/>
+  <line x1="360" y1="208" x2="404" y2="196" stroke="#b3401e" stroke-width="2"/>
+  <polygon points="404,196 394,195 397,203" fill="#b3401e"/>
+  <text x="304" y="172" font-size="12" fill="#23201a">base (b)</text>
+  <!-- lidar -->
+  <rect x="345" y="140" width="30" height="22" rx="4" fill="#faf7f0" stroke="#0e5f5b" stroke-width="2.5"/>
+  <text x="300" y="128" font-size="12" fill="#0e5f5b">lidar (l)</text>
+  <!-- transform arrows -->
+  <path d="M 92 250 Q 200 160 296 205" fill="none" stroke="#b3401e" stroke-width="2" stroke-dasharray="7 5"/>
+  <polygon points="296,205 286,201 288,210" fill="#b3401e"/>
+  <text x="140" y="168" font-size="13" fill="#b3401e">T_wb</text>
+  <path d="M 372 178 Q 378 170 366 164" fill="none" stroke="#0e5f5b" stroke-width="2"/>
+  <text x="386" y="172" font-size="13" fill="#0e5f5b">T_bl</text>
+  <!-- point -->
+  <line x1="634" y1="84" x2="646" y2="96" stroke="#23201a" stroke-width="3"/>
+  <line x1="646" y1="84" x2="634" y2="96" stroke="#23201a" stroke-width="3"/>
+  <text x="656" y="94" font-size="13" fill="#23201a">p</text>
+  <!-- measurement ray -->
+  <line x1="375" y1="150" x2="630" y2="92" stroke="#0e5f5b" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="425" y="118" font-size="12" fill="#0e5f5b" transform="rotate(-13 425 118)">p_l  (what the sensor reports)</text>
+  <!-- world line to p -->
+  <line x1="84" y1="256" x2="630" y2="94" stroke="#a97b1f" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="290" y="272" font-size="12.5" fill="#a97b1f">p_w = T_wb · T_bl · p_l   (what the map needs)</text>
+</svg>
+</div>
+<figcaption>Fig 1.1: the lidar reports p in its own frame; the map wants it in the world frame. Two transforms in a chain, inner subscripts cancelling, convert one to the other. Phase 6 (calibration) exists to measure T_bl; Phase 2 (odometry) exists to estimate T_wb.</figcaption>
+</figure>
+<dl class="jargon">
+  <dt>Frame</dt><dd>An origin plus orthogonal axes. Coordinates mean nothing until you say which frame they are in.</dd>
+  <dt>SE(2), SE(3)</dt><dd>The special Euclidean groups: all rigid transformations of the plane (3 DoF) and of 3D space (6 DoF). "Group" mostly means composable, invertible, closed under both.</dd>
+  <dt>Extrinsics</dt><dd>The fixed transform between two sensors or a sensor and the body, like T_bl above. Measured once by calibration, then trusted by everything.</dd>
+  <dt>Homogeneous coordinates</dt><dd>Appending a 1 to a point so rotation-plus-translation becomes a single matrix product, and chains of transforms become chains of multiplications.</dd>
+</dl>
+<div class="warfield">The single most common bug class in all of robotics is a frame bug: using T_bw where T_wb was meant, composing in the wrong order (matrices do not commute), or feeding degrees where radians were expected. The defenses are boring and non-optional: name every transform with both frames (<code>T_base_lidar</code>, never <code>lidar_tf</code>), make the subscript-cancellation check a habit, and test with an asymmetric configuration — a sensor mounted dead-center on a robot facing forward makes half of all frame bugs invisible until the day the hardware changes.</div>
+
+<h2><span class="sec-no">1.2</span>Rotations Are the Troublemakers</h2>
+<p>Translation is a vector: you can add translations, average them, scale them, and put Gaussians on them. Rotation looks like it should behave the same way and does not, and the gap between those two sentences is why this chapter needs Lie theory at all.</p>
+<p>Three facts break the vector illusion. First, rotations <strong>do not commute</strong>: roll-then-pitch is not pitch-then-roll, while addition never cares about order. Second, angles <strong>wrap around</strong>: the average of headings +179° and −179° is ±180°, but the arithmetic mean says 0° — a robot that averages raw angles will eventually turn to face exactly backwards. Third, the popular three-number parametrization, Euler angles, has a <strong>singularity</strong>: at pitch ±90° two axes align, a degree of freedom vanishes, and Jacobians divide by zero. That is gimbal lock, and it is a property of the parametrization, not of physics.</p>
+<p>The set of all 3D rotations has a name and a definition worth memorizing:</p>
+<pre><code class="language-text">SO(3) = { R ∈ ℝ³ˣ³  :  RᵀR = I,  det R = +1 }
+
+3 degrees of freedom, stored in 9 numbers with 6 constraints —
+or in a unit quaternion: 4 numbers, 1 constraint, and q ≡ −q (double cover)</code></pre>
+<table>
+  <tr><th>Representation</th><th>Numbers</th><th>Constraint</th><th>Pain point</th></tr>
+  <tr><td>Euler angles (roll, pitch, yaw)</td><td>3</td><td>none</td><td>Gimbal lock at pitch ±90°, wrap-around, a dozen axis-order conventions</td></tr>
+  <tr><td>Unit quaternion</td><td>4</td><td>unit norm</td><td>Double cover (q and −q are the same rotation); drifts off the sphere under naive arithmetic</td></tr>
+  <tr><td>Rotation matrix</td><td>9</td><td>orthogonal, det = 1</td><td>Six constraints to maintain; numerical drift needs re-orthogonalization</td></tr>
+  <tr><td>Tangent vector (axis-angle, next section)</td><td>3</td><td>none locally</td><td>Only valid as a <em>local</em> chart around a reference rotation</td></tr>
+</table>
+<p>Every row of that table is a bad place to <em>do calculus</em>. Euler angles are singular, quaternions and matrices are constrained, and an optimizer that takes an unconstrained step off the quaternion sphere or out of orthogonality produces a "rotation" that isn&rsquo;t one. The resolution is not a better parametrization — it is to stop pretending rotations live in a vector space at all.</p>
+
+<h2><span class="sec-no">1.3</span>Lie Theory Without Tears: so(3) and se(3)</h2>
+<p>SO(3) is a <strong>manifold</strong>: a curved 3-dimensional surface living inside the 9-dimensional space of matrices, the way a sphere is a curved 2D surface inside 3D. You cannot add points on a curved surface. But every manifold is <em>locally flat</em>: zoom in far enough at any point and it looks like a plain vector space. That local flat approximation is the <strong>tangent space</strong>, and for SO(3) it is an honest ℝ³ — three unconstrained numbers where addition, Gaussians, Jacobians, and least squares all work exactly as they should.</p>
+<div class="analogy">The exponential map is a thread wound onto a spool. Lay a straight thread (a tangent vector — flat, addable, honest) against a curved spool (the manifold) and wrap: every length of straight thread lands on a definite point of the curve. That wrapping is exp. Unwinding the thread back off the spool — recovering the straight length that reaches a given point — is log. Nobody ever needs a flat map of the whole spool; you only ever wrap and unwind short threads near where you are.</div>
+<p>The tangent space of SO(3) at the identity is called <strong>so(3)</strong>, and its elements have two equivalent forms: a plain vector ω ∈ ℝ³ (rotation axis times angle), or a skew-symmetric matrix. The <strong>hat</strong> operator converts vector to matrix, <strong>vee</strong> (ᵛ) converts back, and the <strong>exponential map</strong> — an honest matrix exponential, with a famous closed form — wraps a tangent vector onto the manifold:</p>
+<pre><code class="language-text">hat:                      [  0   −ω₃   ω₂ ]
+  ω = (ω₁, ω₂, ω₃)ᵀ  →    [  ω₃    0  −ω₁ ]  = ω^        note: ω^ v = ω × v
+                          [ −ω₂   ω₁    0 ]
+
+exponential map (Rodrigues' formula),  θ = ‖ω‖:
+
+  R = exp(ω^) = I + (sin θ / θ) · ω^ + ((1 − cos θ) / θ²) · (ω^)²
+
+log map (the inverse):
+
+  θ = arccos( (tr R − 1) / 2 )         ω = (θ / (2 sin θ)) · (R − Rᵀ)ᵛ</code></pre>
+<p>Poses get the same treatment. SE(3) is a 6-dimensional manifold; its tangent space <strong>se(3)</strong> holds twists ξ = (ρ, ω) — three numbers of translation-like velocity and three of rotation. The exponential map couples them through a matrix V (rotation makes the translation curve, which is why a robot commanding constant (v, ω) drives an arc, not a line — the exact fact wheel odometry in Phase 2 integrates):</p>
+<pre><code class="language-text">ξ = (ρ, ω) ∈ ℝ⁶ ≅ se(3)
+
+  exp(ξ^) = [ exp(ω^)   V·ρ ]        V = I + ((1 − cos θ)/θ²) ω^
+            [    0       1  ]              + ((θ − sin θ)/θ³) (ω^)²
+
+boxplus / boxminus — the only two operators estimation ever needs:
+
+  x ⊞ δ  =  x · exp(δ^)              perturb pose x by tangent step δ
+  y ⊟ x  =  log(x⁻¹ · y)ᵛ            the tangent step carrying x to y</code></pre>
+<p>Two conventions exist for ⊞: multiply the perturbation on the right (a step in the <em>body</em> frame, used above) or on the left (a step in the <em>world</em> frame). Both are fine; mixing them is not, because Jacobians derived in one convention are wrong in the other. The <strong>adjoint</strong> matrix Adj_T is the bookkeeping device that converts tangent vectors between the two sides: T · exp(δ^) = exp((Adj_T δ)^) · T. You mostly need to know it exists and that your library documents its choice.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">THE MANIFOLD AND ITS TANGENT SPACE</text>
+  <!-- manifold arc -->
+  <path d="M 60 300 Q 380 60 700 300" fill="none" stroke="#23201a" stroke-width="3"/>
+  <text x="590" y="262" font-size="12.5" fill="#23201a">manifold: SO(3), SE(3)</text>
+  <!-- tangent line at x -->
+  <line x1="120" y1="228" x2="560" y2="98" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="7 5"/>
+  <text x="330" y="86" font-size="12.5" fill="#0e5f5b">tangent space at x: ℝ³, ℝ⁶ — flat, do all math here</text>
+  <!-- point x -->
+  <circle cx="256" cy="188" r="7" fill="#b3401e"/>
+  <text x="238" y="215" font-size="13" fill="#b3401e">x</text>
+  <!-- delta vector along tangent -->
+  <line x1="256" y1="188" x2="448" y2="131" stroke="#0e5f5b" stroke-width="3"/>
+  <polygon points="448,131 437,131 441,140" fill="#0e5f5b"/>
+  <text x="330" y="142" font-size="13" fill="#0e5f5b">δ</text>
+  <!-- exp arrow wrapping down to manifold -->
+  <path d="M 452 136 Q 470 160 452 184" fill="none" stroke="#a97b1f" stroke-width="2.5"/>
+  <polygon points="452,184 459,176 449,173" fill="#a97b1f"/>
+  <text x="482" y="166" font-size="13" fill="#a97b1f">exp</text>
+  <!-- landing point -->
+  <circle cx="448" cy="190" r="7" fill="#a97b1f"/>
+  <text x="428" y="218" font-size="13" fill="#a97b1f">x ⊞ δ</text>
+  <!-- log arrow back up -->
+  <path d="M 428 182 Q 414 158 430 140" fill="none" stroke="#4d463a" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <polygon points="430,140 421,143 428,150" fill="#4d463a"/>
+  <text x="380" y="164" font-size="12" fill="#4d463a">log</text>
+</svg>
+</div>
+<figcaption>Fig 1.2: keep the state on the curved manifold; keep every correction δ, covariance, and Jacobian in the flat tangent space; travel between the two with exp and log. This one picture is how every serious estimation library handles rotation.</figcaption>
+</figure>
+<p>The cheat sheet for the four groups this book actually uses:</p>
+<table>
+  <tr><th>Group</th><th>Represents</th><th>DoF</th><th>Tangent space</th><th>exp in practice</th></tr>
+  <tr><td>SO(2)</td><td>planar rotation</td><td>1</td><td>θ ∈ ℝ</td><td>trivial: wrap the angle</td></tr>
+  <tr><td>SE(2)</td><td>planar pose</td><td>3</td><td>(ρ₁, ρ₂, θ) ∈ ℝ³</td><td>closed form with a 2×2 V matrix — exactly the unicycle motion model</td></tr>
+  <tr><td>SO(3)</td><td>3D rotation</td><td>3</td><td>ω ∈ ℝ³</td><td>Rodrigues&rsquo; formula</td></tr>
+  <tr><td>SE(3)</td><td>3D pose</td><td>6</td><td>ξ = (ρ, ω) ∈ ℝ⁶</td><td>Rodrigues plus the V matrix</td></tr>
+</table>
+<div class="keypoint">Store the state on the manifold (quaternion or matrix). Do every piece of calculus — corrections, covariances, Jacobians, Gaussians — in the tangent space, where three or six unconstrained numbers behave like the vectors they are. Move between the two with exp and log. Every filter in Phase 2 and every optimizer in Phase 3 is built on this contract.</div>
+<dl class="jargon">
+  <dt>Manifold</dt><dd>A curved space that is locally flat. Sphere: 2D manifold. SO(3): 3D manifold. SE(3): 6D manifold.</dd>
+  <dt>Tangent space / Lie algebra</dt><dd>The flat vector space that best approximates the manifold at a point. At the identity it gets a special name: so(3), se(3).</dd>
+  <dt>hat (^) / vee (ᵛ)</dt><dd>Convert between the vector form of a tangent element and its matrix form. ω^ is also the cross-product matrix.</dd>
+  <dt>exp / log</dt><dd>Wrap a tangent vector onto the manifold; unwrap a manifold displacement into a tangent vector. Closed-form for all groups in this book.</dd>
+  <dt>Adjoint</dt><dd>The linear map that carries tangent vectors between right- and left-perturbation conventions, or between frames.</dd>
+</dl>
+
+<h2><span class="sec-no">1.4</span>Sophus and manif: Lie Groups You Can Compile</h2>
+<p>You should implement Rodrigues&rsquo; formula once in your life, then never again. Two header-only C++ libraries own this niche, and this book uses both. <a href="https://github.com/strasdat/Sophus">Sophus</a> (Strasdat) is the veteran: Eigen-based SO(2)/SE(2)/SO(3)/SE(3)/Sim(3), battle-tested inside a large share of the SLAM systems in Phases 2 and 3, with a ready-made Ceres manifold adapter we will use in Setup B. <a href="https://github.com/artivis/manif">manif</a> (Deray &amp; Solà) is the younger sibling written to accompany the <em>micro Lie theory</em> paper: same groups plus SE_2(3) (the extended pose used by modern IMU filters), and its defining feature is that <em>every operation can return its analytic Jacobians</em> — exactly the matrices an EKF or a factor graph needs, with no autodiff and no finite differences.</p>
+<p>The core of Sophus in fifteen lines:</p>
+<pre><code class="language-cpp">#include &lt;sophus/se3.hpp&gt;
+
+// a pose: 30° about z, translated (1, 2, 0)
+Sophus::SE3d T_wb(Sophus::SO3d::rotZ(M_PI / 6.0),
+                  Eigen::Vector3d(1.0, 2.0, 0.0));
+
+// log: pose → twist ξ = (ρ, ω), a plain 6-vector you can put a Gaussian on
+Eigen::Matrix&lt;double, 6, 1&gt; xi = T_wb.log();
+
+// exp: twist → pose. Round trip is identity up to machine precision
+Sophus::SE3d T_rt = Sophus::SE3d::exp(xi);
+
+// boxplus: perturb by a small tangent step (right convention)
+Eigen::Matrix&lt;double, 6, 1&gt; delta;
+delta &lt;&lt; 0.01, 0, 0, 0, 0, 0.002;            // 1 cm forward, 2 mrad yaw
+Sophus::SE3d T_pert = T_wb * Sophus::SE3d::exp(delta);
+
+// frames compose and invert like the math says
+Eigen::Vector3d p_w = T_wb * Eigen::Vector3d(0.5, 0.0, 0.0);</code></pre>
+<p>And the manif habit that makes Phase 2 pleasant — Jacobians on demand from every operator:</p>
+<pre><code class="language-cpp">#include &lt;manif/manif.h&gt;
+
+manif::SE2d X(1.0, 2.0, M_PI / 6.0);          // planar pose: x, y, θ
+manif::SE2Tangentd w;
+w &lt;&lt; 0.05, 0.0, 0.01;                          // a small twist
+
+manif::SE2d::Jacobian J_x, J_w;                // 3×3 analytic Jacobians
+manif::SE2d X2 = X.plus(w, J_x, J_w);          // X2 = X ⊞ w,  ∂X2/∂X,  ∂X2/∂w
+
+// every EKF predict step in Phase 2 is literally this call:
+// state ⊞ (velocity · dt), with J_x propagating the covariance</code></pre>
+<table>
+  <tr><th>Library</th><th>Groups</th><th>Jacobians</th><th>Pick it when</th></tr>
+  <tr><td><a href="https://github.com/strasdat/Sophus">Sophus</a></td><td>SO/SE(2), SO/SE(3), Sim(3)</td><td>Bring your own (or autodiff via its Ceres adapter)</td><td>You are feeding Ceres, or matching the conventions of existing SLAM code</td></tr>
+  <tr><td><a href="https://github.com/artivis/manif">manif</a></td><td>SO/SE(2), SO/SE(3), SE_2(3), Sim(3)</td><td>Analytic, from every operation, following Solà et al. conventions</td><td>You are writing filters by hand and want exact covariance propagation</td></tr>
+</table>
+
+<div class="setup">
+<p><strong>Setup A: frames, exp/log, and the angle-averaging trap — twenty minutes.</strong> Goal: compile one file that chains two transforms, round-trips exp/log to machine precision, and shows naive angle averaging pointing a robot exactly backwards.</p>
+<p>Prereqs: any Linux with a C++17 compiler. Sophus is header-only; the cmake flag avoids its optional fmt dependency:</p>
+<pre><code class="language-bash">sudo apt install build-essential cmake libeigen3-dev
+git clone https://github.com/strasdat/Sophus.git
+cmake -S Sophus -B Sophus/build -DSOPHUS_USE_BASIC_LOGGING=ON
+sudo cmake --install Sophus/build</code></pre>
+<p>Save as <code>hello_se3.cc</code>, compile with <code>g++ -std=c++17 -I/usr/include/eigen3 hello_se3.cc -o hello_se3</code>:</p>
+<pre><code class="language-cpp">// hello_se3.cc — poses, exp/log, and why you never average angles.
+#include &lt;sophus/se3.hpp&gt;
+#include &lt;iostream&gt;
+
+int main() {
+  // 1. frame chain: lidar → base → world (Fig 1.1, in code)
+  const Sophus::SE3d T_wb(Sophus::SO3d::rotZ(M_PI / 6.0),      // robot at (1,2), yaw 30°
+                          Eigen::Vector3d(1.0, 2.0, 0.0));
+  const Sophus::SE3d T_bl(Sophus::SO3d(),                      // lidar 20 cm fwd, 35 cm up
+                          Eigen::Vector3d(0.20, 0.0, 0.35));
+  const Eigen::Vector3d p_l(4.0, 0.0, 0.0);                    // return 4 m ahead of lidar
+  std::cout &lt;&lt; "p_w = " &lt;&lt; (T_wb * T_bl * p_l).transpose() &lt;&lt; "\n";
+
+  // 2. exp/log round trip
+  const auto xi = T_wb.log();
+  const double err = (Sophus::SE3d::exp(xi).inverse() * T_wb).log().norm();
+  std::cout &lt;&lt; "round-trip error = " &lt;&lt; err &lt;&lt; "\n";
+
+  // 3. the trap: average headings +170° and −170°
+  const Sophus::SO3d Ra = Sophus::SO3d::rotZ( 170.0 * M_PI / 180.0);
+  const Sophus::SO3d Rb = Sophus::SO3d::rotZ(-170.0 * M_PI / 180.0);
+  const double naive_deg = (170.0 + (-170.0)) / 2.0;           // arithmetic mean
+  const Sophus::SO3d mid =                                     // geodesic midpoint:
+      Ra * Sophus::SO3d::exp(0.5 * (Ra.inverse() * Rb).log()); // walk halfway on SO(3)
+  std::cout &lt;&lt; "naive mean yaw    = " &lt;&lt; naive_deg &lt;&lt; " deg\n";
+  std::cout &lt;&lt; "manifold mean yaw = " &lt;&lt; mid.log()(2) * 180.0 / M_PI &lt;&lt; " deg\n";
+}</code></pre>
+<p>Expected: <code>p_w ≈ (4.64, 4.10, 0.35)</code> — work it by hand once: p_b = (4.2, 0, 0.35), rotate by 30°, add (1, 2, 0). Round-trip error at 1e−16. And the finale: naive mean yaw 0°, manifold mean ±180°. Both headings point almost backwards; the arithmetic mean points dead ahead. Any code that averages, interpolates, or low-pass-filters raw angles contains this bug at some density.</p>
+<p>Sanity checks: (1) swap the composition to <code>T_bl * T_wb</code> — the answer changes completely, because subscripts no longer cancel; that is the frame-bug experience in miniature. (2) Print <code>T_wb.inverse() * T_wb</code> and confirm identity. (3) Change the two headings to +10°/−10°: now naive and manifold means agree — the trap only springs near the wrap, which is why it survives testing and dies in the field.</p>
+</div>
+
+<h2><span class="sec-no">1.5</span>The Bayes Filter: The Master Recipe</h2>
+<p>Everything above describes a robot&rsquo;s state; nothing yet estimates it. Estimation starts from an honest admission: sensors are noisy, motion is sloppy, so the robot&rsquo;s knowledge is not a pose but a <em>probability distribution over poses</em> — a <strong>belief</strong>. Two models describe how the world moves and how it is sensed, each with its noise stated explicitly:</p>
+<pre><code class="language-text">x_t = f(x_{t−1}, u_t) + w_t          motion model,       w_t ~ N(0, Q)
+z_t = h(x_t) + v_t                   measurement model,  v_t ~ N(0, R)
+
+bel(x_t) = p(x_t | z_{1:t}, u_{1:t})          the belief we maintain
+
+predict:  bel⁻(x_t) = ∫ p(x_t | x_{t−1}, u_t) · bel(x_{t−1}) dx_{t−1}
+correct:  bel(x_t)  = η · p(z_t | x_t) · bel⁻(x_t)</code></pre>
+<p>The two lines at the bottom are the <strong>Bayes filter</strong>, and they are a heartbeat. <strong>Predict</strong> pushes the belief through the motion model — a convolution that smears probability mass, so uncertainty grows. <strong>Correct</strong> multiplies by the measurement likelihood — a reweighting that concentrates mass where the sensor agrees, so uncertainty shrinks. Widen, narrow, widen, narrow, at sensor rate, forever. Its legality rests on the <strong>Markov assumption</strong>: the state summarizes all history, so the past influences the future only through x<sub>t−1</sub>.</p>
+<p>The integral is intractable over a continuous 6-DoF state, so every practical filter is a compromise about the belief&rsquo;s <em>shape</em>. Constrain it to a Gaussian and linearize the models: the EKF. Sample the nonlinearity at sigma points: the UKF. Represent the belief with a swarm of weighted samples: the particle filter that powers global localization. Those are Phase 2 and Phase 4&rsquo;s machinery; what this phase supplies is the recipe they all instantiate, plus the one Gaussian fact that explains every fusion result you will ever compute:</p>
+<pre><code class="language-text">fusing N(μ₁, σ₁²) with N(μ₂, σ₂²):
+
+  σ² = (1/σ₁² + 1/σ₂²)⁻¹             precisions ADD — fusion never hurts
+  μ  = σ² · (μ₁/σ₁² + μ₂/σ₂²)        precision-weighted mean
+
+example:  N(3.0, 4.0) × N(5.0, 1.0)  →  N(4.6, 0.8)</code></pre>
+<div class="keypoint">The product of two Gaussians is a Gaussian whose precision (inverse variance) is the sum of the inputs&rsquo; precisions. A Kalman update, a fused GNSS-odometry estimate, a converged factor graph — every fusion in this book is this fact applied repeatedly. Note the fused mean sits nearer the confident source, and the fused variance beats both inputs.</div>
+
+<h2><span class="sec-no">1.6</span>Nonlinear Least Squares and Gauss-Newton</h2>
+<p>The Bayes filter runs forward in time and never revisits the past. The other pillar of this phase solves for <em>everything at once</em>: given a pile of measurements, find the states that explain them best. Under Gaussian noise, "best" stops being a matter of taste — maximizing the likelihood of the measurements is <em>exactly</em> minimizing a sum of squared, covariance-weighted <strong>residuals</strong>:</p>
+<pre><code class="language-text">residual — what a measurement disagrees with a candidate state x by:
+  rᵢ(x) = zᵢ − hᵢ(x)
+
+Gaussian noise  ⇒  maximum likelihood = least squares:
+
+  x* = argmax Πᵢ exp(−½ rᵢᵀ Σᵢ⁻¹ rᵢ)
+     = argmin  Σᵢ  rᵢ(x)ᵀ Σᵢ⁻¹ rᵢ(x)
+
+the covariance Σᵢ⁻¹ is the weight: confident measurements pull harder</code></pre>
+<p>The residuals are nonlinear in x (rotations guarantee that), so no closed-form minimum exists. <strong>Gauss-Newton</strong> is the classical fix: linearize each residual around the current guess, solve the resulting <em>linear</em> least-squares problem exactly, step, repeat:</p>
+<pre><code class="language-text">linearize:   rᵢ(x ⊞ δ) ≈ rᵢ(x) + Jᵢ δ          Jᵢ = ∂rᵢ/∂δ at δ = 0
+
+stack all residuals and solve the normal equations:
+
+  (Jᵀ Σ⁻¹ J) δ = −Jᵀ Σ⁻¹ r          H = JᵀΣ⁻¹J is the Gauss-Newton Hessian
+
+update:      x ← x ⊞ δ,   repeat until ‖δ‖ is tiny</code></pre>
+<p>Two remarks the compact notation hides. First, H = JᵀΣ⁻¹J is an <em>approximation</em> of the true Hessian — the dropped term involves second derivatives of the residuals scaled by the residuals themselves, so the approximation is excellent precisely when residuals are small (near the solution) or models are mildly curved. You get near-second-order convergence at first-order cost, which is the whole appeal. Second, H is <strong>sparse</strong> in every robotics problem that matters: each measurement touches only a couple of variables (one pose and one landmark; two consecutive poses), so J has a few nonzero blocks per row and H is nearly all zeros. Sparse Cholesky factorization exploits that ruthlessly — it is the only reason optimizing ten thousand poses at interactive rates is possible, and Phase 3 (pose graphs) and Phase 6 (calibration) both bank on it.</p>
+<p>Gauss-Newton&rsquo;s temper is the reason it never ships alone: it trusts its linearization <em>completely</em>. Near the minimum, where the quadratic model is honest, it converges in a handful of iterations. Far from the minimum, the model is fiction, the full step overshoots into worse territory, and the iteration can diverge outright.</p>
+
+<h2><span class="sec-no">1.7</span>Levenberg-Marquardt and the Art of Not Overshooting</h2>
+<p><strong>Levenberg-Marquardt</strong> is Gauss-Newton with an adjustable amount of humility. Add a damping term λ to the diagonal of H, and the same linear solve smoothly interpolates between two algorithms:</p>
+<pre><code class="language-text">(H + λ · diag(H)) δ = −g              g = Jᵀ Σ⁻¹ r   (Marquardt's scaling;
+                                       Levenberg's original used λI)
+
+λ → 0      :  the step is pure Gauss-Newton — bold, quadratic model trusted
+λ → large  :  δ ≈ −g / λ — a short, safe gradient-descent step
+
+policy after each step:  cost ↓  →  accept, shrink λ (≈ ÷3)
+                         cost ↑  →  reject, grow λ (≈ ×10), re-solve</code></pre>
+<p>The modern reading of λ is a <strong>trust region</strong>: the radius over which the quadratic model is believed. Good steps expand the region; bad steps shrink it. The algorithm is self-tuning, which is why LM has been the default engine of bundle adjustment, calibration, and pose-graph optimization for sixty years — and it is what actually runs when Phase 3&rsquo;s SLAM backend "optimizes the graph".</p>
+<div class="analogy">Driving at night, you only commit to what your headlights show. LM&rsquo;s λ is the headlight range: on a straightaway (quadratic model matching reality) the beams reach far and you floor it — Gauss-Newton. In fog (cost went up, model lied) the beams pull in and you crawl along the gradient. Gauss-Newton alone is driving on high beams in all weather; gradient descent alone is crawling everywhere, even on the freeway.</div>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">WHY DAMPING EXISTS</text>
+  <!-- axes -->
+  <line x1="60" y1="290" x2="710" y2="290" stroke="#23201a" stroke-width="2"/>
+  <text x="640" y="312" font-size="12" fill="#23201a">parameter</text>
+  <text x="30" y="60" font-size="12" fill="#23201a">cost</text>
+  <!-- true cost curve: steep left, min at ~480, rises right -->
+  <polyline points="70,70 120,108 170,146 230,186 300,222 380,248 450,262 490,264 540,252 600,220 660,166 706,110"
+            fill="none" stroke="#23201a" stroke-width="3"/>
+  <!-- quadratic model at x_k (dashed rust): vertex near x=700, past the true minimum -->
+  <polyline points="170,146 270,186 370,217 470,240 570,255 700,262 750,261"
+            fill="none" stroke="#b3401e" stroke-width="2" stroke-dasharray="7 5"/>
+  <text x="60" y="316" font-size="12" fill="#b3401e">quadratic model fitted at x_k</text>
+  <!-- current point -->
+  <circle cx="170" cy="146" r="7" fill="#23201a"/>
+  <text x="150" y="132" font-size="13" fill="#23201a">x_k</text>
+  <!-- GN step: jumps to the model's minimum, where true cost is high again -->
+  <line x1="170" y1="146" x2="700" y2="146" stroke="#b3401e" stroke-width="2.5"/>
+  <polygon points="700,146 689,141 689,151" fill="#b3401e"/>
+  <circle cx="700" cy="117" r="6" fill="#b3401e"/>
+  <text x="500" y="110" font-size="12" fill="#b3401e">GN step: overshoots</text>
+  <!-- LM step: shorter, lands downhill -->
+  <line x1="170" y1="146" x2="320" y2="146" stroke="#0e5f5b" stroke-width="2.5"/>
+  <polygon points="320,146 309,141 309,151" fill="#0e5f5b"/>
+  <circle cx="320" cy="230" r="6" fill="#0e5f5b"/>
+  <text x="228" y="132" font-size="12" fill="#0e5f5b">LM step (λ large)</text>
+  <!-- true min marker -->
+  <line x1="490" y1="264" x2="490" y2="290" stroke="#a97b1f" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <text x="462" y="308" font-size="12" fill="#a97b1f">x*</text>
+</svg>
+</div>
+<figcaption>Fig 1.3: far from the minimum the quadratic model is fiction. The undamped Gauss-Newton step commits to the model&rsquo;s minimum and lands on rising cost; the damped LM step is shorter, stays inside the trusted radius, and descends. As iterations approach x*, λ shrinks and LM becomes Gauss-Newton.</figcaption>
+</figure>
+<table>
+  <tr><th>Method</th><th>Step</th><th>Convergence near x*</th><th>Far from x*</th><th>Verdict</th></tr>
+  <tr><td>Gradient descent</td><td>δ = −α g</td><td>Slow (linear), zig-zags in narrow valleys</td><td>Safe</td><td>Never the right tool alone here</td></tr>
+  <tr><td>Gauss-Newton</td><td>H δ = −g</td><td>Fast (near-quadratic)</td><td>Can diverge</td><td>Fine with an excellent initial guess</td></tr>
+  <tr><td>Levenberg-Marquardt</td><td>(H + λ·diag(H)) δ = −g</td><td>Fast — λ → 0 recovers GN</td><td>Safe — λ grows, step shrinks</td><td>The default, everywhere in this book</td></tr>
+</table>
+<div class="warfield">Three ways the solve goes wrong that damping will not save. <strong>Gauge freedom</strong>: a pose graph with no prior can slide and rotate as a rigid whole at zero cost, so H is singular — pin one pose (a prior factor) or the solver returns garbage that looks plausible. <strong>Scaling</strong>: radians and metres in one state vector give H wildly mismatched diagonal blocks and a miserable condition number — Marquardt&rsquo;s diag(H) scaling and Jacobi preconditioning exist for this. <strong>Local minima</strong>: LM is a <em>local</em> method; started far enough from the truth it converges confidently to the wrong answer. The fix is never the optimizer — it is a better initial guess, which is why odometry (Phase 2) feeds SLAM (Phase 3) rather than the other way around.</div>
+
+<h2><span class="sec-no">1.8</span>Optimizing on the Manifold: The Whole Phase in One Loop</h2>
+<p>Now snap the two halves of the chapter together. States live on manifolds (1.1–1.3); estimators minimize weighted squared residuals (1.6–1.7). The composite algorithm — nonlinear least squares with manifold updates — is four lines, and it is arguably the most-executed loop in robotics:</p>
+<pre><code class="language-text">given residuals rᵢ, a state x on a manifold, weights Σᵢ⁻¹:
+
+repeat:
+    Jᵢ  = ∂ rᵢ(x ⊞ δ) / ∂δ   evaluated at δ = 0      (tangent-space Jacobian)
+    solve   (Jᵀ Σ⁻¹ J + λ·diag) δ = −Jᵀ Σ⁻¹ r
+    x  ← x ⊞ δ                                        (retract onto manifold)
+until ‖δ‖ small</code></pre>
+<p>Rename the residuals and you have named half this book. Reprojection errors of 3D points into cameras: <em>bundle adjustment</em>. Relative-pose disagreements between odometry and loop closures: <em>pose-graph optimization</em> (Phase 3). Point-to-plane distances between two lidar scans: the inner loop of <em>ICP</em> (Phase 2). Checkerboard corners against a projection model: <em>camera calibration</em> (Phase 6). Tracking error against a dynamics model over a horizon: the QP heart of <em>MPC</em> (Phase 5). Different residuals, same loop.</p>
+<div class="keypoint">One loop to learn: linearize residuals in the tangent space, solve a damped sparse normal system, retract with ⊞, repeat. Bundle adjustment, pose graphs, ICP, calibration, and MPC are this loop with different residual functions plugged in.</div>
+
+<h2><span class="sec-no">1.9</span>Ceres, g2o, GTSAM: The Three Back-Ends</h2>
+<p>Three mature C++ libraries implement section 1.8 so you never hand-roll it. They differ in abstraction, not in math:</p>
+<table>
+  <tr><th>Library</th><th>Native abstraction</th><th>Derivatives</th><th>Where you will meet it</th></tr>
+  <tr><td><a href="http://ceres-solver.org/">Ceres Solver</a></td><td>Generic cost functions over parameter blocks; manifolds via a <code>Manifold</code> plug-in</td><td>Superb automatic differentiation (templated functors)</td><td>Cartographer, VINS-Fusion, most calibration tools (Phase 6)</td></tr>
+  <tr><td><a href="https://github.com/RainerKuemmerle/g2o">g2o</a></td><td>Graph of vertices (states) and edges (measurements)</td><td>Hand-derived (analytic) Jacobians, mostly</td><td>ORB-SLAM&rsquo;s backend, classic pose-graph SLAM (Phase 3)</td></tr>
+  <tr><td><a href="https://gtsam.org/">GTSAM</a></td><td>Factor graphs, with incremental solving (iSAM2) built in</td><td>Analytic, with autodiff options</td><td>LIO/VIO backends, GNSS fusion (Phases 2, 7)</td></tr>
+</table>
+<p>A rule of thumb that survives contact with real projects: <strong>Ceres</strong> when your problem is "minimize this cost I just invented" (calibration, alignment, fitting); <strong>g2o</strong> when it is a textbook pose graph and you want the classic machinery; <strong>GTSAM</strong> when factors arrive continuously and you need incremental updates rather than batch re-solves. All three accept robust loss functions (Huber, Cauchy) that tame outlier measurements — a theme Phase 3 returns to when loop closures lie.</p>
+
+<div class="setup">
+<p><strong>Setup B: SE(3) alignment with Ceres + Sophus — one evening.</strong> Goal: recover the rigid transform between two point clouds with known correspondences by running LM over the SE(3) tangent space, then break it two instructive ways. This is the exact shape of problems you will meet as ICP (Phase 2), extrinsic calibration (Phase 6), and map merging (Phase 3).</p>
+<p>Prereqs: Setup A&rsquo;s Sophus install, plus Ceres:</p>
+<pre><code class="language-bash">sudo apt install libceres-dev            # Ubuntu 22.04+/Debian: Ceres 2.x</code></pre>
+<p><code>CMakeLists.txt</code>:</p>
+<pre><code class="language-text">cmake_minimum_required(VERSION 3.16)
+project(align_se3 CXX)
+set(CMAKE_CXX_STANDARD 17)
+find_package(Ceres REQUIRED)
+find_package(Sophus REQUIRED)
+add_executable(align_se3 align_se3.cc)
+target_link_libraries(align_se3 Ceres::ceres Sophus::Sophus)</code></pre>
+<p><code>align_se3.cc</code>:</p>
+<pre><code class="language-cpp">// align_se3.cc — recover T_ba between two clouds by LM on the SE(3) manifold.
+#include &lt;ceres/ceres.h&gt;
+#include &lt;sophus/se3.hpp&gt;
+#include &lt;sophus/ceres_manifold.hpp&gt;
+#include &lt;iostream&gt;
+#include &lt;random&gt;
+#include &lt;vector&gt;
+
+struct PointPairResidual {
+  PointPairResidual(const Eigen::Vector3d&amp; p_a, const Eigen::Vector3d&amp; p_b)
+      : p_a_(p_a), p_b_(p_b) {}
+
+  template &lt;typename T&gt;
+  bool operator()(const T* const pose, T* residual) const {
+    const Eigen::Map&lt;const Sophus::SE3&lt;T&gt;&gt; T_ba(pose);
+    Eigen::Map&lt;Eigen::Matrix&lt;T, 3, 1&gt;&gt; r(residual);
+    r = T_ba * p_a_.template cast&lt;T&gt;() - p_b_.template cast&lt;T&gt;();
+    return true;
+  }
+  const Eigen::Vector3d p_a_, p_b_;
+};
+
+int main() {
+  std::mt19937 rng(42);
+  std::normal_distribution&lt;double&gt; noise(0.0, 0.01);        // 1 cm sensor noise
+  std::uniform_real_distribution&lt;double&gt; coord(-2.0, 2.0);
+
+  // ground truth: 20° about z, translated (0.5, −0.3, 0.2)
+  const Sophus::SE3d T_ba_true(Sophus::SO3d::rotZ(20.0 * M_PI / 180.0),
+                               Eigen::Vector3d(0.5, -0.3, 0.2));
+
+  std::vector&lt;Eigen::Vector3d&gt; pts_a, pts_b;
+  for (int i = 0; i &lt; 200; ++i) {
+    Eigen::Vector3d p(coord(rng), coord(rng), coord(rng));
+    pts_a.push_back(p);
+    pts_b.push_back(T_ba_true * p +
+                    Eigen::Vector3d(noise(rng), noise(rng), noise(rng)));
+  }
+
+  Sophus::SE3d T_ba;                        // identity — a poor initial guess
+  ceres::Problem problem;
+  problem.AddParameterBlock(T_ba.data(), Sophus::SE3d::num_parameters,
+                            new Sophus::Manifold&lt;Sophus::SE3&gt;());
+  for (int i = 0; i &lt; 200; ++i) {
+    problem.AddResidualBlock(
+        new ceres::AutoDiffCostFunction&lt;PointPairResidual, 3,
+                                        Sophus::SE3d::num_parameters&gt;(
+            new PointPairResidual(pts_a[i], pts_b[i])),
+        nullptr,                  // experiment 2: new ceres::HuberLoss(0.05)
+        T_ba.data());
+  }
+
+  ceres::Solver::Options opts;
+  opts.linear_solver_type = ceres::DENSE_QR;
+  opts.minimizer_progress_to_stdout = true;  // watch λ (tr_radius) breathe
+  ceres::Solver::Summary summary;
+  ceres::Solve(opts, &amp;problem, &amp;summary);
+
+  const Sophus::SE3d err = T_ba_true.inverse() * T_ba;
+  std::cout &lt;&lt; summary.BriefReport() &lt;&lt; "\n"
+            &lt;&lt; "translation error: " &lt;&lt; err.translation().norm() &lt;&lt; " m\n"
+            &lt;&lt; "rotation error   : "
+            &lt;&lt; err.so3().log().norm() * 180.0 / M_PI &lt;&lt; " deg\n";
+}</code></pre>
+<p>Build and run: <code>cmake -B build &amp;&amp; cmake --build build &amp;&amp; ./build/align_se3</code>. Expected: the LM trace shows cost collapsing from order 10¹–10² to order 10⁻² in five or so iterations, with <code>tr_ratio</code> near 1 (the quadratic model is being honest) and the trust radius expanding. Final errors: translation around a millimetre, rotation a few hundredths of a degree — the 1 cm noise averaged down by two hundred correspondences.</p>
+<p>Now break it, deliberately. <strong>Experiment 1 — lose the manifold:</strong> replace the <code>AddParameterBlock</code> call with a plain 7-parameter block (no <code>Sophus::Manifold</code>). Ceres now steps the quaternion like four free numbers: it drifts off unit norm, and the "rotation" it converges to is not a rotation. This is section 1.3&rsquo;s entire argument, rendered as a wrong answer. <strong>Experiment 2 — outliers:</strong> corrupt 20% of <code>pts_b</code> with a 0.5 m offset and rerun; the estimate is visibly dragged. Swap the <code>nullptr</code> loss for <code>new ceres::HuberLoss(0.05)</code> and the errors return to near-clean levels — the quadratic cost stops escalating past 5 cm, so gross outliers lose their leverage. Phase 3 uses the same trick on lying loop closures.</p>
+<p>Sanity checks: (1) Sophus stores SE3 parameters quaternion-first — never hand-index <code>data()</code>. (2) If <code>find_package(Sophus)</code> fails, re-run Setup A&rsquo;s install; Sophus is header-only so this is purely a cmake-config issue. (3) Set the initial guess to the truth and confirm LM converges in one or two iterations with tr_ratio ≈ 1 — a good habit for validating any residual you ever write.</p>
+</div>
+
+<h2><span class="sec-no">1.10</span>Reading List</h2>
+<a class="paper" href="https://arxiv.org/abs/1812.01537"><span class="p-title">A Micro Lie Theory for State Estimation in Robotics</span><span class="p-meta">Solà, Deray &amp; Atchuthan · arXiv:1812.01537</span><span class="p-why">Sections 1.2–1.3 with the math filled in, in 17 pages instead of a differential-geometry course. The single most valuable read of this phase.</span></a>
+<a class="paper" href="https://joss.theoj.org/papers/10.21105/joss.01371"><span class="p-title">manif: A Micro Lie Theory Library for State Estimation</span><span class="p-meta">Deray &amp; Solà · Journal of Open Source Software 2020</span><span class="p-why">The paper behind the library in 1.4 — same authors, same conventions, so paper and code annotate each other.</span></a>
+<a class="paper" href="http://asrl.utias.utoronto.ca/~tdb/bib/barfoot_ser17.pdf"><span class="p-title">State Estimation for Robotics</span><span class="p-meta">Barfoot · Cambridge University Press 2017 · free PDF from the author</span><span class="p-why">The rigorous version of this entire chapter: matrix Lie groups, Gaussians on manifolds, GN and LM, every derivation shown.</span></a>
+<a class="paper" href="https://hades.mech.northwestern.edu/index.php/Modern_Robotics"><span class="p-title">Modern Robotics: Mechanics, Planning, and Control</span><span class="p-meta">Lynch &amp; Park · Cambridge University Press 2017 · free PDF + videos</span><span class="p-why">The cleanest on-ramp to frames, SE(3), twists and screws (chapters 2–4). Read if section 1.1 went by too fast.</span></a>
+<a class="paper" href="https://mitpress.mit.edu/9780262201629/probabilistic-robotics/"><span class="p-title">Probabilistic Robotics</span><span class="p-meta">Thrun, Burgard &amp; Fox · MIT Press 2005</span><span class="p-why">The canon for section 1.5 and everything Phase 2 and Phase 4 build: Bayes filters, Gaussian filters, particle filters, MCL.</span></a>
+<a class="paper" href="https://link.springer.com/book/10.1007/978-0-387-40065-5"><span class="p-title">Numerical Optimization</span><span class="p-meta">Nocedal &amp; Wright · Springer, 2nd ed. 2006</span><span class="p-why">Where GN, LM, trust regions, and line search are treated as first-class algorithms rather than folklore. Chapters 3, 4, 10.</span></a>
+<a class="paper" href="https://epubs.siam.org/doi/10.1137/0111030"><span class="p-title">An Algorithm for Least-Squares Estimation of Nonlinear Parameters</span><span class="p-meta">Marquardt · SIAM Journal on Applied Mathematics 1963</span><span class="p-why">The original LM paper: eleven pages, still readable, and the diag(H) scaling trick is already in it.</span></a>
+<a class="paper" href="https://hal.inria.fr/inria-00548290/document"><span class="p-title">Bundle Adjustment — A Modern Synthesis</span><span class="p-meta">Triggs, McLauchlan, Hartley &amp; Fitzgibbon · Vision Algorithms Workshop 1999</span><span class="p-why">How the loop of 1.8 scales to millions of residuals: sparsity, the Schur complement, gauge freedom. Dense but definitive.</span></a>
+<a class="paper" href="http://ceres-solver.org/"><span class="p-title">Ceres Solver Documentation</span><span class="p-meta">ceres-solver.org · Google</span><span class="p-why">Where Setup B leads: the modeling and solving chapters double as a well-written NLLS textbook with runnable examples.</span></a>
+
+<h2><span class="sec-no">1.11</span>Interview Questions</h2>
+<details class="qa"><summary>What does T_ab mean, and how do you keep frame conventions from biting you?</summary><div class="a"><p>T_ab is the pose of frame b expressed in frame a — equivalently, the matrix mapping coordinates from b into a: p_a = T_ab · p_b. The payoff of the convention is mechanical checking: in any product, adjacent inner subscripts must match and cancel (T_ab · T_bc = T_ac), and the inverse swaps subscripts (T_ab⁻¹ = T_ba). In code, name every transform with both frames (<code>T_base_lidar</code>), never bare (<code>lidar_tf</code>), and test with asymmetric sensor mounts so ordering mistakes actually show up in the numbers.</p></div></details>
+<details class="qa"><summary>Why can&rsquo;t you average two rotations by averaging their matrices or Euler angles?</summary><div class="a"><p>The mean of two rotation matrices is generally not a rotation matrix (orthogonality is not preserved by addition), and Euler angles wrap: +179° and −179° average arithmetically to 0° when the true mean heading is ±180°. Correct approaches stay on the manifold: for two rotations, walk halfway along the geodesic, R₁ · exp(½ log(R₁⁻¹R₂)); for many, iterate a tangent-space mean (average the log residuals about a guess, retract, repeat) or use the quaternion eigen-decomposition method — while handling the q ≡ −q double cover by sign-aligning quaternions first.</p></div></details>
+<details class="qa"><summary>Explain the exponential and log maps like an engineer, not a mathematician.</summary><div class="a"><p>exp wraps a small, flat, unconstrained vector (axis-times-angle for rotations; a 6-DoF twist for poses) onto the curved set of valid rotations/poses; log unwraps a rotation/pose displacement back into that flat vector. They are exact, closed-form (Rodrigues for SO(3)), and mutually inverse near the identity. Practically they let you do all arithmetic — corrections, averaging, covariances, Jacobians — on plain vectors, then convert the result back to a legal rotation, so no step of optimization ever produces a non-rotation.</p></div></details>
+<details class="qa"><summary>Gauss-Newton versus Levenberg-Marquardt: what changes and when does it matter?</summary><div class="a"><p>Both linearize residuals and solve normal equations; LM adds λ·diag(H) to the system before solving. That damping interpolates between GN (λ→0, full confident steps, near-quadratic convergence) and scaled gradient descent (λ large, short safe steps), with λ adapted by whether the last step reduced cost — a trust-region policy. It matters exactly when the initial guess is poor or the problem strongly nonlinear: GN&rsquo;s full step overshoots and can diverge, LM shrinks the step until progress resumes. Near convergence they behave identically, so LM costs essentially nothing for the robustness it buys.</p></div></details>
+<details class="qa"><summary>Why do these solvers use JᵀΣ⁻¹J instead of the true Hessian?</summary><div class="a"><p>The true Hessian of a squared residual adds a term Σᵢ rᵢ·∇²rᵢ — second derivatives weighted by the residuals themselves. Near the solution residuals are small, so the term is negligible and JᵀΣ⁻¹J is an excellent approximation that needs only first derivatives, is positive semi-definite by construction (safe to solve), and inherits the problem&rsquo;s sparsity. You get close-to-second-order convergence at first-order cost. The approximation degrades for large-residual, strongly curved problems — which is part of why outliers (large residuals) are so poisonous and get robust losses in practice.</p></div></details>
+<details class="qa"><summary>What is gauge freedom, and what does it do to your optimization?</summary><div class="a"><p>If all measurements are relative (odometry, loop closures, point correspondences), rigidly moving the entire solution changes no residual, so the cost function has a flat direction and H is singular — the solver either fails or silently returns one of infinitely many answers. The fix is to fix the gauge: add a prior factor pinning one pose (the standard), or hold a parameter block constant. In bundle adjustment the same disease also includes global scale for monocular cameras. Any time a solver reports rank deficiency on a relative-measurement problem, check the gauge before anything else.</p></div></details>
+<details class="qa"><summary>How would you choose between Ceres, g2o, and GTSAM for a new project?</summary><div class="a"><p>They solve the same damped sparse NLLS; choose by abstraction and workflow. Ceres: general cost functions with excellent autodiff — best for calibration, alignment, and "custom residual" problems, and it is what Cartographer and VINS-Fusion build on. g2o: vertices-and-edges pose graphs, analytic Jacobians, the classic choice and ORB-SLAM&rsquo;s backend. GTSAM: factor graphs as the native language with iSAM2 incremental solving — best when measurements stream in and you need updates at sensor rate rather than batch re-solves, which is why modern LIO/VIO backends favor it. For a one-off calibration: Ceres. For a research pose-graph: g2o or GTSAM. For an online estimator: GTSAM.</p></div></details>
+<details class="qa"><summary>Your optimizer converged. Give three reasons the answer can still be wrong.</summary><div class="a"><p>First, local minimum: LM is a local method, and a bad initial guess converges confidently to the wrong basin — the cure is better initialization (odometry, RANSAC), not more iterations. Second, outliers under a quadratic cost: a single gross outlier&rsquo;s influence grows with its residual, dragging the solution; robust kernels (Huber, Cauchy) cap that influence. Third, a modeling error: wrong noise covariances (one sensor trusted 100× too much), an unpinned gauge, or a residual whose Jacobian doesn&rsquo;t match its cost. Convergence means the gradient is zero, not that the model was true — checking innovation statistics and per-residual costs is how you tell the difference.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

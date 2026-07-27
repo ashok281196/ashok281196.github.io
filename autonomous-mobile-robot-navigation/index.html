@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Autonomous Mobile Robot Navigation · A Field Book</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <div class="topbar" id="booktop"></div>
+
+  <div class="cover">
+    <div class="cover-kicker">A Field Book for the Autonomy Stack · ROS-Free · 2026 Edition</div>
+    <h1>Autonomous mobile robot<br><span class="accent">navigation</span></h1>
+    <p class="cover-sub">The complete route from rigid-body math to learning-based navigation — the classical methods and the state-of-the-art systems that replaced them, ROS-free and C++-first. Eight phases: a short brief for each below, a full deep-dive chapter behind every one.</p>
+    <div class="cover-rule"></div>
+  </div>
+
+  <h2><span class="sec-no">Before You Start</span>How This Book Is Laid Out</h2>
+  <p>This book covers the full navigation stack the way you would actually build one: math first, then estimation, then maps, then decisions — with the infrastructure and outdoor hardening before the learning-based finale. The phases stack deliberately: Phase 5&rsquo;s planners consume Phase 3&rsquo;s maps, which consume Phase 2&rsquo;s odometry, which stands entirely on Phase 1&rsquo;s optimization machinery.</p>
+  <p>Everything here is deliberately <strong>ROS-free</strong>. Every library named runs as a standalone C++ dependency, so you learn the actual algorithms and systems rather than a middleware&rsquo;s wrappers around them. Each phase brief below says what the phase covers, why it sits where it does, and the specific state-of-the-art tools worth knowing by name.</p>
+  <p>This page is the map; the chapters are the territory. Every phase below links to its deep dive — same format as the <a href="../reading/slam/index.html">SLAM field book</a>: equations, diagrams, runnable C++ setups, papers, and interview questions.</p>
+  <div class="keypoint">Navigation is four questions asked in a loop: <em>Where am I?</em> (estimation) · <em>What is around me?</em> (mapping) · <em>Where should I go?</em> (planning) · <em>How do I get there?</em> (control). Every tool in the eight phases exists to answer one of these faster, tighter, or with fewer assumptions.</div>
+
+  <h2><span class="sec-no">Contents</span>The Eight Phases</h2>
+  <nav class="toc" id="toc"></nav>
+
+  <h2 id="phase-1"><span class="sec-no">Phase 1</span>Mathematical Foundations &amp; Optimization</h2>
+  <p>Every later phase speaks one language — pose — and this phase teaches it properly: rigid transformations in SE(2) and SE(3) for where things sit, and Lie theory (so(3), se(3)) for doing calculus on rotations without singularities or slowly-corrupting matrices. On top comes the estimation machinery the whole stack reuses: the Bayes filter as the master recipe for reasoning under uncertainty, and Gauss-Newton and Levenberg-Marquardt as the workhorses of the nonlinear least-squares problems that SLAM backends, calibration, and planners all eventually reduce to. Get this phase right and phases 2&ndash;8 become applications, not mysteries.</p>
+  <div class="toolbox">
+    <strong>Core topics</strong> — SE(2)/SE(3) rigid transformations · Lie theory (so(3), se(3)) · Bayes filter · Gauss-Newton · Levenberg-Marquardt<br>
+    <strong>SOTA C++</strong> — Ceres Solver · GTSAM (factor graphs) · g2o · Sophus · manif
+  </div>
+  <p><strong>Deep dive available:</strong> <a href="01-math-foundations.html">Phase 1 · Mathematical Foundations &amp; Optimization &rarr;</a> — equations, diagrams, Sophus/manif/Ceres code, papers, and interview questions.</p>
+
+  <h2 id="phase-2"><span class="sec-no">Phase 2</span>State Estimation &amp; Odometry</h2>
+  <p>The robot&rsquo;s first continuous job is a running estimate of where it is and how it is moving, fused from sensors that each lie a little in their own way. The classical tools come first: EKF/UKF fusion, wheel and IMU kinematics, visual odometry in both feature-based and direct flavors, and point cloud registration with ICP and NDT. Then the systems defining today&rsquo;s state of the art: tightly-coupled LiDAR-inertial odometry (FAST-LIO2, DLIO, Point-LIO) and the visual-inertial pipelines (ORB-SLAM3, VINS-Fusion, OKVIS2, SVO&nbsp;2.0). Everything in this phase drifts without bound — fixing that is Phase&nbsp;3&rsquo;s job.</p>
+  <div class="toolbox">
+    <strong>Core topics</strong> — EKF/UKF · wheel &amp; IMU kinematics · feature/direct visual odometry · ICP &amp; NDT registration<br>
+    <strong>LiDAR-inertial</strong> — FAST-LIO2 · DLIO · Point-LIO&ensp;·&ensp;<strong>Visual-inertial</strong> — ORB-SLAM3 · VINS-Fusion · OKVIS2 · SVO 2.0
+  </div>
+  <p><strong>Deep dive available:</strong> <a href="02-state-estimation-odometry.html">Phase 2 · State Estimation &amp; Odometry &rarr;</a> — IMU and wheel models, EKF/ESKF, visual odometry, ICP/NDT, the LIO and VIO SOTA, plus two runnable C++ setups.</p>
+
+  <h2 id="phase-3"><span class="sec-no">Phase 3</span>Mapping &amp; SLAM Systems</h2>
+  <p>Odometry drifts; SLAM caps the drift by building a map and recognizing when the robot returns somewhere it has already been. This phase covers the map representations — occupancy grids, 3D octrees (OctoMap), and the TSDF/SDF distance fields that replaced them for dense work — plus the correction machinery of loop closure detection and pose graph optimization. On the systems side: Cartographer&rsquo;s standalone C++ core and the GPU-accelerated GLIM for LiDAR, ORB-SLAM3 across monocular, stereo, and RGB-D with IMU, and Voxblox / NVBlox for modern dense TSDF and ESDF mapping.</p>
+  <div class="toolbox">
+    <strong>Core topics</strong> — occupancy grids · OctoMap · TSDF/SDF · loop closure detection · pose graph optimization<br>
+    <strong>SOTA systems</strong> — Cartographer (standalone core) · GLIM · ORB-SLAM3 · Voxblox · NVBlox
+  </div>
+  <p><strong>Deep dive available:</strong> <a href="03-mapping-slam.html">Phase 3 · Mapping &amp; SLAM Systems &rarr;</a> — occupancy grids, octrees, TSDF/ESDF, loop closure, pose graphs, the Cartographer/GLIM/ORB-SLAM3 tour, plus two runnable C++ setups.</p>
+
+  <h2 id="phase-4"><span class="sec-no">Phase 4</span>Global Localization &amp; Relocalization</h2>
+  <p>A robot switched on inside an already-mapped building has a map but no idea where it stands in it — the kidnapped robot problem. Monte Carlo Localization answers it with a cloud of particle hypotheses, whittled down by scan matching against the known map until one survives. The modern accelerant is place recognition: compressing what the robot currently sees into a fingerprint it can look up in the map — DBoW3, NetVLAD, and CosPlace for cameras; Scan Context++, OverlapNet, and LiDAR-Iris for LiDAR. The same machinery is what rescues a SLAM system after tracking loss.</p>
+  <div class="toolbox">
+    <strong>Core topics</strong> — Monte Carlo Localization (particle filters) · scan matching against known maps · place recognition<br>
+    <strong>Visual PR</strong> — DBoW3 · NetVLAD · CosPlace&ensp;·&ensp;<strong>LiDAR PR</strong> — Scan Context++ · OverlapNet · LiDAR-Iris
+  </div>
+  <p><strong>Deep dive available:</strong> <a href="04-global-localization.html">Phase 4 · Global Localization &amp; Relocalization &rarr;</a> — Monte Carlo localization with kidnap recovery, scan matching, visual and LiDAR place recognition, plus two zero-dependency C++ setups.</p>
+
+  <h2 id="phase-5"><span class="sec-no">Phase 5</span>Path Planning &amp; Motion Control</h2>
+  <p>With a pose and a map in hand, the robot can finally decide where to go and how to steer. Global planners search the map, either on a graph (A*, D*&nbsp;Lite, Jump Point Search) or by sampling (RRT*, PRM, Informed&nbsp;RRT*, LazyPRM*), while the local layer turns the chosen route into motor commands: the Dynamic Window Approach, Pure Pursuit, the Stanley controller, and model predictive control. The state-of-the-art local stack is GPU-accelerated MPPI, the standalone Time-Elastic-Band optimizer, and nonlinear MPC built on ACADO or CasADi.</p>
+  <div class="toolbox">
+    <strong>Core topics</strong> — A* · D* Lite · RRT* · PRM · DWA · Pure Pursuit · Stanley controller · MPC<br>
+    <strong>Global SOTA</strong> — JPS+ · Informed RRT* · LazyPRM*&ensp;·&ensp;<strong>Local SOTA</strong> — GPU MPPI · TEB (standalone) · NMPC via ACADO / CasADi
+  </div>
+  <p><strong>Deep dive available:</strong> <a href="05-planning-control.html">Phase 5 · Path Planning &amp; Motion Control &rarr;</a> — A*/D* Lite/JPS, RRT* and the informed trick, DWA/TEB/MPPI, pure pursuit and Stanley, plus runnable A* and pure-pursuit setups.</p>
+
+  <h2 id="phase-6"><span class="sec-no">Phase 6</span>Calibration &amp; ROS-Free System Infrastructure</h2>
+  <p>None of the earlier math survives contact with a rig whose sensors disagree about where they are mounted and when they measured. This phase covers intrinsic and extrinsic sensor calibration — Kalibr for camera&ndash;IMU, LiDAR-Align for LiDAR&ndash;IMU, BIFROST — and the systems plumbing a ROS-free stack must supply for itself: zero-copy shared-memory IPC with Iceoryx, messaging with ZeroMQ, standalone eProsima Fast-DDS, and the multi-threading and time-synchronization discipline that keeps a multi-sensor pipeline honest. Unglamorous, and the difference between a demo and a product.</p>
+  <div class="toolbox">
+    <strong>Core topics</strong> — intrinsic/extrinsic calibration · zero-copy shared-memory IPC · multi-threading &amp; synchronization<br>
+    <strong>Calibration</strong> — Kalibr · LiDAR-Align · BIFROST&ensp;·&ensp;<strong>IPC</strong> — Iceoryx · ZeroMQ · Fast-DDS (standalone)
+  </div>
+  <p><strong>Deep dive available:</strong> <a href="06-calibration-infrastructure.html">Phase 6 · Calibration &amp; ROS-Free Infrastructure &rarr;</a> — intrinsics, Allan variance, Kalibr and hand-eye, time sync, zero-copy IPC, plus runnable Allan-variance and ZeroMQ benchmarks.</p>
+
+  <h2 id="phase-7"><span class="sec-no">Phase 7</span>Outdoor &amp; Large-Scale Navigation</h2>
+  <p>Outdoors, the tidy indoor assumptions collapse: no flat floor, kilometres of scale, moving people and vehicles, and lighting and weather that change what every sensor sees. The additions this phase brings: RTK-GNSS fusion with correct WGS84&nbsp;&rarr;&nbsp;ENU frame handling, 2.5D elevation mapping with ETH Zurich&rsquo;s Grid Map library, dynamic obstacle removal so a car that parked and left doesn&rsquo;t haunt the map forever, and robustness to appearance change. Graph-based GNSS&ndash;LiDAR&ndash;inertial fusion ties the global and local estimates together at scale.</p>
+  <div class="toolbox">
+    <strong>Core topics</strong> — RTK-GNSS fusion (WGS84 &rarr; ENU) · elevation mapping · dynamic obstacle removal · lighting/weather invariance<br>
+    <strong>SOTA frameworks</strong> — Grid Map (ETH Zurich) · graph-based GNSS&ndash;LiDAR&ndash;inertial fusion
+  </div>
+  <p><strong>Deep dive available:</strong> <a href="07-outdoor-navigation.html">Phase 7 · Outdoor &amp; Large-Scale Navigation &rarr;</a> — RTK-GNSS, exact WGS84&rarr;ENU math, GNSS factor graphs, elevation mapping and traversability, dynamic removal, plus two zero-dependency setups.</p>
+
+  <h2 id="phase-8"><span class="sec-no">Phase 8</span>Learning-Based Methods (AI Navigation)</h2>
+  <p>The final phase asks, for every module built so far, whether a neural network does the job better — and the honest answer is <em>sometimes, and the list grows every year</em>. Learned front-ends replace hand-designed features and ICP, NeRFs and 3D Gaussian Splatting replace voxel grids with continuous photorealistic scenes, reinforcement-learned policies trained sim-to-real replace local planners in dynamic crowds, and vision-language models let you state the goal in plain English (&ldquo;find the office coffee machine&rdquo;). Five tracks, each enhancing or replacing a classical phase from earlier in the book:</p>
+  <table>
+    <thead>
+      <tr><th>Track</th><th>Concept</th><th>SOTA</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>Learned odometry</strong></td>
+        <td>Differentiable networks replace hand-built feature extractors and ICP for end-to-end pose estimation.</td>
+        <td>DROID-SLAM · SuperPoint + SuperGlue / LightGlue · DeepMapping 2.0</td>
+      </tr>
+      <tr>
+        <td><strong>Neural implicit maps &amp; photorealistic SLAM</strong></td>
+        <td>NeRFs and 3D Gaussian Splatting replace voxel grids and point clouds with continuous 3D representations.</td>
+        <td>SplaTAM · GS-SLAM · Nice-SLAM · Vox-Fusion</td>
+      </tr>
+      <tr>
+        <td><strong>DRL for local navigation</strong></td>
+        <td>Sensor-to-control policies trained in massively parallel simulation, transferred sim-to-real for dynamic environments.</td>
+        <td>Isaac Lab / Isaac Gym · PPO / SAC mapless &amp; obstacle-avoidance policies</td>
+      </tr>
+      <tr>
+        <td><strong>Learned path planning</strong></td>
+        <td>Networks predict heuristics, collision-free manifolds, or direct paths to accelerate classical planners.</td>
+        <td>MPNet · Neural A* · Value Iteration Networks</td>
+      </tr>
+      <tr>
+        <td><strong>VLA &amp; embodied navigation</strong></td>
+        <td>Zero-shot semantic goal-seeking driven by multimodal vision-language models.</td>
+        <td>OpenVLA · Octo · VLFM · CLIP-on-Wheels</td>
+      </tr>
+    </tbody>
+  </table>
+  <p><strong>Deep dive available:</strong> <a href="08-learning-based.html">Phase 8 · Learning-Based Methods &rarr;</a> — SuperPoint/LightGlue/DROID-SLAM, NeRF and Gaussian-splatting SLAM, DRL with PPO, neural planners, VLA navigation, plus value-iteration and REINFORCE setups.</p>
+
+  <h2><span class="sec-no">Next</span>The Deep Dives</h2>
+  <p>All eight phases now have their chapters — the intuition, the real machinery, the SOTA systems compared honestly, worked C++ setups you can reproduce, linked papers, and interview questions with answers. Start at <a href="01-math-foundations.html">Phase 1</a> and read in order, or jump from any brief above; the prev/next navigation chains them end to end.</p>
+  <p style="font-family:var(--mono); font-size:13px; color:var(--ink-soft); margin-top:50px;">Compiled July 2026 · Complete edition — all eight deep dives live · Classical &amp; SOTA, ROS-free throughout.</p>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

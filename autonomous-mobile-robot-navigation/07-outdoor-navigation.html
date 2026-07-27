@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 7 · Outdoor &amp; Large-Scale Navigation · Autonomous Mobile Robot Navigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">07</div>
+  <div class="chapter-kicker">Phase Seven · When the Building Runs Out</div>
+  <h1>Outdoor &amp; Large-Scale Navigation</h1>
+  <p class="chapter-sub">Outdoors, the floor tilts, the world moves, the map is measured in kilometres, and the sky offers both a gift (satellites) and a curse (weather). This phase upgrades the indoor stack for all four.</p>
+</header>
+
+<h2><span class="sec-no">7.1</span>What Breaks Outside</h2>
+<p>The indoor stack of Phases 2–5 rests on assumptions so convenient they were never written down. Outdoors cancels them in bulk:</p>
+<table>
+  <tr><th>Indoor assumption</th><th>Outdoor reality</th><th>The upgrade (this chapter)</th></tr>
+  <tr><td>The floor is flat; 2D pose suffices</td><td>slopes, curbs, ruts, grass — z, roll, pitch matter</td><td>2.5D elevation mapping + traversability (7.5)</td></tr>
+  <tr><td>The world holds still</td><td>cars, people, carts everywhere; yesterday&rsquo;s parked truck is gone</td><td>dynamic removal &amp; lifelong maps (7.6)</td></tr>
+  <tr><td>Drift is fixed by loop closure</td><td>routes are kilometres with few revisits</td><td>absolute positioning: RTK-GNSS in the graph (7.2–7.4)</td></tr>
+  <tr><td>Lighting is benign, appearance stable</td><td>sun angle, night, rain, snow, seasons</td><td>appearance-robust sensing &amp; retrieval (7.7)</td></tr>
+</table>
+<div class="keypoint">The outdoor upgrade is not one algorithm — it is an absolute anchor (GNSS), a richer floor model (2.5D), an honest treatment of change (dynamic removal), and humility about appearance. Everything else from Phases 1–6 carries over intact; that was the point of building it on frames, factors, and honest covariances.</div>
+
+<h2><span class="sec-no">7.2</span>GNSS: From Satellites to Centimetres</h2>
+<p>A GNSS receiver measures <strong>pseudoranges</strong> — signal travel time × c to each visible satellite — and solves for position plus its own clock error. Standalone accuracy is metres, and the error budget explains why: ionospheric and tropospheric delays, satellite clock and orbit errors, and <strong>multipath</strong> (signals bouncing off buildings before arriving). The route to centimetres is differential: a nearby <strong>base station</strong> at a surveyed position observes the <em>same</em> errors, and broadcasting corrections cancels everything the two receivers share:</p>
+<pre><code class="language-text">pseudorange:  ρᵢ = ‖ sᵢ − r ‖ + c·δt_rx + iono + tropo + multipath + ε
+
+RTK (real-time kinematic): use the carrier PHASE (~19 cm wavelength, measured
+to ~1%) instead of the code. Double-difference across two receivers and two
+satellites cancels both clocks and the shared atmosphere — leaving geometry
+plus an INTEGER number of unknown wavelengths (the ambiguity):
+
+  fix   = ambiguities resolved to integers  → ~1–2 cm  (trust it)
+  float = ambiguities still real-valued     → dm-level  (suspect it)
+
+corrections arrive over internet (NTRIP casters) or radio; RTKLIB is the
+standalone open-source engine for all of it.</code></pre>
+<p>Operationally, the receiver&rsquo;s <strong>fix/float/single</strong> status is a first-class input to fusion, not a footnote: an RTK-fixed position deserves centimetre-grade covariance; a float solution deserves decimetres and suspicion; and in an urban canyon, a "fixed" solution that jumps three metres between epochs is multipath wearing a confident face — which is what the gating in 7.4 exists to catch.</p>
+
+<h2><span class="sec-no">7.3</span>Frames for the Planet: WGS84 → ECEF → ENU</h2>
+<p>GNSS speaks latitude, longitude, height on the <strong>WGS84 ellipsoid</strong>; every controller and costmap in this book speaks metres in a flat local frame. The conversion is two exact steps, and doing them properly (not with degree-to-metre folklore) is a roadmap item in its own right:</p>
+<pre><code class="language-text">step 1 — geodetic (φ, λ, h) → ECEF (Earth-Centered Earth-Fixed):
+  a = 6378137.0,   f = 1/298.257223563,   e² = f(2−f)          (WGS84)
+  N(φ) = a / √(1 − e²·sin²φ)                 prime-vertical radius
+  X = (N + h)·cosφ·cosλ
+  Y = (N + h)·cosφ·sinλ
+  Z = (N·(1 − e²) + h)·sinφ
+
+step 2 — ECEF → ENU about a reference point r₀ (the "map origin"):
+  d = p_ecef − r₀_ecef
+  [E]   [ −sinλ         cosλ        0    ]
+  [N] = [ −sinφ·cosλ   −sinφ·sinλ   cosφ ] · d
+  [U]   [  cosφ·cosλ    cosφ·sinλ   sinφ ]
+
+pick ONE reference r₀ per site, convert everything, and never do arithmetic
+in degrees. The local tangent plane is honest to ~10 km; beyond that,
+re-anchor or account for curvature.</code></pre>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">THREE FRAMES FOR ONE PLANET</text>
+  <!-- earth ellipse -->
+  <ellipse cx="300" cy="190" rx="180" ry="120" fill="#faf7f0" stroke="#23201a" stroke-width="2.5"/>
+  <text x="238" y="196" font-size="11.5" fill="#4d463a">WGS84 ellipsoid</text>
+  <!-- ECEF axes from center -->
+  <circle cx="300" cy="190" r="4" fill="#23201a"/>
+  <line x1="300" y1="190" x2="410" y2="236" stroke="#b3401e" stroke-width="2"/>
+  <polygon points="410,236 399,233 403,225" fill="#b3401e"/>
+  <text x="418" y="248" font-size="11.5" fill="#b3401e">X_ecef</text>
+  <line x1="300" y1="190" x2="300" y2="80" stroke="#b3401e" stroke-width="2"/>
+  <polygon points="300,80 295,90 305,90" fill="#b3401e"/>
+  <text x="308" y="86" font-size="11.5" fill="#b3401e">Z_ecef</text>
+  <!-- surface point + tangent plane -->
+  <circle cx="428" cy="120" r="6" fill="#0e5f5b"/>
+  <line x1="348" y1="66" x2="536" y2="150" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="7 5"/>
+  <text x="510" y="170" font-size="11.5" fill="#0e5f5b">local tangent plane</text>
+  <!-- ENU axes at P -->
+  <line x1="428" y1="120" x2="500" y2="152" stroke="#a97b1f" stroke-width="2.5"/>
+  <polygon points="500,152 490,150 493,142" fill="#a97b1f"/>
+  <text x="508" y="146" font-size="11.5" fill="#a97b1f">E</text>
+  <line x1="428" y1="120" x2="372" y2="90" stroke="#a97b1f" stroke-width="2.5"/>
+  <polygon points="372,90 381,91 378,99" fill="#a97b1f"/>
+  <text x="348" y="88" font-size="11.5" fill="#a97b1f">N</text>
+  <line x1="428" y1="120" x2="464" y2="58" stroke="#a97b1f" stroke-width="2.5"/>
+  <polygon points="464,58 456,64 464,69" fill="#a97b1f"/>
+  <text x="472" y="56" font-size="11.5" fill="#a97b1f">U</text>
+  <text x="560" y="234" font-size="11" fill="#4d463a">GNSS reports (φ, λ, h);</text>
+  <text x="560" y="250" font-size="11" fill="#4d463a">the robot plans in (E, N, U)</text>
+  <text x="560" y="266" font-size="11" fill="#4d463a">metres about one anchor.</text>
+</svg>
+</div>
+<figcaption>Fig 7.1: geodetic coordinates live on the ellipsoid, ECEF at the planet&rsquo;s center, and the robot in a flat East-North-Up frame anchored at the site origin. Setup A implements both conversions and prices the shortcuts.</figcaption>
+</figure>
+
+<div class="setup">
+<p><strong>Setup A: a WGS84 → ENU converter — one evening, zero dependencies.</strong> Goal: implement the two exact steps, verify them against known geometry, and measure what the spherical-Earth shortcut costs — the bug that ships in more outdoor robots than anyone admits. Save as <code>wgs84.cc</code>, compile with <code>g++ -O2 -std=c++17 wgs84.cc -o wgs84</code>:</p>
+<pre><code class="language-cpp">// wgs84.cc — geodetic → ECEF → ENU, exactly; then the spherical shortcut.
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+
+struct V3 { double x, y, z; };
+const double A = 6378137.0, F = 1.0 / 298.257223563, E2 = F * (2.0 - F);
+const double D2R = M_PI / 180.0;
+
+V3 geodetic_to_ecef(double lat, double lon, double h) {
+  const double s = std::sin(lat * D2R), c = std::cos(lat * D2R);
+  const double N = A / std::sqrt(1.0 - E2 * s * s);
+  return { (N + h) * c * std::cos(lon * D2R),
+           (N + h) * c * std::sin(lon * D2R),
+           (N * (1.0 - E2) + h) * s };
+}
+V3 ecef_to_enu(V3 p, double lat0, double lon0, double h0) {
+  const V3 r = geodetic_to_ecef(lat0, lon0, h0);
+  const double dx = p.x - r.x, dy = p.y - r.y, dz = p.z - r.z;
+  const double sφ = std::sin(lat0 * D2R), cφ = std::cos(lat0 * D2R);
+  const double sλ = std::sin(lon0 * D2R), cλ = std::cos(lon0 * D2R);
+  return { -sλ * dx + cλ * dy,
+           -sφ * cλ * dx - sφ * sλ * dy + cφ * dz,
+            cφ * cλ * dx + cφ * sλ * dy + sφ * dz };
+}
+
+int main() {
+  const double lat0 = 12.9716, lon0 = 77.5946, h0 = 920.0;   // site origin
+
+  // a point 0.001° north and 0.001° east of the origin
+  V3 enu = ecef_to_enu(geodetic_to_ecef(lat0 + 0.001, lon0 + 0.001, h0),
+                       lat0, lon0, h0);
+  std::cout &lt;&lt; "exact ENU      : E = " &lt;&lt; enu.x &lt;&lt; "  N = " &lt;&lt; enu.y
+            &lt;&lt; "  U = " &lt;&lt; enu.z &lt;&lt; "\n";
+
+  // the folklore shortcut: metres-per-degree on a 6371 km sphere
+  const double R = 6371000.0;
+  const double n_sph = 0.001 * D2R * R;
+  const double e_sph = 0.001 * D2R * R * std::cos(lat0 * D2R);
+  std::cout &lt;&lt; "spherical guess: E = " &lt;&lt; e_sph &lt;&lt; "  N = " &lt;&lt; n_sph &lt;&lt; "\n"
+            &lt;&lt; "shortcut error : "
+            &lt;&lt; std::hypot(enu.x - e_sph, enu.y - n_sph) * 100.0
+            &lt;&lt; " cm over ~150 m\n";
+}</code></pre>
+<p>Expected: the exact conversion puts the point at roughly E ≈ 108.4 m, N ≈ 110.6 m (east metres shrink with cos φ; north metres reflect the ellipsoid&rsquo;s meridian radius at 13°N), with U within millimetres of zero. The spherical shortcut lands tens of centimetres away <em>over a 150 m baseline</em> — harmless for geofencing, fatal for feeding an RTK-fixed antenna (1–2 cm!) into a factor graph, where the "measurement" would carry 30× its claimed error. The moral generalizes: RTK-grade inputs deserve WGS84-grade math.</p>
+<p>Sanity checks: (1) verify the round trip: convert the origin itself — expect (0, 0, 0) to machine precision. (2) Push the test point to 5 km and 20 km: exact-vs-spherical error grows to metres, and even the exact <em>tangent plane</em> starts absorbing curvature in U — the "re-anchor beyond ~10 km" rule made visible. (3) Swap in your own site&rsquo;s coordinates and keep this file; every outdoor project needs it within the first week.</p>
+</div>
+
+<h2><span class="sec-no">7.4</span>Fusing GNSS Into the Graph</h2>
+<p>GNSS is the sensor Phase 3 wished for: an <em>absolute</em> measurement, immune to drift, arriving at 1–10 Hz. The modern fusion architecture is graph-based: LIO (Phase 2) provides high-rate relative factors between poses; each GNSS epoch adds a <strong>unary factor</strong> pinning one pose toward its ENU measurement, weighted by the receiver&rsquo;s reported (and status-scaled) covariance; the Phase 1 optimizer reconciles them continuously. This is exactly LIO-SAM&rsquo;s shape, and the tightly-coupled end of the spectrum (GVINS-style) goes deeper — raw pseudorange/carrier factors instead of finished fixes — buying accuracy in partial-sky conditions where fewer than four satellites still contribute information.</p>
+<pre><code class="language-text">graph:  X₀ ── odom ── X₁ ── odom ── X₂ ── odom ── X₃ ⋯      (LIO, Phase 2)
+                       │                  │
+                    GNSS z₁            GNSS z₃                (unary anchors)
+
+r_gnss(Xᵢ) = pos(Xᵢ) − z_enu,     Ω from receiver covariance × status
+                                   (fix: cm² — float: dm² — single: m²)
+gate before insert: chi-squared against current marginal — a 3 m jump
+against 5 cm of plausible drift is multipath, not information.</code></pre>
+<p>Two integration details decide whether this works in practice. <strong>Yaw alignment</strong>: ENU and the LIO map frame differ by an unknown rotation about gravity; position fixes make it observable only once the robot has moved (the trajectory&rsquo;s shape in both frames is compared), so initialization needs a few metres of travel — dual-antenna heading receivers shortcut this by measuring yaw directly. <strong>The lever arm</strong>: the antenna is not at the body origin; T_body_antenna is a Phase 6 extrinsic, and forgetting it costs exactly that offset, rotated by every turn — visible as position "breathing" during rotation.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">THE OUTDOOR FACTOR GRAPH</text>
+  <!-- chain -->
+  <line x1="110" y1="190" x2="650" y2="190" stroke="#23201a" stroke-width="2"/>
+  <rect x="204" y="184" width="12" height="12" fill="#b3401e"/>
+  <rect x="339" y="184" width="12" height="12" fill="#b3401e"/>
+  <rect x="474" y="184" width="12" height="12" fill="#b3401e"/>
+  <circle cx="110" cy="190" r="22" fill="#faf7f0" stroke="#23201a" stroke-width="2.5"/>
+  <circle cx="290" cy="190" r="22" fill="#faf7f0" stroke="#23201a" stroke-width="2.5"/>
+  <circle cx="425" cy="190" r="22" fill="#faf7f0" stroke="#23201a" stroke-width="2.5"/>
+  <circle cx="560" cy="190" r="22" fill="#faf7f0" stroke="#23201a" stroke-width="2.5"/>
+  <text x="102" y="195" font-size="13" fill="#23201a">x0</text>
+  <text x="282" y="195" font-size="13" fill="#23201a">x1</text>
+  <text x="417" y="195" font-size="13" fill="#23201a">x2</text>
+  <text x="552" y="195" font-size="13" fill="#23201a">x3</text>
+  <text x="196" y="172" font-size="11" fill="#b3401e">LIO factors (Phase 2)</text>
+  <!-- satellites -->
+  <text x="96" y="70" font-size="18" fill="#0e5f5b">✦</text>
+  <text x="410" y="70" font-size="18" fill="#0e5f5b">✦</text>
+  <text x="546" y="70" font-size="18" fill="#0e5f5b">✦</text>
+  <rect x="104" y="118" width="12" height="12" fill="#0e5f5b"/>
+  <rect x="419" y="118" width="12" height="12" fill="#0e5f5b"/>
+  <rect x="554" y="118" width="12" height="12" fill="#0e5f5b"/>
+  <line x1="110" y1="130" x2="110" y2="168" stroke="#0e5f5b" stroke-width="2"/>
+  <line x1="425" y1="130" x2="425" y2="168" stroke="#0e5f5b" stroke-width="2"/>
+  <line x1="560" y1="130" x2="560" y2="168" stroke="#0e5f5b" stroke-width="2"/>
+  <text x="620" y="126" font-size="11" fill="#0e5f5b">GNSS unary anchors</text>
+  <!-- gated one -->
+  <text x="272" y="70" font-size="18" fill="#4d463a">✦</text>
+  <rect x="284" y="118" width="12" height="12" fill="none" stroke="#4d463a" stroke-width="2" stroke-dasharray="3 3"/>
+  <line x1="290" y1="130" x2="290" y2="168" stroke="#4d463a" stroke-width="2" stroke-dasharray="3 3"/>
+  <line x1="276" y1="112" x2="304" y2="140" stroke="#b3401e" stroke-width="3"/>
+  <line x1="304" y1="112" x2="276" y2="140" stroke="#b3401e" stroke-width="3"/>
+  <text x="196" y="258" font-size="11" fill="#b3401e">gated: failed chi-squared (multipath) — rejected before insertion</text>
+</svg>
+</div>
+<figcaption>Fig 7.2: LIO carries the trajectory; GNSS anchors it to the planet where the sky allows; the gate throws away confident lies. Drift becomes bounded everywhere, centimetric wherever RTK holds — with no loop closures required over kilometres.</figcaption>
+</figure>
+
+<h2><span class="sec-no">7.5</span>Elevation Mapping &amp; Traversability (Grid Map)</h2>
+<p>Outdoor ground is neither free nor occupied — it is <em>terrain</em>, and the question becomes "can these wheels handle this patch?". The workhorse representation is the <strong>2.5D elevation map</strong>: a grid where each cell stores height (and its variance) — vastly cheaper than full 3D, expressive enough for slopes, curbs, and ruts. ETH&rsquo;s <a href="https://github.com/ANYbotics/grid_map">Grid Map</a> is the standard C++ library: multi-layer float grids (elevation, variance, traversability, anything), a moving robot-centric window with efficient shifting, iterators, and the robot-centric <em>probabilistic</em> elevation mapping stack built on it, which fuses range measurements with pose uncertainty so the map degrades honestly as odometry does. From elevation, <strong>traversability</strong> is derived per cell from three ingredients:</p>
+<pre><code class="language-text">slope(x,y)     = ‖∇h‖ via finite differences over the cell's neighborhood
+step(x,y)      = max height discontinuity to any neighbor   (curbs!)
+roughness(x,y) = local height variance after plane removal
+
+traversable  ⇔  slope &lt; slope_max  ∧  step &lt; step_max  ∧  roughness &lt; r_max
+   (limits are per-platform: what a tracked robot shrugs at kills a caster)
+→ the result feeds Phase 5's planners as a cost layer, exactly like a costmap</code></pre>
+<table>
+  <tr><th>Representation</th><th>Stores</th><th>Fails at</th><th>Use when</th></tr>
+  <tr><td>2D costmap (Phase 5)</td><td>free/occupied/cost</td><td>anything with height: curbs, slopes, grass</td><td>genuinely flat sites</td></tr>
+  <tr><td>2.5D elevation (Grid Map)</td><td>height + variance per cell</td><td>overhangs, tunnels (one z per cell)</td><td>ground robots outdoors — the default</td></tr>
+  <tr><td>Full 3D (Phase 3&rsquo;s octree/TSDF)</td><td>volumetric occupancy/distance</td><td>memory &amp; compute at km scale</td><td>overhangs matter: forests, mines, drones</td></tr>
+</table>
+
+<h2><span class="sec-no">7.6</span>The World Moves: Dynamic Objects &amp; Map Maintenance</h2>
+<p>A parking lot mapped on Monday is a lie by Tuesday. Dynamic objects poison maps twice: <strong>ghosts</strong> (the parked truck baked into the map keeps blocking the planner after it drives away) and <strong>swiss cheese</strong> (points on moving objects scatter through free space, corrupting registration). The classical, sensor-agnostic cure is <strong>visibility-based removal</strong>: if today&rsquo;s ray passes <em>through</em> a map point and hits something behind it, that point cannot still exist — erase it. Removert refines this with multi-resolution range-image comparison (remove aggressively, then <em>revert</em> what static structure was wrongly deleted); ERASOR works in per-cell height stacks in bird&rsquo;s-eye view, exploiting that dynamic objects touch the ground. Upstream, modern LIO simply <em>segments</em> people and vehicles out of scans before integration (a Phase 8 network, run in the pipeline), and mapping layers add <strong>decay</strong> — NVBlox-style down-weighting of unobserved regions — so the map forgets gracefully. The strategic upgrade is <strong>lifelong mapping</strong>: stop treating the map as an artifact and treat it as a maintained estimate, with sessions merged, changes detected, and stale geometry demoted; the two-frame contract of Phase 3.8 already gave the runtime side of that story.</p>
+<div class="warfield">The subtle killer is neither ghosts nor noise — it is <em>semi-static</em> structure: pallets, dumpsters, seasonal foliage, snowbanks. Too permanent to segment as "dynamic", too transient to trust for localization. Symptoms: relocalization (Phase 4) confidence sags in exactly the areas that change; scan-matching residuals grow seasonally. Mitigations: weight localization toward high-permanence geometry (building facades, curbs — learned or heuristic permanence scores), keep multi-session maps so change is measured rather than discovered, and monitor match-fitness per region as a map-health metric with a re-survey threshold. Assume the site changes; design the schedule, not the hope.</div>
+
+<h2><span class="sec-no">7.7</span>Appearance: Lighting, Weather, Seasons</h2>
+<p>Everything Phase 4 said about place recognition gets stress-tested outdoors, where the same street is a different <em>image</em> at noon, dusk, and midnight in sleet. The sensor hierarchy of robustness: <strong>lidar geometry</strong> barely notices light (but rain attenuates, snow adds noise clusters near the sensor, fog scatters — filter by intensity and range consistency); <strong>radar</strong> shrugs at all of it, at coarse resolution; <strong>cameras</strong> suffer most and carry the most information. The camera-side toolkit: learned descriptors trained across conditions (NetVLAD/CosPlace, Phase 4.5 — trained on exactly this problem), <strong>sequence matching</strong> (SeqSLAM&rsquo;s insight: a single frame may be ambiguous at night, but a 100 m <em>sequence</em> of frames rarely is), and <strong>multi-session experience maps</strong> — store the site&rsquo;s appearance per condition (sunny-summer, wet-winter-night) and localize against the nearest experience rather than forcing one representation to span them all. The honest engineering answer for 2026 deployments remains: geometry (lidar + RTK) for the safety-critical pose, appearance for semantics and redundancy.</p>
+
+<div class="setup">
+<p><strong>Setup B: elevation mapping + traversability — one evening, zero dependencies.</strong> Goal: build a 2.5D elevation map of synthetic terrain (a ramp, a curb, rough gravel), derive slope/step/roughness per cell, and print a traversability map that shows exactly why a 2D costmap lies outdoors. Save as <code>elev.cc</code>, compile with <code>g++ -O2 -std=c++17 elev.cc -o elev</code>:</p>
+<pre><code class="language-cpp">// elev.cc — a 2.5D elevation map with slope/step/roughness traversability.
+#include &lt;algorithm&gt;
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+#include &lt;random&gt;
+#include &lt;vector&gt;
+
+const int W = 60, H = 24;            // 6 m × 2.4 m at 10 cm cells
+double terrain(double x, double y) { // ground truth height field
+  double z = 0.0;
+  if (x &gt; 2.0 &amp;&amp; x &lt; 3.2) z += (x - 2.0) * 0.25;        // 14° ramp up
+  if (x &gt;= 3.2)           z += 0.30;                     // plateau
+  if (x &gt; 4.4 &amp;&amp; y &gt; 1.2) z += 0.18;                     // a curb (step!)
+  if (x &gt; 0.6 &amp;&amp; x &lt; 1.6 &amp;&amp; y &lt; 0.9)                     // gravel patch
+    z += 0.03 * std::sin(37.0 * x) * std::sin(41.0 * y);
+  return z;
+}
+
+int main() {
+  std::mt19937 rng(9);
+  std::normal_distribution&lt;double&gt; noise(0.0, 0.005);   // 5 mm sensor noise
+
+  // "scan" the terrain: 40k random hits, keep per-cell mean height
+  std::vector&lt;double&gt; sum(W * H, 0.0);  std::vector&lt;int&gt; cnt(W * H, 0);
+  std::uniform_real_distribution&lt;double&gt; ux(0.0, 6.0), uy(0.0, 2.4);
+  for (int i = 0; i &lt; 40000; ++i) {
+    const double x = ux(rng), y = uy(rng);
+    const int c = std::min(H - 1, int(y * 10)) * W + std::min(W - 1, int(x * 10));
+    sum[c] += terrain(x, y) + noise(rng);  cnt[c]++;
+  }
+  std::vector&lt;double&gt; z(W * H, 0.0);
+  for (int c = 0; c &lt; W * H; ++c) if (cnt[c]) z[c] = sum[c] / cnt[c];
+
+  // traversability: slope &lt; 20°, step &lt; 12 cm  (a modest wheeled base)
+  std::cout &lt;&lt; "traversability ('.' go, '#' no-go):\n";
+  for (int gy = H - 1; gy &gt;= 0; --gy) {
+    std::cout &lt;&lt; "  ";
+    for (int gx = 0; gx &lt; W; ++gx) {
+      double step = 0.0, sx = 0.0, sy = 0.0;
+      for (int dy = -1; dy &lt;= 1; ++dy) for (int dx = -1; dx &lt;= 1; ++dx) {
+        const int nx = gx + dx, ny = gy + dy;
+        if (nx &lt; 0 || ny &lt; 0 || nx &gt;= W || ny &gt;= H) continue;
+        step = std::max(step, std::abs(z[ny * W + nx] - z[gy * W + gx]));
+      }
+      if (gx &gt; 0 &amp;&amp; gx &lt; W - 1) sx = (z[gy * W + gx + 1] - z[gy * W + gx - 1]) / 0.2;
+      if (gy &gt; 0 &amp;&amp; gy &lt; H - 1) sy = (z[(gy + 1) * W + gx] - z[(gy - 1) * W + gx]) / 0.2;
+      const bool ok = std::hypot(sx, sy) &lt; std::tan(20.0 * M_PI / 180.0)
+                      &amp;&amp; step &lt; 0.12;
+      std::cout &lt;&lt; (ok ? '.' : '#');
+    }
+    std::cout &lt;&lt; "\n";
+  }
+}</code></pre>
+<p>Expected: an ASCII field that reads like the terrain — the gravel patch passes (rough but within limits), the 14° ramp passes (steep but under 20°), and the curb prints as a hard <code>#</code> wall across its edge while the plateau behind it is fine. Now the punchline: a 2D costmap of this scene would have shown <em>nothing</em> — every cell is "ground" — and a naive 3D occupancy view would have marked the whole ramp occupied. The 2.5D layer is precisely the representation that can say "passable, from the low side, at reduced speed".</p>
+<p>Sanity checks: (1) drop <code>step_max</code> to 0.05 — the ramp&rsquo;s discretization starts failing cells: resolution and thresholds interact, tune them together. (2) Raise sensor noise to 3 cm and watch phantom no-go speckle appear — this is why real elevation maps carry per-cell <em>variance</em> and fuse before classifying (the Grid Map stack&rsquo;s whole design). (3) Approach the curb region from the other side in your head: traversability is directional for real robots — which is why production layers store slope <em>vectors</em>, not magnitudes, for Phase 5 to consume.</p>
+</div>
+
+<h2><span class="sec-no">7.8</span>Reading List</h2>
+<a class="paper" href="https://arxiv.org/abs/2007.00258"><span class="p-title">LIO-SAM: Tightly-Coupled Lidar Inertial Odometry via Smoothing and Mapping</span><span class="p-meta">Shan, Englot, Meyers, Wang, Ratti &amp; Rus · IROS 2020</span><span class="p-why">The reference architecture for Fig 7.2: LIO factors plus GNSS anchors in one GTSAM graph — readable code, deployed everywhere.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2103.07899"><span class="p-title">GVINS: Tightly Coupled GNSS-Visual-Inertial Fusion</span><span class="p-meta">Cao, Lu &amp; Shen · IEEE TRO 2022</span><span class="p-why">The tightly-coupled end: raw pseudorange and Doppler factors, so three visible satellites still help instead of "no fix, no data".</span></a>
+<a class="paper" href="https://link.springer.com/book/10.1007/978-3-319-42928-1"><span class="p-title">Springer Handbook of Global Navigation Satellite Systems</span><span class="p-meta">Teunissen &amp; Montenbruck (eds.) · Springer 2017</span><span class="p-why">The GNSS reference: error budgets, carrier-phase processing, ambiguity resolution — where section 7.2&rsquo;s summaries become rigorous.</span></a>
+<a class="paper" href="https://www.rtklib.com/"><span class="p-title">RTKLIB: Open-Source GNSS Positioning</span><span class="p-meta">Takasu · rtklib.com</span><span class="p-why">The standalone RTK engine: NTRIP client, ambiguity resolution, post-processing — the tool that demystifies the fix/float lights.</span></a>
+<a class="paper" href="https://link.springer.com/chapter/10.1007/978-3-319-26054-9_5"><span class="p-title">A Universal Grid Map Library</span><span class="p-meta">Fankhauser &amp; Hutter · Robot Operating System — The Complete Reference 2016</span><span class="p-why">The multi-layer grid, robot-centric shifting, and iterator design that made 2.5D mapping a library instead of a per-project rewrite.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/8392399"><span class="p-title">Probabilistic Terrain Mapping for Mobile Robots with Uncertain Localization</span><span class="p-meta">Fankhauser, Bloesch &amp; Hutter · IEEE RA-L 2018</span><span class="p-why">Elevation mapping that admits pose uncertainty — heights with variances, fused honestly. Setup B&rsquo;s grown-up sibling.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/9340856"><span class="p-title">Remove, then Revert: Static Point Cloud Map Construction using Multiresolution Range Images</span><span class="p-meta">Kim &amp; Kim · IROS 2020</span><span class="p-why">Visibility-based dynamic removal with an undo pass — the pragmatic recipe for de-ghosting survey maps.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2103.04316"><span class="p-title">ERASOR: Egocentric Ratio of Pseudo Occupancy-Based Dynamic Object Removal</span><span class="p-meta">Lim, Hwang &amp; Myung · IEEE RA-L 2021</span><span class="p-why">Ground-touching objects betray themselves in per-cell height stacks — fast, lidar-native de-ghosting.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/6224623"><span class="p-title">SeqSLAM: Visual Route-Based Navigation for Sunny Summer Days and Stormy Winter Nights</span><span class="p-meta">Milford &amp; Wyeth · ICRA 2012</span><span class="p-why">The title is the thesis: single frames lie across seasons, sequences don&rsquo;t. The paper that reframed appearance-invariant localization.</span></a>
+
+<h2><span class="sec-no">7.9</span>Interview Questions</h2>
+<details class="qa"><summary>Why must GNSS coordinates be converted to a local ENU frame before fusion — why not work in latitude/longitude?</summary><div class="a"><p>Latitude and longitude are angles on an ellipsoid, not distances: a degree of longitude is ~111 km at the equator and shrinks with cos φ, so Euclidean math on degrees is dimensionally wrong and anisotropically scaled. Filters, factors, and planners all assume a metric vector space with meaningful Gaussians. The exact route is geodetic → ECEF (using the WGS84 ellipsoid&rsquo;s N(φ)) → ENU about one fixed site anchor, giving honest metres in a right-handed local frame. The spherical-Earth shortcut misplaces points by tens of centimetres over hundreds of metres — 30× an RTK fix&rsquo;s stated error — and the tangent plane itself should be re-anchored beyond ~10 km.</p></div></details>
+<details class="qa"><summary>RTK fix vs float — what is actually different, and how should fusion treat them?</summary><div class="a"><p>RTK works on carrier phase, where the unknown per-satellite integer number of wavelengths (the ambiguity) must be resolved. "Fix" means the integers were pinned confidently — accuracy 1–2 cm, trustworthy. "Float" means they remain real-valued estimates — decimetre-level, and crucially, capable of coherent drift as the ambiguity estimates wander, which violates the white-noise assumption of a naive fusion. Treat status as a covariance multiplier at minimum (cm² / dm² / m² for fix/float/single), gate float solutions harder, and never let a "fixed" flag bypass the chi-squared gate — urban multipath produces confidently wrong fixes, and the gate is what catches them.</p></div></details>
+<details class="qa"><summary>How does GNSS-LIO graph fusion handle an urban canyon, and what is the failure mode if it doesn&rsquo;t?</summary><div class="a"><p>In the canyon, multipath produces GNSS positions that are metres wrong with optimistic covariances. The graph defense is layered: scale covariance by fix status and satellite geometry (DOP), chi-squared gate each epoch against the current marginal (LIO drift over one epoch is centimetres, so a 3 m innovation is a lie, not information), optionally wrap surviving GNSS factors in robust kernels, and let LIO carry the trajectory unaided through the outage — that is exactly what it is for. Without gating, one accepted multipath fix yanks the whole recent trajectory sideways (the optimizer believes it), the map shears, and the planner responds to a world that jumped — the outdoor twin of Phase 3&rsquo;s false loop closure.</p></div></details>
+<details class="qa"><summary>Why is the ENU-to-map yaw alignment a special problem, and how do systems solve it?</summary><div class="a"><p>GNSS measures position only, so a single fix says nothing about which way the LIO map&rsquo;s x-axis points relative to East — the rotation about gravity between the two frames is unobservable until the <em>trajectory</em> has shape: after some travel, matching the path&rsquo;s geometry in both frames pins the yaw. Consequences: initialization requires motion (systems drive a few metres before trusting alignment), degenerate straight-line-only paths leave residual ambiguity, and the alignment should be estimated as a state (it can be refined) rather than hard-coded. The hardware shortcut is a dual-antenna receiver, which measures heading directly from the baseline between antennas and removes the whole bootstrapping dance.</p></div></details>
+<details class="qa"><summary>2D costmap, 2.5D elevation map, full 3D map — how do you choose for an outdoor ground robot?</summary><div class="a"><p>Choose by the cheapest representation that answers the platform&rsquo;s traversability question. A 2D costmap represents only free/occupied — it cannot express a curb (lethal to casters, trivial to tracks) or a 15° slope, so outdoors it lies in both directions. A 2.5D elevation map stores height and variance per cell: slopes, steps, and roughness become computable, memory stays near-2D, and it feeds Phase 5 as cost layers — the correct default for wheels and legs on ground. Full 3D (octree/TSDF) is required only when one-height-per-cell breaks: overhangs, tree canopies, tunnels, multi-level structures — paid for in memory and update cost at kilometre scale. Many stacks run 2.5D for planning plus local 3D for collision checking the body.</p></div></details>
+<details class="qa"><summary>Your survey-grade map keeps a truck that has since driven away. Compare the removal strategies.</summary><div class="a"><p>Visibility/raycast methods (the classical cure): any ray passing through a map point proves it absent — sensor-agnostic and principled, but expensive at scale and blind where you never re-observed; Removert&rsquo;s multi-resolution compare-then-revert makes it practical and un-deletes wrongly removed statics. ERASOR compares per-cell height stacks in bird&rsquo;s-eye view, exploiting that dynamics touch the ground — fast, lidar-native, tuned for vehicles/pedestrians. Segmentation-first (run a detector, never integrate people/cars) prevents rather than cures, at the cost of a learned model and its misses. Map decay (NVBlox-style) forgets unobserved regions gracefully — robust, but forgets valid unvisited structure too. Production answer: segment upstream, decay in the background, and run a Removert/ERASOR pass on survey maps before release.</p></div></details>
+<details class="qa"><summary>What actually happens to a lidar in rain, snow, and fog — and what do you do about it?</summary><div class="a"><p>Rain: mostly attenuation and occasional early returns off dense drops — range shortens, noise rises modestly; heavy rain can halve effective range. Snow: bright, close-in clutter — flakes return strongly near the sensor, producing noise clusters that corrupt registration; filter by the signature (close range + low intensity + spatial isolation), or use dual-return lidars where the second return sees past the flake. Fog: scattering — dramatic range loss and a haze of false returns; below some visibility, lidar is simply degraded and the stack must know it. Systemically: monitor return statistics as a weather-health signal, widen registration gating when quality drops, lean harder on RTK + IMU + wheels (their weather immunity is why they&rsquo;re in the stack), and slow down — degraded perception with unchanged speed is a decision, and the wrong one.</p></div></details>
+<details class="qa"><summary>Design localization for a campus delivery robot: buildings, tree cover, seasons, snow.</summary><div class="a"><p>Belt and suspenders, weighted by conditions. Base: LIO (Phase 2) for continuous pose; RTK-GNSS via NTRIP fused as gated unary factors — centimetric in open sky, gracefully absent under trees and in urban canyons between buildings; dual-antenna heading to kill yaw bootstrapping. Map side: a lidar map for scan-matching localization (Phase 4) weighted toward permanent geometry (facades, curbs) with seasonal re-surveys scheduled — snowbanks reshape geometry, so match-fitness per region is monitored as map health. Appearance: CosPlace-style retrieval plus sequence matching as a redundant coarse localizer for lidar-degenerate open fields, trained/validated across the site&rsquo;s seasons. Fusion: one factor graph, chi-squared gates on every absolute input, covariance inflation tied to weather-health metrics, and an explicit degraded mode — reduced speed, tighter geofence — the robot enters when any two of GNSS, lidar match fitness, and visual retrieval disagree. The design principle: every source is allowed to fail, and no single failure changes the pose by more than its gate allows.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

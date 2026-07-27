@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 2 · State Estimation &amp; Odometry · Autonomous Mobile Robot Navigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">02</div>
+  <div class="chapter-kicker">Phase Two · Where Am I, Two Hundred Times a Second</div>
+  <h1>State Estimation &amp; Odometry</h1>
+  <p class="chapter-sub">Everything above this layer — maps, planners, controllers — consumes one product: a fast, smooth, honest estimate of where the robot is and how it is moving. This phase builds that estimate four ways and fuses them with the Phase 1 toolbox.</p>
+</header>
+
+<h2><span class="sec-no">2.1</span>The Odometry Contract</h2>
+<p><strong>Odometry</strong> is dead reckoning: integrate what the sensors say about motion, step by step, starting from wherever you started. No map, no absolute reference — just accumulation. That definition contains its own doom: every step adds a little error, errors compound through the pose chain, and the estimate <em>drifts</em> without bound. Nothing in this phase eliminates drift. The entire craft is making drift <strong>slow, smooth, and honestly quantified</strong> — and the entire point of Phase 3 (SLAM) and Phase 4 (global localization) is to cancel what remains against a map.</p>
+<div class="analogy">Close your eyes and walk across a room you know, counting steps. Ten steps in, you are confident. Fifty steps and a few turns in, you are betting. Nothing was wrong with any single step — the error <em>accumulated</em>, and turning made it worse, because a small heading error converts every subsequent metre of walking into sideways position error. That heading-error-times-distance term is the dominant villain of all odometry.</div>
+<p>The contract every consumer relies on: odometry must be <strong>high-rate</strong> (a controller at 50 Hz cannot wait for a 10 Hz camera), <strong>smooth</strong> (no jumps — jumps belong to loop closures, Phase 3), <strong>locally accurate</strong>, and shipped with a <strong>covariance that admits the drift</strong>. Four sensor families supply the raw material, with beautifully complementary failure modes:</p>
+<table>
+  <tr><th>Sensor</th><th>Measures</th><th>Rate</th><th>Drifts because</th><th>Lies when</th></tr>
+  <tr><td>Wheel encoders</td><td>wheel rotation → body twist</td><td>100 Hz+</td><td>integration of slip &amp; kinematic error</td><td>wheels slip, skid, or leave the ground</td></tr>
+  <tr><td>IMU (gyro + accel)</td><td>angular velocity, specific force</td><td>200–1000 Hz</td><td>double integration of bias + noise</td><td>always, within seconds, if used alone</td></tr>
+  <tr><td>Camera</td><td>bearing to visual texture</td><td>15–60 Hz</td><td>per-frame matching error accumulates</td><td>texture-poor, dark, fast motion, mono scale</td></tr>
+  <tr><td>LiDAR</td><td>range to structure</td><td>10–100 Hz</td><td>per-scan registration error accumulates</td><td>geometry-poor: long corridors, open fields</td></tr>
+</table>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">DRIFT, THE HONEST ENEMY</text>
+  <!-- truth -->
+  <path d="M 60 210 C 180 140 300 250 420 190 S 620 120 710 170" fill="none" stroke="#0e5f5b" stroke-width="3"/>
+  <text x="640" y="200" font-size="12" fill="#0e5f5b">truth</text>
+  <!-- odometry estimate diverging upward -->
+  <path d="M 60 210 C 180 130 300 225 420 150 S 610 50 700 75" fill="none" stroke="#b3401e" stroke-width="2.5" stroke-dasharray="7 5"/>
+  <text x="200" y="118" font-size="12" fill="#b3401e">dead-reckoned odometry</text>
+  <!-- growing covariance ellipses on the estimate -->
+  <ellipse cx="230" cy="172" rx="14" ry="9" transform="rotate(-18 230 172)" fill="#b3401e" fill-opacity="0.08" stroke="#b3401e" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <ellipse cx="420" cy="150" rx="30" ry="17" transform="rotate(-14 420 150)" fill="#b3401e" fill-opacity="0.08" stroke="#b3401e" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <ellipse cx="640" cy="60" rx="52" ry="28" transform="rotate(-8 640 60)" fill="#b3401e" fill-opacity="0.08" stroke="#b3401e" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <text x="330" y="266" font-size="12" fill="#4d463a">covariance grows without bound — and must say so</text>
+  <!-- gap marker -->
+  <line x1="702" y1="86" x2="710" y2="160" stroke="#a97b1f" stroke-width="1.5" stroke-dasharray="3 3"/>
+  <text x="596" y="130" font-size="12" fill="#a97b1f">the drift</text>
+</svg>
+</div>
+<figcaption>Fig 2.1: odometry tracks the truth locally and leaves it globally. A good odometry system drifts slowly and reports an uncertainty that actually contains the truth; a bad one drifts fast, or worse, drifts fast while claiming confidence.</figcaption>
+</figure>
+<dl class="jargon">
+  <dt>Odometry / dead reckoning</dt><dd>Estimating pose by integrating motion measurements from a known start. Relative, drifting, high-rate.</dd>
+  <dt>Localization</dt><dd>Estimating pose against a prior map. Absolute, non-drifting, needs the map (Phase 4).</dd>
+  <dt>Twist</dt><dd>The velocity object of Phase 1: linear plus angular velocity, an element of se(2) or se(3). Odometry integrates twists into poses with ⊞.</dd>
+  <dt>Proprioceptive vs exteroceptive</dt><dd>Sensors that measure the robot itself (encoders, IMU) versus the world (camera, lidar). Only exteroceptive sensing can ever cancel drift.</dd>
+</dl>
+
+<h2><span class="sec-no">2.2</span>Wheel Odometry: Rolling, Integrated</h2>
+<p>For a differential-drive robot — two independently driven wheels, the dominant indoor platform — the encoder-to-motion story is two lines of algebra. Wheel angular rates times radius give rim speeds; their mean moves the robot, their difference turns it:</p>
+<pre><code class="language-text">v = (v_R + v_L) / 2                  forward speed
+ω = (v_R − v_L) / b                  yaw rate,  b = wheel separation
+
+per step, the body twist is  u = (v·Δt, 0, ω·Δt) ∈ se(2), and the pose update
+is Phase 1's boxplus — exactly the arc the robot physically drove:
+
+    X ← X ⊞ u  =  X · exp(u^)
+
+(driving with constant v and ω traces a circular arc of radius v/ω;
+the exp of an se(2) twist IS that arc — the V matrix from Phase 1.3)</code></pre>
+<p>Wheel odometry errors come in two species that are fixed in two different places. <strong>Systematic</strong> errors — wrong wheel radius, wrong wheel separation, unequal tire pressure — bias every step the same way and are <em>calibratable</em>: drive a known square or circle, measure the closure error, correct the parameters (the classic UMBmark procedure; Phase 6 revisits this). <strong>Stochastic</strong> errors — slip, skid, carpet fibers, debris — are unpredictable per step and can only be <em>modeled</em>, as the process noise Q that widens the covariance each update. Getting Q roughly right matters more than getting it precisely right: too small and the fused estimate ignores better sensors; too large and it jitters after every correction.</p>
+<div class="warfield">Wheel odometry&rsquo;s failure mode is not gradual — it is catastrophic and silent. A wheel spinning on a wet patch reports beautiful, confident, entirely fictional motion; a robot pushed by a human reports none. Encoders cannot tell the difference from inside. This is why no serious stack ever trusts wheels alone: the IMU (which feels the true rotation and the shove) is the standard witness, and disagreement between the two is your slip detector — an idea Phase 7 scales up to detect stuck robots in mud.</div>
+
+<h2><span class="sec-no">2.3</span>The IMU: Gravity, Biases, and t² Drift</h2>
+<p>An IMU is two instruments in one package. The <strong>gyroscope</strong> measures angular velocity — genuinely, directly, at hundreds of hertz. The <strong>accelerometer</strong> does <em>not</em> measure acceleration. It measures <strong>specific force</strong>: the sum of true acceleration and the force resisting gravity. Sitting still, it reads +9.81 m/s² upward; in free fall it reads zero. Every IMU pipeline begins by writing that fact down correctly, and both sensors add a slowly wandering <strong>bias</strong> plus white noise:</p>
+<pre><code class="language-text">gyro:   ω̃ = ω + b_g + n_g                     b_g, b_a: biases, random walk
+accel:  ã = Rᵀ(a_w − g) + b_a + n_a           ḃ = n_b  (they wander — track them)
+
+naive integration ("strapdown"):
+
+  R ← R · exp((ω̃ − b_g)·Δt)                  attitude: Phase 1 exp again
+  v ← v + (R·(ã − b_a) + g)·Δt                velocity: rotate, restore gravity
+  p ← p + v·Δt + ½·(R·(ã − b_a) + g)·Δt²      position: integrate once more
+
+error growth: gyro bias → heading error ~ t → position error ~ t², and an
+attitude error tilts g (≈9.81 m/s²) into the velocity integral. Minutes? No.
+Seconds.</code></pre>
+<div class="analogy">The IMU is the robot&rsquo;s inner ear, and it inherits the inner ear&rsquo;s famous bug: with eyes closed you cannot distinguish steady acceleration from tilt — both press the same way. An accelerometer reading of 0.5 m/s² sideways is <em>either</em> real acceleration <em>or</em> a 3° tilt misestimating gravity, and the mathematics genuinely cannot separate them without a second opinion. That second opinion — camera, lidar, wheels — is why the rest of this chapter says "inertial" only ever as a suffix.</div>
+<p>So why tolerate a sensor that diverges in seconds? Because between any two camera frames or lidar scans, the IMU is the <em>only</em> sensor fast enough to know what happened — it bridges the gaps, predicts where features will reappear, de-blurs fast motion, and makes gravity (hence roll and pitch) observable. Fusion is not optional garnish; it is the design. The two integration styles are the fork in the road for every system in 2.7 and 2.8: <strong>filter-style</strong> (propagate an EKF between corrections — next section) and <strong>preintegration</strong> (summarize the IMU stream between keyframes as a single relative-motion factor, computed once and cheaply re-linearized as estimates improve — the Forster et al. trick that made optimization-based VIO real-time, and Phase 3&rsquo;s factor graphs eat these factors directly).</p>
+<dl class="jargon">
+  <dt>Specific force</dt><dd>What accelerometers measure: true acceleration minus gravity, expressed in the sensor frame. Static reading: +1 g up.</dd>
+  <dt>Bias / random walk</dt><dd>A slowly wandering offset added to each measurement. Estimated on-line as part of the state; its noise density comes from an Allan-variance calibration (Phase 6).</dd>
+  <dt>Strapdown integration</dt><dd>Direct numerical integration of IMU readings into pose — the equations above. Exact in form, divergent in practice.</dd>
+  <dt>Preintegration</dt><dd>Compressing hundreds of IMU samples between keyframes into one relative constraint (ΔR, Δv, Δp) with covariance and bias-Jacobians, on the manifold.</dd>
+</dl>
+
+<h2><span class="sec-no">2.4</span>Fusion: The EKF and the Error-State Trick</h2>
+<p>Phase 1 left the Bayes filter abstract. Make it concrete: restrict the belief to a Gaussian, linearize the models at the current estimate with Jacobians, and you get the <strong>extended Kalman filter</strong> — the workhorse that fuses the last three sections into one estimate:</p>
+<pre><code class="language-text">predict (each odometry/IMU step):
+  x̂⁻ = f(x̂, u)                        propagate the estimate
+  P⁻  = F P Fᵀ + G Q Gᵀ                F = ∂f/∂δx,  G = ∂f/∂u
+
+correct (when a slower/absolute measurement arrives):
+  K  = P⁻ Hᵀ (H P⁻ Hᵀ + R)⁻¹           H = ∂h/∂δx
+  x̂  = x̂⁻ ⊞ K·(z − h(x̂⁻))             innovation, weighted by trust
+  P  = (I − K H) P⁻</code></pre>
+<p>The subtlety is the δx. Robot states contain rotations, and Phase 1 spent three sections proving you cannot put a Gaussian on a rotation matrix. The <strong>error-state EKF</strong> (ESKF) is the manifold contract executed inside a filter: keep the <em>nominal</em> state on the manifold (quaternion, SE(3)), define the filter&rsquo;s Gaussian over the small <em>error</em> δx in the tangent space, propagate the nominal with full nonlinear integration, and fold the estimated error back in with ⊞ after each correction. The error stays near zero — the one place linearization is guaranteed honest — which is why every IMU filter that works, from consumer drones to FAST-LIO2, is an ESKF. Solà&rsquo;s tutorial (reading list) derives every Jacobian; manif hands them to you as code.</p>
+<h3>The UKF, in One Honest Paragraph</h3>
+<p>The <strong>unscented Kalman filter</strong> replaces Jacobians with deterministic sampling: pick 2n+1 <strong>sigma points</strong> spread along the covariance axes, push each through the true nonlinear model, refit a Gaussian to the results. Second-order accuracy instead of first, no derivatives to derive, similar cost. Choose it when models are violently nonlinear or Jacobians are error-prone; skip it when an ESKF is already consistent — on mildly nonlinear problems the two agree to within noise, and the ESKF&rsquo;s structure is easier to introspect. Both remain unimodal Gaussians; when the belief genuinely splits (kidnapped robot, symmetric corridors), Phase 4&rsquo;s particle filter takes over.</p>
+<div class="keypoint">Nominal state on the manifold, error state in the tangent space, corrections applied with ⊞ — the ESKF is Phase 1&rsquo;s keypoint wearing a filter. Once you see it, every fusion system in this book (2.7&rsquo;s LIO, 2.8&rsquo;s VIO, Phase 7&rsquo;s GNSS stacks) reads as the same design with different measurement models plugged into H.</div>
+
+<div class="setup">
+<p><strong>Setup A: an SE(2) EKF with manif — one evening.</strong> Goal: simulate a differential-drive robot driving a circle, dead-reckon it with noisy, gyro-biased odometry, then fuse 1 Hz position fixes with an on-manifold EKF and watch metres of drift collapse to centimetres. The Jacobians come from manif&rsquo;s operators — you derive nothing by hand.</p>
+<p>Prereqs: Eigen (Phase 1 Setup A), plus manif:</p>
+<pre><code class="language-bash">git clone https://github.com/artivis/manif.git
+cmake -S manif -B manif/build &amp;&amp; sudo cmake --install manif/build</code></pre>
+<p>Save as <code>se2_ekf.cc</code>, compile with <code>g++ -O2 -std=c++17 -I/usr/include/eigen3 se2_ekf.cc -o se2_ekf</code>:</p>
+<pre><code class="language-cpp">// se2_ekf.cc — dead reckoning vs on-manifold EKF with sparse position fixes.
+#include &lt;manif/manif.h&gt;
+#include &lt;Eigen/Dense&gt;
+#include &lt;iostream&gt;
+#include &lt;random&gt;
+
+int main() {
+  std::mt19937 rng(7);
+  auto gauss = [&amp;](double s) {
+    return std::normal_distribution&lt;double&gt;(0.0, s)(rng); };
+
+  const double dt = 0.02;                       // 50 Hz odometry
+  const int    N  = 3000;                       // 60 seconds
+  const double gyro_bias = 0.005;               // rad/s — unmodeled, systematic
+
+  manif::SE2d X_true = manif::SE2d::Identity(); // truth
+  manif::SE2d X_dr   = X_true;                  // dead reckoning only
+  manif::SE2d X      = X_true;                  // EKF estimate
+  Eigen::Matrix3d P  = Eigen::Matrix3d::Zero();
+
+  const Eigen::Matrix3d Q =                     // per-step twist noise
+      Eigen::Vector3d(4e-6, 4e-6, 1e-7).asDiagonal();
+  const Eigen::Matrix2d R_fix = Eigen::Matrix2d::Identity() * 0.05 * 0.05;
+
+  manif::SE2d::Jacobian F_x, F_u;               // 3×3, filled by manif
+  for (int k = 1; k &lt;= N; ++k) {
+    // truth drives a circle: v = 1 m/s, ω = 0.3 rad/s
+    manif::SE2Tangentd u_true; u_true &lt;&lt; 1.0 * dt, 0.0, 0.3 * dt;
+    X_true = X_true + u_true;
+
+    // measured twist = truth + noise + gyro bias
+    manif::SE2Tangentd u_meas;
+    u_meas &lt;&lt; u_true.x() + gauss(2e-3), gauss(2e-3),
+              u_true.angle() + gyro_bias * dt + gauss(3e-4);
+
+    X_dr = X_dr + u_meas;                       // dead reckoning
+
+    X = X.plus(u_meas, F_x, F_u);               // EKF predict, Jacobians free
+    P = F_x * P * F_x.transpose() + F_u * Q * F_u.transpose();
+
+    if (k % 50 == 0) {                          // 1 Hz position fix (GNSS/UWB)
+      Eigen::Vector2d z = X_true.translation()
+                        + Eigen::Vector2d(gauss(0.05), gauss(0.05));
+      Eigen::Matrix&lt;double, 2, 3&gt; H;            // t(X⊞δ) ≈ t + R·δρ  ⇒  H=[R 0]
+      H &lt;&lt; X.rotation(), Eigen::Vector2d::Zero();
+      const Eigen::Vector2d r = z - X.translation();
+      const Eigen::Matrix2d S = H * P * H.transpose() + R_fix;
+      const Eigen::Matrix&lt;double, 3, 2&gt; K = P * H.transpose() * S.inverse();
+      X = X + manif::SE2Tangentd(K * r);        // correct with ⊞
+      P = (Eigen::Matrix3d::Identity() - K * H) * P;
+    }
+  }
+  const auto err = [&amp;](const manif::SE2d&amp; A) {
+    return (X_true.inverse() * A).log().coeffs().head&lt;2&gt;().norm(); };
+  std::cout &lt;&lt; "dead-reckoning error: " &lt;&lt; err(X_dr) &lt;&lt; " m\n"
+            &lt;&lt; "EKF error           : " &lt;&lt; err(X)    &lt;&lt; " m\n";
+}</code></pre>
+<p>Expected: dead reckoning ends metres off — the unmodeled gyro bias bends the whole circle — while the EKF stays within roughly the fix noise, a few centimetres. Note what the filter never sees: heading. Position fixes plus the F-matrix correlation between heading and future position let the EKF infer and cancel the heading error indirectly. That correlation bookkeeping is the entire value of carrying P.</p>
+<p>Sanity checks: (1) set <code>gyro_bias = 0</code> and shrink the fix rate to <code>k % 500</code> — the EKF should still beat dead reckoning, now by less; drift is slower without the systematic term. (2) Multiply Q by 1000: the estimate starts chasing every fix, jittering — over-humble models jitter, over-confident ones ignore. (3) Add the bias to the state (state dim 4: SE(2) ⊕ b_g) and watch the filter estimate it to ~0.005 — the standard upgrade, and the reason real IMU filters carry 15+ states.</p>
+</div>
+
+<h2><span class="sec-no">2.5</span>Visual Odometry: Features, Directness, and Scale</h2>
+<p>A camera measures bearings to texture — no range, no motion, just a dense grid of brightness. <strong>Visual odometry</strong> (VO) recovers camera motion by watching that texture flow between frames, and every VO system is one of two philosophies about what to compare.</p>
+<p><strong>Feature-based</strong> (indirect) methods distill each image into a few hundred distinctive points — corners with descriptors (ORB, or Phase 8&rsquo;s learned SuperPoint) — match them across frames, and do geometry on the matches: the <strong>essential matrix</strong> from 2D–2D matches for initialization, then <strong>PnP</strong> (perspective-n-point) against already-triangulated 3D points for tracking. The residual is <strong>reprojection error</strong>, and minimizing it is — say it with me — the Phase 1 loop:</p>
+<pre><code class="language-text">reprojection residual (feature-based):
+  rᵢ = uᵢ − π(T_cw · pᵢ)               π = camera projection (Phase 6 calibrates it)
+  epipolar constraint:  u₂ᵀ E u₁ = 0,  E = t^ R    (the 5-point algorithm's target)
+
+photometric residual (direct):
+  rᵢ = I₂( π(T · π⁻¹(uᵢ, dᵢ)) ) − I₁(uᵢ)          compare brightness, not landmarks
+
+monocular scale: if (R, t) explains the images, so does (R, s·t) for ANY s —
+scale is unobservable. Fixes: stereo baseline, RGB-D, or an IMU (section 2.8).</code></pre>
+<p><strong>Direct</strong> methods skip features entirely: warp one image toward another through the current motion-and-depth estimate and minimize the brightness difference itself. They exploit the whole image (edges, gradients — not just corners), shine where texture is weak but gradients exist, and run fast; the price is a brutal sensitivity to exposure changes, rolling shutter, and un-modeled photometrics. <strong>Semi-direct</strong> hybrids (SVO) track sparse points directly and optimize structure like a feature method — the pragmatic middle.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">REPROJECTION ERROR, THE RESIDUAL OF VISUAL ODOMETRY</text>
+  <!-- landmark -->
+  <line x1="554" y1="54" x2="566" y2="66" stroke="#23201a" stroke-width="3"/>
+  <line x1="566" y1="54" x2="554" y2="66" stroke="#23201a" stroke-width="3"/>
+  <text x="576" y="64" font-size="13" fill="#23201a">landmark p</text>
+  <!-- camera apex + frustum -->
+  <circle cx="180" cy="250" r="6" fill="#23201a"/>
+  <line x1="180" y1="250" x2="300" y2="140" stroke="#23201a" stroke-width="1.5"/>
+  <line x1="180" y1="250" x2="360" y2="270" stroke="#23201a" stroke-width="1.5"/>
+  <text x="96" y="282" font-size="12" fill="#23201a">camera at pose T</text>
+  <!-- image plane -->
+  <line x1="300" y1="140" x2="360" y2="270" stroke="#23201a" stroke-width="2.5"/>
+  <text x="252" y="128" font-size="12" fill="#23201a">image plane</text>
+  <!-- ray through predicted pixel to landmark -->
+  <line x1="180" y1="250" x2="560" y2="60" stroke="#b3401e" stroke-width="2"/>
+  <circle cx="318.8" cy="180.6" r="6" fill="#b3401e"/>
+  <text x="204" y="176" font-size="12" fill="#b3401e">π(T·p)</text>
+  <!-- observed pixel + its ray missing the landmark -->
+  <circle cx="333" cy="211.5" r="6" fill="#0e5f5b"/>
+  <text x="348" y="232" font-size="12" fill="#0e5f5b">u observed</text>
+  <line x1="180" y1="250" x2="620" y2="139" stroke="#0e5f5b" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <text x="606" y="128" font-size="11.5" fill="#0e5f5b">observed ray misses p</text>
+  <!-- residual arrow -->
+  <line x1="321" y1="186" x2="330" y2="205" stroke="#a97b1f" stroke-width="3"/>
+  <text x="288" y="216" font-size="13" fill="#a97b1f">r</text>
+</svg>
+</div>
+<figcaption>Fig 2.2: project the landmark through the current pose estimate and it lands at π(T·p); the detector found it at u. The gap r is the reprojection error. Minimize Σ‖r‖² over T and you have PnP; over poses and landmarks jointly and you have bundle adjustment (Phase 3).</figcaption>
+</figure>
+<table>
+  <tr><th></th><th>Feature-based (ORB-SLAM lineage)</th><th>Direct (DSO lineage)</th></tr>
+  <tr><td>Compares</td><td>descriptors of a few hundred corners</td><td>raw pixel intensities along gradients</td></tr>
+  <tr><td>Robust to</td><td>exposure/lighting change, larger view change</td><td>texture-poor scenes (needs only gradients)</td></tr>
+  <tr><td>Fragile to</td><td>texture-poor scenes, repetitive patterns</td><td>exposure change, rolling shutter, bad photometric calibration</td></tr>
+  <tr><td>Residual</td><td>geometric (pixels of reprojection)</td><td>photometric (units of brightness)</td></tr>
+  <tr><td>Representative</td><td>ORB-SLAM3, VINS front-ends</td><td>DSO, LSD-SLAM; SVO 2.0 = semi-direct hybrid</td></tr>
+</table>
+<div class="warfield">Monocular VO&rsquo;s scale isn&rsquo;t just unknown — it <em>drifts</em>: each initialization error compounds, and a trajectory can be internally consistent while being 7% too small in a way no image can reveal. Auto-exposure silently sabotages direct methods (the "constant brightness" assumption dies every time the camera gain steps). And all VO dies together in the same three places: featureless walls, motion blur from fast rotation, and darkness. Know the failure modes before the demo, because the demo will find them.</div>
+
+<h2><span class="sec-no">2.6</span>Point Cloud Registration: ICP and NDT</h2>
+<p>A lidar hands you geometry directly: thousands of 3D points per scan. Two consecutive scans overlap heavily, so the transform aligning scan to scan (or scan to a local map) <em>is</em> the robot&rsquo;s motion. The classical tool is <strong>ICP — iterative closest point</strong> — and it earns the "iterative": correspondences are unknown, so guess them from proximity, solve, and repeat with better proximity:</p>
+<pre><code class="language-text">repeat:
+  1. associate: for each source point pᵢ (moved by current T),
+     find the nearest target point qᵢ                     ← the guessed matches
+  2. solve:     T = argmin Σᵢ ‖ T·pᵢ − qᵢ ‖²              ← closed form! (below)
+  3. loop until the alignment stops improving
+
+closed form for fixed pairs (Kabsch/Umeyama): with centroids p̄, q̄ and
+cross-covariance  W = Σᵢ (qᵢ − q̄)(pᵢ − p̄)ᵀ  =  U S Vᵀ (SVD):
+
+  R = U · diag(1, 1, det(UVᵀ)) · Vᵀ          t = q̄ − R·p̄
+
+point-to-plane variant (what production systems use):
+  rᵢ = nᵢᵀ (T·pᵢ − qᵢ)      distance along the target's normal — lets
+                             flat surfaces slide into place, converges far faster</code></pre>
+<p><strong>NDT</strong> (normal distributions transform) trades points for statistics: voxelize the target cloud, fit a little Gaussian (μ, Σ) to the points in each voxel, then optimize the pose so source points fall on high-probability ground — a smooth, differentiable score with a wider convergence basin and no per-point correspondence search. <strong>GICP</strong> generalizes both, modeling each point as a local Gaussian (plane-to-plane). The engineering tiers: brute-force ICP for learning, kd-tree accelerated point-to-plane for products, NDT when maps are big and initial guesses rough, GICP when accuracy is worth the cost.</p>
+<table>
+  <tr><th>Variant</th><th>Residual</th><th>Needs</th><th>Character</th></tr>
+  <tr><td>Point-to-point ICP</td><td>‖T·p − q‖</td><td>nothing extra</td><td>simple, slow convergence, narrow basin</td></tr>
+  <tr><td>Point-to-plane ICP</td><td>nᵀ(T·p − q)</td><td>target normals</td><td>the default; flat regions slide, converges in few iterations</td></tr>
+  <tr><td>GICP (plane-to-plane)</td><td>Mahalanobis, per-point Σ</td><td>local covariances both sides</td><td>most accurate classical; heavier per iteration</td></tr>
+  <tr><td>NDT</td><td>−Σ exp(Gaussian score)</td><td>voxelized target Gaussians</td><td>wide basin, smooth cost, resolution-sensitive</td></tr>
+</table>
+<div class="keypoint">ICP is the Phase 1 loop with one twist: the correspondences themselves are re-decided every iteration. That makes the cost surface piecewise and multi-basin, which is why ICP&rsquo;s single tunable that matters is the <em>initial guess</em> — and why every LIO system feeds it an IMU prediction rather than starting from identity.</div>
+
+<div class="setup">
+<p><strong>Setup B: ICP from scratch — one evening.</strong> Goal: sixty lines of Eigen that recover a known SE(3) transform between two clouds, watch RMS fall per iteration, then find the convergence basin&rsquo;s edge by cranking the initial rotation until ICP confidently returns the wrong answer.</p>
+<p>Prereqs: Phase 1 Setup A (Eigen + Sophus). Save as <code>icp.cc</code>, compile with <code>g++ -O2 -std=c++17 -I/usr/include/eigen3 icp.cc -o icp</code>:</p>
+<pre><code class="language-cpp">// icp.cc — point-to-point ICP: associate by proximity, solve in closed form.
+#include &lt;Eigen/Dense&gt;
+#include &lt;sophus/se3.hpp&gt;
+#include &lt;iostream&gt;
+#include &lt;random&gt;
+#include &lt;vector&gt;
+
+using V3 = Eigen::Vector3d;
+
+// Kabsch/Umeyama: best rigid transform for KNOWN correspondences P[i] ↔ Q[i]
+Sophus::SE3d solve_pairs(const std::vector&lt;V3&gt;&amp; P, const std::vector&lt;V3&gt;&amp; Q) {
+  V3 cp = V3::Zero(), cq = V3::Zero();
+  for (size_t i = 0; i &lt; P.size(); ++i) { cp += P[i]; cq += Q[i]; }
+  cp /= P.size();  cq /= Q.size();
+  Eigen::Matrix3d W = Eigen::Matrix3d::Zero();
+  for (size_t i = 0; i &lt; P.size(); ++i)
+    W += (Q[i] - cq) * (P[i] - cp).transpose();
+  Eigen::JacobiSVD&lt;Eigen::Matrix3d&gt; svd(W, Eigen::ComputeFullU | Eigen::ComputeFullV);
+  Eigen::Matrix3d R = svd.matrixU() * svd.matrixV().transpose();
+  if (R.determinant() &lt; 0) {                       // guard against reflections
+    Eigen::Matrix3d D = Eigen::Matrix3d::Identity(); D(2, 2) = -1.0;
+    R = svd.matrixU() * D * svd.matrixV().transpose();
+  }
+  return Sophus::SE3d(Sophus::SO3d(R), cq - R * cp);
+}
+
+int main() {
+  std::mt19937 rng(1);
+  std::uniform_real_distribution&lt;double&gt; box(-2.0, 2.0);
+  std::normal_distribution&lt;double&gt; noise(0.0, 0.01);
+
+  const double yaw_deg = 25.0;                     // experiment: try 60, 90, 120
+  const Sophus::SE3d T_true(Sophus::SO3d::rotZ(yaw_deg * M_PI / 180.0),
+                            V3(0.6, -0.4, 0.3));
+  std::vector&lt;V3&gt; model, scan;
+  for (int i = 0; i &lt; 500; ++i) {
+    V3 p(box(rng), box(rng), box(rng));
+    model.push_back(p);
+    scan.push_back(T_true * p + V3(noise(rng), noise(rng), noise(rng)));
+  }
+
+  Sophus::SE3d T;                                  // initial guess: identity
+  for (int it = 0; it &lt; 30; ++it) {
+    std::vector&lt;V3&gt; src, dst;                      // associate: brute-force NN
+    double rms = 0.0;
+    for (const V3&amp; p : model) {
+      const V3 y = T * p;
+      double best = 1e18; V3 bq;
+      for (const V3&amp; q : scan) {
+        const double d = (y - q).squaredNorm();
+        if (d &lt; best) { best = d; bq = q; }
+      }
+      src.push_back(p); dst.push_back(bq); rms += best;
+    }
+    rms = std::sqrt(rms / model.size());
+    T = solve_pairs(src, dst);                     // solve on guessed matches
+    std::cout &lt;&lt; "iter " &lt;&lt; it &lt;&lt; "  rms " &lt;&lt; rms &lt;&lt; "\n";
+    if (rms &lt; 0.02) break;
+  }
+  const auto err = T_true.inverse() * T;
+  std::cout &lt;&lt; "rotation error   : "
+            &lt;&lt; err.so3().log().norm() * 180.0 / M_PI &lt;&lt; " deg\n"
+            &lt;&lt; "translation error: " &lt;&lt; err.translation().norm() &lt;&lt; " m\n";
+}</code></pre>
+<p>Expected at 25°: RMS collapses over a handful of iterations to the noise floor (~0.017, i.e. √3·0.01), final errors a fraction of a degree and millimetres. Now the real lesson: rerun with <code>yaw_deg</code> = 60, 90, 120. Somewhere along that dial ICP stops converging to the truth and settles into a confident wrong alignment — the nearest-neighbor guesses become self-consistently wrong, and step 2 happily optimizes fiction. Nothing in the RMS trace screams "wrong basin"; it just plateaus higher. That silence is why registration always wants an initial guess (IMU, constant-velocity, or Phase 4&rsquo;s place recognition after a kidnap).</p>
+<p>Sanity checks: (1) raise noise to 0.05 — convergence holds, the floor rises; ICP degrades gracefully against noise, brutally against bad initialization. (2) Delete the reflection guard and rerun many seeds; the rare det = −1 case produces a mirrored "alignment" — a real bug class in naive implementations. (3) The O(N²) association is the toy part: production code uses a kd-tree (nanoflann; FAST-LIO2&rsquo;s incremental ikd-tree) and voxel downsampling — swap them in and this same file scales to real scans.</p>
+</div>
+
+<h2><span class="sec-no">2.7</span>LiDAR-Inertial Odometry: The 2026 Default</h2>
+<p>Put sections 2.3, 2.4, and 2.6 in one tight loop and you get the architecture that now dominates mobile-robot odometry. The IMU propagates an error-state filter at hundreds of hertz; each arriving lidar scan is first <strong>deskewed</strong> (a spinning lidar collects points over ~100 ms of motion — each point gets un-warped using the IMU trajectory), then registered point-to-plane against a local map; the registration residuals update the same filter the IMU propagates, biases and all. That "same filter" is the definition of <strong>tightly coupled</strong> — raw measurements meet raw measurements inside one estimator, instead of two finished pose streams being averaged after the fact (<strong>loosely coupled</strong>, simpler and strictly weaker in degenerate scenes).</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">THE TIGHTLY-COUPLED LIO LOOP (FAST-LIO2 SHAPE)</text>
+  <!-- sources -->
+  <rect x="40" y="52" width="160" height="46" rx="8" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="66" y="72" font-size="12" fill="#23201a">IMU</text>
+  <text x="66" y="88" font-size="11" fill="#4d463a">200–1000 Hz</text>
+  <rect x="40" y="210" width="160" height="46" rx="8" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="66" y="230" font-size="12" fill="#23201a">LiDAR scan</text>
+  <text x="66" y="246" font-size="11" fill="#4d463a">10–100 Hz</text>
+  <!-- propagate -->
+  <rect x="270" y="52" width="210" height="56" rx="8" fill="#faf7f0" stroke="#b3401e" stroke-width="2.5"/>
+  <text x="288" y="76" font-size="12" fill="#b3401e">propagate (predict)</text>
+  <text x="288" y="94" font-size="11" fill="#4d463a">iterated error-state KF</text>
+  <!-- deskew -->
+  <rect x="270" y="210" width="210" height="56" rx="8" fill="#faf7f0" stroke="#0e5f5b" stroke-width="2.5"/>
+  <text x="288" y="234" font-size="12" fill="#0e5f5b">deskew scan</text>
+  <text x="288" y="252" font-size="11" fill="#4d463a">per-point IMU poses</text>
+  <!-- update -->
+  <rect x="550" y="120" width="180" height="70" rx="8" fill="#faf7f0" stroke="#b3401e" stroke-width="2.5"/>
+  <text x="566" y="146" font-size="12" fill="#b3401e">iterated update</text>
+  <text x="566" y="164" font-size="11" fill="#4d463a">point-to-plane residuals</text>
+  <text x="566" y="180" font-size="11" fill="#4d463a">vs local map</text>
+  <!-- map -->
+  <rect x="550" y="250" width="180" height="56" rx="8" fill="#faf7f0" stroke="#a97b1f" stroke-width="2.5"/>
+  <text x="566" y="274" font-size="12" fill="#a97b1f">ikd-tree map</text>
+  <text x="566" y="292" font-size="11" fill="#4d463a">incremental insert/prune</text>
+  <!-- arrows -->
+  <line x1="200" y1="75" x2="266" y2="78" stroke="#23201a" stroke-width="2"/>
+  <polygon points="266,78 256,73 256,83" fill="#23201a"/>
+  <line x1="200" y1="233" x2="266" y2="236" stroke="#23201a" stroke-width="2"/>
+  <polygon points="266,236 256,231 256,241" fill="#23201a"/>
+  <line x1="375" y1="108" x2="375" y2="206" stroke="#b3401e" stroke-width="2"/>
+  <polygon points="375,206 370,196 380,196" fill="#b3401e"/>
+  <text x="386" y="162" font-size="11" fill="#b3401e">per-point poses</text>
+  <line x1="480" y1="238" x2="546" y2="172" stroke="#0e5f5b" stroke-width="2"/>
+  <polygon points="546,172 536,174 543,181" fill="#0e5f5b"/>
+  <line x1="480" y1="80" x2="546" y2="136" stroke="#b3401e" stroke-width="2"/>
+  <polygon points="546,136 539,128 533,136" fill="#b3401e"/>
+  <line x1="618" y1="190" x2="618" y2="246" stroke="#a97b1f" stroke-width="2"/>
+  <polygon points="618,246 613,236 623,236" fill="#a97b1f"/>
+  <text x="630" y="222" font-size="11" fill="#a97b1f">insert refined pts</text>
+  <line x1="672" y1="246" x2="672" y2="190" stroke="#4d463a" stroke-width="1.5" stroke-dasharray="4 3"/>
+  <polygon points="672,190 667,200 677,200" fill="#4d463a"/>
+  <!-- feedback -->
+  <path d="M 640 116 Q 500 6 382 48" fill="none" stroke="#23201a" stroke-width="1.5" stroke-dasharray="5 4"/>
+  <polygon points="382,48 393,45 388,54" fill="#23201a"/>
+  <text x="452" y="62" font-size="11" fill="#23201a">corrected state + biases</text>
+</svg>
+</div>
+<figcaption>Fig 2.3: the FAST-LIO2-shaped loop. The IMU predicts, the prediction deskews the scan and seeds registration, raw point-to-plane residuals correct the same filter, and refined points feed an incremental kd-tree map. Tight coupling means one estimator sees everything.</figcaption>
+</figure>
+<p>Three systems define the state of the art, all from the same research lineage and all standalone C++:</p>
+<table>
+  <tr><th>System</th><th>Core idea</th><th>Distinguishing trick</th><th>Reach for it when</th></tr>
+  <tr><td><a href="https://github.com/hku-mars/FAST_LIO">FAST-LIO2</a></td><td>Iterated ESKF, direct raw-point registration (no feature extraction), incremental <strong>ikd-tree</strong> map</td><td>A Kalman-gain reformulation that scales with state dim, not measurement count — thousands of residuals per update, cheap</td><td>The default. General-purpose, mature, fast on modest CPUs</td></tr>
+  <tr><td><a href="https://github.com/hku-mars/Point-LIO">Point-LIO</a></td><td>Updates the filter <em>per point</em> rather than per scan; models IMU as output, not input</td><td>Effectively continuous-time updates → survives violent motion and IMU saturation (spinning, thrown sensors)</td><td>Aggressive dynamics: legged robots, drones hitting things, high angular rates</td></tr>
+  <tr><td><a href="https://github.com/vectr-ucla/direct_lidar_inertial_odometry">DLIO</a></td><td>Continuous-time motion correction with an analytic (closed-form) integrator, geometric observer instead of a KF</td><td>Deskew via exact continuous-time integration — accurate warp at low cost; dense keyframe maps</td><td>You want dense, pretty maps and a simple, robust estimator</td></tr>
+</table>
+<p>Why this family displaced the LOAM lineage that preceded it: LOAM extracted sparse edge/plane features from each scan, which threw information away and broke on featureless-but-geometric scenes; FAST-LIO2 registers <em>raw points</em> against the map and lets the filter weigh them. The enabler is the ikd-tree — a kd-tree that supports incremental insertion and deletion, so "the map" is a living structure updated per scan rather than rebuilt. GLIM and the full SLAM systems of Phase 3 pick up exactly here, adding loop closure on top.</p>
+<dl class="jargon">
+  <dt>Deskew / motion compensation</dt><dd>Undoing the motion the robot made <em>during</em> one lidar sweep, using the IMU trajectory, so the scan looks like a snapshot.</dd>
+  <dt>Tightly / loosely coupled</dt><dd>Raw measurements fused in one estimator vs finished pose estimates averaged afterwards. Tight wins in degenerate scenes because information (not conclusions) gets weighed.</dd>
+  <dt>ikd-tree</dt><dd>Incremental kd-tree: nearest-neighbor structure supporting insert/delete/re-balance on the fly. FAST-LIO2&rsquo;s map container.</dd>
+  <dt>Iterated update</dt><dd>Re-linearizing the measurement model a few times within one correction step — an EKF borrowing one Gauss-Newton trick from Phase 1.</dd>
+</dl>
+
+<h2><span class="sec-no">2.8</span>Visual-Inertial Odometry: Four Systems Worth Knowing</h2>
+<p>Cameras and IMUs are the great complementary pair: the IMU is blind but fast and metric; the camera is slow and scale-blind but anchors drift to the world. Fusing them makes monocular <strong>scale observable</strong> (accelerometer units are metres per second squared), makes <strong>gravity observable</strong> (so roll/pitch never drift), and bridges motion blur. The fusion currency on the optimization side is <strong>preintegration</strong>: compress the hundreds of IMU samples between two keyframes into a single relative factor (ΔR, Δv, Δp) with covariance and bias Jacobians, computed once on the manifold and cheaply corrected when bias estimates move. Four mature open systems cover the design space:</p>
+<table>
+  <tr><th>System</th><th>Front-end</th><th>Back-end</th><th>Sensors</th><th>Character</th></tr>
+  <tr><td><a href="https://github.com/UZ-SLAMLab/ORB_SLAM3">ORB-SLAM3</a></td><td>ORB features, descriptor matching</td><td>Factor-graph MAP over keyframes (g2o), multi-map Atlas</td><td>mono / stereo / RGB-D, ± IMU</td><td>The accuracy benchmark; a full SLAM system whose VIO mode is the front half (Phase 3 covers the rest)</td></tr>
+  <tr><td><a href="https://github.com/HKUST-Aerial-Robotics/VINS-Fusion">VINS-Fusion</a></td><td>KLT optical flow (no descriptors)</td><td>Sliding-window optimization (Ceres) + marginalization</td><td>mono/stereo + IMU, + GNSS</td><td>The pragmatic workhorse: robust initialization, online extrinsic &amp; time-offset estimation</td></tr>
+  <tr><td><a href="https://github.com/smartroboticslab/okvis2">OKVIS2</a></td><td>Multi-scale features, stereo-first</td><td>Keyframe sliding window with careful marginalization; realtime loop closure</td><td>stereo + IMU</td><td>The rigorous engineer&rsquo;s choice; excellent calibration story, strong on stereo rigs</td></tr>
+  <tr><td><a href="https://github.com/uzh-rpg/rpg_svo_pro_open">SVO 2.0</a></td><td>Semi-direct: photometric tracking of sparse patches, depth filters</td><td>Lightweight local BA (+ optional loop closure)</td><td>mono/stereo/fisheye + IMU</td><td>Speed champion — hundreds of Hz on embedded CPUs; the drone-racing lineage</td></tr>
+</table>
+<p>Reading the table as a decision: ORB-SLAM3 when accuracy on benchmarks matters and compute is available; VINS-Fusion when the rig is imperfect and you want something that initializes itself and forgives miscalibration; OKVIS2 for a serious stereo product; SVO for embedded speed. All four assume Phase 6&rsquo;s homework — intrinsics, extrinsics, and time offset between camera and IMU — and the difference between "works in the demo" and "works" is usually that homework, not the system choice.</p>
+
+<h2><span class="sec-no">2.9</span>Choosing a Stack, and Watching It Fail</h2>
+<p>Odometry selection is failure-mode engineering: pick the primary sensor whose degenerate case you will meet least, and a partner that covers it. A decision table compresses this chapter:</p>
+<table>
+  <tr><th>Platform / environment</th><th>Reach first for</th><th>Because</th></tr>
+  <tr><td>Indoor wheeled robot, budget build</td><td>Wheel + gyro EKF (Setup A), camera assist</td><td>Floors are flat, slips are rare, encoders are free</td></tr>
+  <tr><td>Indoor/outdoor, structure-rich, money for one good sensor</td><td>LiDAR-inertial: FAST-LIO2 / DLIO</td><td>Geometry is lighting-proof; LIO is the most drift-free odometry per dollar of compute</td></tr>
+  <tr><td>Aggressive motion (legged, aerial contact)</td><td>Point-LIO</td><td>Per-point updates + IMU-as-output survive saturation</td></tr>
+  <tr><td>Weight/power-starved aerial</td><td>VIO: SVO 2.0 or VINS-Fusion</td><td>Camera + IMU weigh grams; scale and gravity come from the IMU</td></tr>
+  <tr><td>Benchmark accuracy, later loop closure</td><td>ORB-SLAM3 / OKVIS2</td><td>Feature machinery and keyframe BA transfer straight into Phase 3</td></tr>
+</table>
+<div class="warfield"><strong>Degeneracy</strong> is the failure mode that unifies this chapter. A long featureless corridor leaves lidar registration unconstrained <em>along</em> the corridor: the Phase 1 Hessian JᵀJ goes near-singular in exactly one direction, and the estimate slides freely there while looking healthy everywhere else. A blank wall does it to VO; a straight-line constant-velocity run does it to mono-VIO scale; ice does it to wheels. The professional move is to <em>detect</em> it — monitor the smallest eigenvalue of the registration Hessian, and when it collapses, inflate covariance along that eigenvector and lean on the complementary sensor. Systems that skip this check don&rsquo;t fail less; they fail confidently.</div>
+<div class="keypoint">Fuse sensors whose failure modes are disjoint, detect degeneracy through the eigenvalues of the same JᵀJ Phase 1 taught you to build, and never ship an odometry covariance that doesn&rsquo;t contain the truth. Drift you have honestly quantified is a solved problem — Phase 3 erases it with loop closures; drift you lied about poisons everything downstream.</div>
+
+<h2><span class="sec-no">2.10</span>Reading List</h2>
+<a class="paper" href="https://rpg.ifi.uzh.ch/docs/VO_Part_I_Scaramuzza.pdf"><span class="p-title">Visual Odometry: Part I &amp; Part II (Tutorial)</span><span class="p-meta">Scaramuzza &amp; Fraundorfer · IEEE Robotics &amp; Automation Magazine 2011/2012</span><span class="p-why">The standard on-ramp for section 2.5: the full feature-based pipeline, drift analysis, and the vocabulary interviews assume.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1711.02508"><span class="p-title">Quaternion Kinematics for the Error-State Kalman Filter</span><span class="p-meta">Solà · arXiv:1711.02508</span><span class="p-why">Section 2.4 with every Jacobian derived and every convention stated. The reference that stays open while you write an IMU filter.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1512.02363"><span class="p-title">On-Manifold Preintegration for Real-Time Visual-Inertial Odometry</span><span class="p-meta">Forster, Carlone, Dellaert &amp; Scaramuzza · IEEE TRO 2017</span><span class="p-why">The preintegration paper: how hundreds of IMU samples become one factor, and why that made optimization-based VIO real-time.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/121791"><span class="p-title">A Method for Registration of 3-D Shapes</span><span class="p-meta">Besl &amp; McKay · IEEE TPAMI 1992</span><span class="p-why">The ICP original. Thirty-plus years old and Setup B is still recognizably this paper.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/1249285"><span class="p-title">The Normal Distributions Transform: A New Approach to Laser Scan Matching</span><span class="p-meta">Biber &amp; Straßer · IROS 2003</span><span class="p-why">Registration without correspondences: voxels as Gaussians, matching as smooth optimization. The other half of section 2.6.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2107.06829"><span class="p-title">FAST-LIO2: Fast Direct LiDAR-Inertial Odometry</span><span class="p-meta">Xu, Cai, He, Lin &amp; Zhang · IEEE TRO 2022</span><span class="p-why">The paper behind Fig 2.3: raw-point registration, the ikd-tree, and the Kalman gain trick that makes thousands of residuals cheap.</span></a>
+<a class="paper" href="https://onlinelibrary.wiley.com/doi/10.1002/aisy.202200459"><span class="p-title">Point-LIO: Robust High-Bandwidth LiDAR-Inertial Odometry</span><span class="p-meta">He, Xu, Zhou, Cai &amp; Zhang · Advanced Intelligent Systems 2023</span><span class="p-why">Per-point filtering and the stochastic-process IMU model — LIO that survives 75 rad/s and saturated accelerometers.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2203.03749"><span class="p-title">Direct LiDAR-Inertial Odometry (DLIO)</span><span class="p-meta">Chen, Nemiroff &amp; Lopez · ICRA 2023</span><span class="p-why">Continuous-time deskew with closed-form integration and a geometric observer — the "simple and dense" corner of the LIO design space.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2007.11898"><span class="p-title">ORB-SLAM3: An Accurate Open-Source Library for Visual, Visual-Inertial and Multi-Map SLAM</span><span class="p-meta">Campos, Elvira, Rodríguez, Montiel &amp; Tardós · IEEE TRO 2021</span><span class="p-why">The reference feature-based system for 2.5 and 2.8; returns as a lead character in Phase 3.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1708.03852"><span class="p-title">VINS-Mono: A Robust and Versatile Monocular Visual-Inertial State Estimator</span><span class="p-meta">Qin, Li &amp; Shen · IEEE TRO 2018</span><span class="p-why">Sliding-window VIO with marginalization, online calibration, and the initialization procedure everyone borrowed. VINS-Fusion is its multi-sensor successor.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2202.09199"><span class="p-title">OKVIS2: Realtime Scalable Visual-Inertial SLAM with Loop Closure</span><span class="p-meta">Leutenegger · arXiv:2202.09199</span><span class="p-why">Keyframe sliding-window VIO done with unusual rigor; the marginalization discussion doubles as a Phase 3 preview.</span></a>
+
+<h2><span class="sec-no">2.11</span>Interview Questions</h2>
+<details class="qa"><summary>What does an accelerometer actually measure, and why does the answer matter?</summary><div class="a"><p>Specific force: true acceleration minus gravity, in the sensor frame — not acceleration. At rest it reads +9.81 m/s² upward (the table pushing back); in free fall it reads zero. It matters because every integration pipeline must add gravity back using the current attitude estimate, so any attitude error tilts a 9.81 m/s² vector into the velocity integral — which is why attitude accuracy dominates inertial navigation error, and why roll/pitch are observable in the first place (gravity is a free reference direction).</p></div></details>
+<details class="qa"><summary>Why is scale unobservable in monocular VO, and what are the standard fixes?</summary><div class="a"><p>A camera measures bearings only. Scale every distance and every translation by the same factor s and all image projections are identical — (R, t) and (R, s·t) explain the data equally well, so no image evidence can pick s. Fixes add a metric ruler: a stereo baseline (known distance between cameras), an RGB-D sensor (direct depth), an IMU (accelerometer units are m/s², making scale observable given sufficient acceleration excitation), or known object sizes. Note the IMU fix fails under constant velocity — zero acceleration excites nothing — which is the classic mono-VIO degeneracy.</p></div></details>
+<details class="qa"><summary>What is an error-state Kalman filter and why is it the standard for IMU fusion?</summary><div class="a"><p>The ESKF splits the state into a nominal part, kept on the manifold and propagated with full nonlinear integration, and an error part δx in the tangent space, which is what the Gaussian and covariance actually describe. Corrections estimate δx and fold it into the nominal with ⊞, resetting the error to zero. It is standard because the error is always small — so linearization is maximally honest, rotations never leave their manifold, there is no gimbal lock or quaternion-normalization hack, and the covariance is a clean 3×3 or 15×15 over tangent coordinates.</p></div></details>
+<details class="qa"><summary>Point-to-point vs point-to-plane ICP: why does point-to-plane converge so much faster?</summary><div class="a"><p>Point-to-point penalizes the full 3D distance between matched points, but on a flat surface the correspondence is essentially arbitrary along the plane — the true constraint is only perpendicular to it. Point-to-plane encodes exactly that: the residual nᵀ(T·p − q) measures only the distance along the target normal, so tangential sliding is free and the optimizer can slide surfaces into place instead of fighting fictitious in-plane constraints. Fewer iterations, better resistance to imperfect correspondences; the price is needing target normals, computed once from local neighborhoods.</p></div></details>
+<details class="qa"><summary>What problem does IMU preintegration solve in optimization-based VIO?</summary><div class="a"><p>A factor graph over keyframes must relate consecutive keyframe states through the hundreds of IMU samples between them. Naively, changing the linearization point (which iterative optimization does constantly) would force re-integrating all raw samples every iteration. Preintegration integrates the samples once, in a frame relative to the first keyframe, producing ΔR, Δv, Δp with covariance — independent of the global states — plus Jacobians with respect to bias so the factor can be corrected first-order when bias estimates move. The result: one cheap factor per keyframe pair, re-linearizable for free, on the manifold.</p></div></details>
+<details class="qa"><summary>Tightly coupled vs loosely coupled fusion — what is the actual difference and when does it matter?</summary><div class="a"><p>Loosely coupled runs each sensor pipeline to a finished pose estimate and fuses the poses; tightly coupled feeds raw measurements (image features, lidar residuals, IMU samples) into a single estimator. The difference shows in degenerate scenes: a corridor-degenerate lidar pipeline outputs a confident wrong pose that a loose fusion can only average in, while a tight fusion sees the raw residuals constrain five directions and not the sixth, and lets the IMU own that direction automatically through the shared covariance. Loose is simpler and easier to certify; tight is strictly more informative. FAST-LIO2 and VINS are tight; most quick GNSS+odometry integrations are loose.</p></div></details>
+<details class="qa"><summary>Your lidar odometry works everywhere except a long straight corridor. What is happening and what do you do?</summary><div class="a"><p>The corridor constrains motion perpendicular to its walls and floor but says nothing about translation along it — every point-to-plane residual has its normal roughly perpendicular to the corridor axis. The registration Hessian JᵀJ becomes near-singular along that axis: its smallest eigenvalue collapses and the corresponding eigenvector points down the corridor. Detection: monitor that eigenvalue (or the condition number) per scan. Mitigation: inflate covariance along the weak eigenvector and let the fused IMU/wheel odometry carry that direction; refuse registration updates along it (solve in the reduced subspace); and longer-term, add texture the sensor can see or a sensor whose failure mode differs. What you must not do is let the registration "succeed" — it will, at an arbitrary position along the corridor.</p></div></details>
+<details class="qa"><summary>Wheel odometry: what are the two classes of error, and how is each handled?</summary><div class="a"><p>Systematic errors — wrong effective wheel radius, wrong wheel base, unequal wheels — bias every step identically and are handled by calibration: drive closed paths (the UMBmark square, or circles both directions), measure closure error, and solve for corrected parameters; they are parameters, not noise. Stochastic errors — slip, skid, surface irregularity — are unpredictable and handled by modeling: they become the process noise Q that grows the covariance per step, tuned so the reported uncertainty actually covers observed drift. Mixing the two up is the classic tuning failure: no amount of Q inflation fixes a 2% wheel-radius bias, and no calibration removes carpet slip.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

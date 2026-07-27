@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 6 · Calibration &amp; ROS-Free Infrastructure · Autonomous Mobile Robot Navigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">06</div>
+  <div class="chapter-kicker">Phase Six · The Unglamorous Work That Decides Everything</div>
+  <h1>Calibration &amp; ROS-Free System Infrastructure</h1>
+  <p class="chapter-sub">No algorithm from Phases 1–5 survives a rig whose sensors disagree about where they are, what they measure, and when they measured it — or a process architecture that drops frames under load. This phase is the homework.</p>
+</header>
+
+<h2><span class="sec-no">6.1</span>The Calibration Ladder</h2>
+<p>Every fusion equation in this book silently assumed three things were known exactly: each sensor&rsquo;s <strong>intrinsics</strong> (its internal model — focal length, distortion, bias behavior), the <strong>extrinsics</strong> between sensors (the fixed T_imu_cam, T_imu_lidar of Phase 1&rsquo;s frame chains), and a shared <strong>clock</strong>. Get any rung wrong and the errors don&rsquo;t add — they masquerade: a 5 ms time offset looks like an IMU bias, a 1° extrinsic error looks like odometry drift, a bad focal length looks like scale drift. Whole weeks have been lost tuning filters to compensate for calibration that was never done. The ladder must be climbed in order — intrinsics first, then extrinsics, then time — because each stage&rsquo;s estimator assumes the previous stage is solved.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">ONE RIG, SIX UNKNOWNS</text>
+  <!-- robot body -->
+  <rect x="230" y="130" width="300" height="90" rx="10" fill="#faf7f0" stroke="#23201a" stroke-width="2.5"/>
+  <text x="330" y="180" font-size="12" fill="#23201a">robot body</text>
+  <!-- imu -->
+  <rect x="355" y="96" width="60" height="34" rx="6" fill="#faf7f0" stroke="#b3401e" stroke-width="2.5"/>
+  <text x="368" y="117" font-size="11.5" fill="#b3401e">IMU</text>
+  <!-- camera -->
+  <rect x="180" y="70" width="86" height="36" rx="6" fill="#faf7f0" stroke="#0e5f5b" stroke-width="2.5"/>
+  <text x="196" y="92" font-size="11.5" fill="#0e5f5b">camera</text>
+  <!-- lidar -->
+  <rect x="512" y="62" width="80" height="40" rx="6" fill="#faf7f0" stroke="#a97b1f" stroke-width="2.5"/>
+  <text x="528" y="86" font-size="11.5" fill="#a97b1f">lidar</text>
+  <!-- unknown transforms -->
+  <line x1="266" y1="94" x2="358" y2="108" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="248" y="130" font-size="11.5" fill="#0e5f5b">T_imu_cam?  Δt_cam?</text>
+  <line x1="512" y1="88" x2="416" y2="106" stroke="#a97b1f" stroke-width="2" stroke-dasharray="6 4"/>
+  <text x="452" y="126" font-size="11.5" fill="#a97b1f">T_imu_lidar?  Δt_lidar?</text>
+  <!-- intrinsics -->
+  <text x="120" y="52" font-size="11.5" fill="#0e5f5b">K, distortion?</text>
+  <text x="360" y="66" font-size="11.5" fill="#b3401e">biases, noise densities?</text>
+  <text x="606" y="52" font-size="11.5" fill="#a97b1f">beam angles?</text>
+  <text x="180" y="266" font-size="11.5" fill="#4d463a">every dashed arrow and question mark is a number some phase already assumed</text>
+</svg>
+</div>
+<figcaption>Fig 6.1: the full inventory for a camera-IMU-lidar rig: three intrinsic models, two extrinsic transforms, two time offsets. Phase 2&rsquo;s VIO quietly consumed all seven; this phase measures them.</figcaption>
+</figure>
+
+<h2><span class="sec-no">6.2</span>Camera Intrinsics: The Projection Contract</h2>
+<p>The pinhole model maps a 3D point in the camera frame to a pixel, and calibration is — one more time — the Phase 1 loop, with the model&rsquo;s parameters as the state and checkerboard (or AprilTag) corners as the measurements:</p>
+<pre><code class="language-text">projection:  [u]   [f_x  0   c_x] [X/Z]
+             [v] = [ 0  f_y  c_y]·[Y/Z]     then distortion warps (u,v):
+             [1]   [ 0   0    1 ]
+
+radial:      x_d = x(1 + k₁r² + k₂r⁴ + k₃r⁶) + tangential p₁, p₂ terms
+
+calibrate:   argmin_{K, dist, poses}  Σᵢⱼ ‖ u_ij − π(K, dist, T_j, P_i) ‖²
+             → LM over intrinsics AND board poses jointly (Phase 1.8)
+target RMS reprojection: &lt; 0.5 px. Above 1 px, redo the capture, not the math.</code></pre>
+<p>Capture craft matters more than solver choice: fill the whole image with board views (distortion lives at the edges), tilt the board (foreshortening constrains focal length), lock exposure and focus, and prefer AprilTag grids over checkerboards — each tag&rsquo;s identity is unambiguous, so partial views and motion blur stop silently corrupting corners. Rolling-shutter cameras need the rolling-shutter model or slow motion during capture; fisheye lenses need their own projection models (equidistant, double-sphere), not more radial terms bolted onto pinhole.</p>
+
+<h2><span class="sec-no">6.3</span>IMU Intrinsics: Allan Variance</h2>
+<p>Phase 2&rsquo;s filters need two numbers per gyro/accel axis that datasheets state optimistically and temperature ruins: the <strong>white noise density</strong> (how noisy each sample is) and the <strong>bias random walk</strong> (how fast the bias wanders). The standard instrument is the <strong>Allan variance</strong>: record the stationary sensor for hours, average the signal over windows of growing length τ, and study how the averages disagree as a function of τ:</p>
+<pre><code class="language-text">σ²(τ) = ½ ⟨ ( ȳ_{k+1}(τ) − ȳ_k(τ) )² ⟩       ȳ_k: mean over the k-th window
+
+log-log plot of σ(τ) vs τ reads like a spectrogram of error sources:
+  slope −½  →  white noise:        σ(τ) = N / √τ      → read N at τ = 1 s
+  slope  0  →  bias instability    (the flat floor)
+  slope +½  →  rate random walk:   σ(τ) = K·√(τ/3)    → read K on the rise
+averaging longer first helps (noise averages out), then hurts (bias wanders)</code></pre>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">THE ALLAN DEVIATION CURVE, ANNOTATED</text>
+  <line x1="80" y1="250" x2="710" y2="250" stroke="#23201a" stroke-width="2"/>
+  <line x1="80" y1="250" x2="80" y2="60" stroke="#23201a" stroke-width="2"/>
+  <text x="600" y="274" font-size="12" fill="#23201a">log τ (s)</text>
+  <text x="60" y="80" font-size="12" fill="#23201a" transform="rotate(-90 60 80)"></text>
+  <text x="90" y="60" font-size="12" fill="#23201a">log σ(τ)</text>
+  <polyline points="110,90 220,150 330,196 420,210 480,210 560,196 660,160"
+            fill="none" stroke="#b3401e" stroke-width="3"/>
+  <text x="130" y="140" font-size="11.5" fill="#0e5f5b">slope −½: white noise</text>
+  <text x="130" y="156" font-size="11.5" fill="#0e5f5b">read N at τ = 1 s</text>
+  <text x="360" y="246" font-size="11.5" fill="#a97b1f">flat: bias instability</text>
+  <text x="548" y="130" font-size="11.5" fill="#0e5f5b">slope +½: rate</text>
+  <text x="548" y="146" font-size="11.5" fill="#0e5f5b">random walk K</text>
+  <line x1="196" y1="60" x2="196 " y2="250" stroke="#d8cdb4" stroke-width="1.5" stroke-dasharray="4 4"/>
+  <text x="176" y="284" font-size="11" fill="#4d463a">τ=1s</text>
+</svg>
+</div>
+<figcaption>Fig 6.2: hours of a sensor sitting still, compressed into one curve. The descending arm prices each sample&rsquo;s noise, the floor is the best the sensor will ever hold a bias, the rising arm prices how fast the bias flees. Setup A computes this curve and reads both parameters back out.</figcaption>
+</figure>
+
+<div class="setup">
+<p><strong>Setup A: Allan variance from scratch — one evening, zero dependencies.</strong> Goal: simulate two hours of gyro data with known noise parameters, compute the Allan deviation, and recover the parameters you injected — the round trip that makes IMU datasheets stop being folklore. Save as <code>allan.cc</code>, compile with <code>g++ -O2 -std=c++17 allan.cc -o allan</code>:</p>
+<pre><code class="language-cpp">// allan.cc — simulate a stationary gyro, recover N and K from Allan deviation.
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+#include &lt;random&gt;
+#include &lt;vector&gt;
+
+int main() {
+  const double fs = 100.0, T = 7200.0;        // 100 Hz, two hours
+  const double N_true = 0.005;                 // white noise  [rad/s/√Hz]
+  const double K_true = 0.0001;                // rate random walk [rad/s·√Hz]
+  const size_t n = size_t(fs * T);
+
+  std::mt19937 rng(11);
+  std::normal_distribution&lt;double&gt; gauss(0.0, 1.0);
+  std::vector&lt;double&gt; w(n);
+  double bias = 0.0;
+  for (size_t i = 0; i &lt; n; ++i) {             // rate = wandering bias + noise
+    bias += K_true * std::sqrt(1.0 / fs) * gauss(rng);
+    w[i] = bias + N_true * std::sqrt(fs) * gauss(rng);
+  }
+
+  std::cout &lt;&lt; "tau(s)      sigma(rad/s)\n";
+  for (double tau = 0.01; tau &lt;= 1000.0; tau *= 2.0) {
+    const size_t m = size_t(tau * fs);         // samples per window
+    if (m &lt; 1 || 2 * m &gt;= n) continue;
+    std::vector&lt;double&gt; avg;                   // window means
+    for (size_t k = 0; k + m &lt;= n; k += m) {
+      double s = 0.0;
+      for (size_t i = k; i &lt; k + m; ++i) s += w[i];
+      avg.push_back(s / m);
+    }
+    double acc = 0.0;                          // Allan variance
+    for (size_t k = 0; k + 1 &lt; avg.size(); ++k)
+      acc += (avg[k + 1] - avg[k]) * (avg[k + 1] - avg[k]);
+    const double sigma = std::sqrt(0.5 * acc / (avg.size() - 1));
+    std::cout &lt;&lt; tau &lt;&lt; "\t" &lt;&lt; sigma &lt;&lt; "\n";
+    if (std::abs(tau - 1.28) &lt; 0.1)            // ≈ read-off points
+      std::cout &lt;&lt; "  → N ≈ σ(1s)·√1s = " &lt;&lt; sigma
+                &lt;&lt; "   (true " &lt;&lt; N_true &lt;&lt; ")\n";
+    if (std::abs(tau - 655.36) &lt; 1.0)
+      std::cout &lt;&lt; "  → K ≈ σ(τ)·√(3/τ) = " &lt;&lt; sigma * std::sqrt(3.0 / tau)
+                &lt;&lt; "   (true " &lt;&lt; K_true &lt;&lt; ")\n";
+  }
+}</code></pre>
+<p>Expected: the printed σ(τ) column falls with slope −½ (halving per 4× of τ), flattens, then rises — Fig 6.2 in numbers. The τ ≈ 1 s read-off recovers N within a few percent; the long-τ read-off recovers K within a factor of ~1.5 (long-τ estimates are statistically starved even with two hours of data — note how few windows exist at τ = 655 s, and why real IMU characterization runs overnight). These two numbers, per axis, are precisely what Phase 2&rsquo;s filters want as Q entries, and what Kalibr&rsquo;s IMU yaml demands.</p>
+<p>Sanity checks: (1) set K_true = 0 — the curve keeps falling with slope −½ forever; the rising arm <em>is</em> the bias wandering. (2) Halve the record length twice and watch the long-τ tail get noisy first — the practical reason short logs mis-estimate random walk. (3) Add a temperature-style slow sinusoidal drift and watch a hump appear — real Allan plots have personality, and reading them is the skill.</p>
+</div>
+
+<h2><span class="sec-no">6.4</span>Extrinsics: Kalibr, Hand-Eye, and LiDAR Rigs</h2>
+<p>Extrinsic calibration answers: what rigid transform relates two sensors&rsquo; frames — and it needs <em>shared observations of motion or structure</em>. The camera–IMU case is the canon, and <a href="https://github.com/ethz-asl/kalibr">Kalibr</a> is its standard tool: wave the rig in front of an AprilTag grid with rich rotation on all axes, and solve a continuous-time batch problem — the trajectory modeled as B-splines so that camera poses (from the target) and IMU samples (rates and accelerations, i.e. spline derivatives) constrain <em>one</em> smooth curve — estimating T_imu_cam, gravity, biases, and, crucially, the camera–IMU <strong>time offset</strong> in the same optimization. The observability fine print: without rotational excitation about all axes, the extrinsic translation is barely observable — a gentle hand-held figure-eight beats any tripod.</p>
+<pre><code class="language-text">hand-eye (the classical form of every extrinsic problem):
+  A_i · X = X · B_i         A_i: sensor-1 motion,  B_i: sensor-2 motion,
+                            X = the unknown extrinsic between them
+  → rotations first (quaternion linear system), then translation (linear LS)
+  → needs ≥ 2 motions with non-parallel rotation axes — excitation, again</code></pre>
+<p>LiDAR–IMU rigs use the same principles with geometry instead of tags: <a href="https://github.com/ethz-asl/lidar_align">LiDAR-Align</a> optimizes the extrinsic (and time offset) by minimizing the crispness of the aggregated point cloud — with the wrong transform, walls smear when the rig moves; with the right one, they focus. Newer target-free tools (the BIFROST line and friends) push this further with continuous-time trajectories, but the acceptance test never changes: aggregate a rotation-rich log through the estimated calibration and <em>look at the walls</em>. Blur is truth.</p>
+
+<h2><span class="sec-no">6.5</span>Time: The Third Dimension of Calibration</h2>
+<p>Two sensors with perfect intrinsics and extrinsics still disagree if their clocks do. Time errors are vicious because they scale with <em>motion</em>: at a yaw rate of 1 rad/s, a 5 ms offset is a 0.29° attitude error — larger than a good extrinsic calibration&rsquo;s whole budget — and it vanishes on the bench where the rig sits still. The engineering hierarchy, best to worst: <strong>hardware triggering</strong> (one signal line exposes the camera and timestamps the lidar sweep — the offset becomes zero by construction); <strong>PTP / IEEE 1588</strong> on the network for microsecond-level sync between devices that can&rsquo;t share a wire; <strong>software timestamping at the driver</strong> with an estimated constant offset (what Kalibr and VINS-Fusion estimate online); and — the one that fails silently — timestamping <em>on message arrival</em>, where USB buffering injects tens of jittering milliseconds. One more subtlety worth an interview answer: a camera&rsquo;s honest timestamp is mid-exposure, and a spinning lidar&rsquo;s points span the whole sweep — which is exactly the deskew problem Phase 2.7 solved, now revealed as a time-calibration statement.</p>
+<div class="warfield">The classic silent killer: everything calibrated, fusion still "soft" — poses lag reality by a beat, corners in the map rounded. Log the innovation (Phase 1&rsquo;s z − h(x̂)) against yaw rate: a time offset shows up as innovation <em>correlated with angular velocity</em>, the unmistakable fingerprint. Extrinsic errors correlate with orientation instead; bias errors don&rsquo;t care about either. That one diagnostic plot distinguishes all three families in ten minutes and has saved more field weeks than any tool in this chapter.</div>
+<div class="keypoint">Calibration is not a setup step; it is a failure mode with a schedule. Mounts flex, temperature walks intrinsics, bumps move sensors. Ship a re-calibration procedure, monitor innovation statistics for the fingerprints above, and treat "when were these numbers last measured?" as a first-class operational question.</div>
+
+<h2><span class="sec-no">6.6</span>ROS-Free IPC: Iceoryx, ZeroMQ, Fast-DDS</h2>
+<p>A navigation stack is a set of processes — driver, odometry, SLAM, planner, controller — passing sensor-sized messages at sensor rates. Without ROS, you choose the transport yourself, and the choice is really about <strong>copies</strong>. A 2 MB point cloud at 20 Hz through a socket API is serialized, copied into the kernel, copied out, deserialized — four traversals of memory per hop, per subscriber. <a href="https://iceoryx.io/">Iceoryx</a> deletes all of them: publishers <em>loan</em> a chunk of shared memory, write the cloud in place, and publish the <em>pointer</em>; subscribers read the same physical bytes. Latency becomes single-digit microseconds and — the deeper win — <em>independent of message size</em>.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">WHERE THE MICROSECONDS GO</text>
+  <!-- copying pipeline -->
+  <rect x="40" y="58" width="120" height="44" rx="7" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="58" y="84" font-size="11.5" fill="#23201a">producer</text>
+  <rect x="230" y="58" width="130" height="44" rx="7" fill="#faf7f0" stroke="#b3401e" stroke-width="2"/>
+  <text x="244" y="78" font-size="11" fill="#b3401e">serialize</text>
+  <text x="244" y="93" font-size="11" fill="#b3401e">copy #1</text>
+  <rect x="430" y="58" width="130" height="44" rx="7" fill="#faf7f0" stroke="#b3401e" stroke-width="2"/>
+  <text x="444" y="78" font-size="11" fill="#b3401e">kernel buffer</text>
+  <text x="444" y="93" font-size="11" fill="#b3401e">copies #2, #3</text>
+  <rect x="620" y="58" width="110" height="44" rx="7" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="634" y="78" font-size="11" fill="#23201a">consumer</text>
+  <text x="634" y="93" font-size="11" fill="#b3401e">copy #4</text>
+  <line x1="160" y1="80" x2="226" y2="80" stroke="#23201a" stroke-width="2"/>
+  <polygon points="226,80 216,75 216,85" fill="#23201a"/>
+  <line x1="360" y1="80" x2="426" y2="80" stroke="#23201a" stroke-width="2"/>
+  <polygon points="426,80 416,75 416,85" fill="#23201a"/>
+  <line x1="560" y1="80" x2="616" y2="80" stroke="#23201a" stroke-width="2"/>
+  <polygon points="616,80 606,75 606,85" fill="#23201a"/>
+  <text x="40" y="132" font-size="11.5" fill="#4d463a">socket path: cost scales with size × subscribers  (ZeroMQ, plain DDS)</text>
+  <!-- zero copy -->
+  <rect x="40" y="190" width="120" height="44" rx="7" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="58" y="216" font-size="11.5" fill="#23201a">producer</text>
+  <rect x="280" y="176" width="200" height="72" rx="7" fill="#0e5f5b" fill-opacity="0.08" stroke="#0e5f5b" stroke-width="2.5"/>
+  <text x="300" y="206" font-size="11.5" fill="#0e5f5b">shared-memory chunk</text>
+  <text x="300" y="224" font-size="11" fill="#4d463a">written once, in place</text>
+  <rect x="620" y="190" width="110" height="44" rx="7" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="634" y="216" font-size="11.5" fill="#23201a">consumer</text>
+  <line x1="160" y1="212" x2="276" y2="212" stroke="#0e5f5b" stroke-width="2"/>
+  <polygon points="276,212 266,207 266,217" fill="#0e5f5b"/>
+  <text x="176" y="202" font-size="10.5" fill="#0e5f5b">loan, write</text>
+  <line x1="480" y1="212" x2="616" y2="212" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="6 4"/>
+  <polygon points="616,212 606,207 606,217" fill="#0e5f5b"/>
+  <text x="500" y="202" font-size="10.5" fill="#0e5f5b">pointer only</text>
+  <text x="40" y="286" font-size="11.5" fill="#4d463a">iceoryx path: ~µs, independent of message size — the point cloud never moves</text>
+</svg>
+</div>
+<figcaption>Fig 6.3: the socket pipeline pays per byte per subscriber; the zero-copy pipeline pays once to write and never again. At camera/lidar data rates this is the difference between an idle core and a saturated one.</figcaption>
+</figure>
+<table>
+  <tr><th></th><th>Iceoryx</th><th>ZeroMQ</th><th>eProsima Fast-DDS</th></tr>
+  <tr><td>Model</td><td>zero-copy shared-memory pub/sub</td><td>message sockets (pub/sub, req/rep, push/pull)</td><td>full DDS: discovery, QoS, typed topics</td></tr>
+  <tr><td>Copies (same host)</td><td>0 — pointer handoff</td><td>2+ per hop</td><td>1–2 (shared-mem transport) or socket path</td></tr>
+  <tr><td>Cross-machine</td><td>no (pair with a gateway)</td><td>yes, natively</td><td>yes, UDP with discovery</td></tr>
+  <tr><td>QoS / reliability</td><td>minimal by design</td><td>DIY on top of patterns</td><td>rich: deadlines, liveliness, history, durability</td></tr>
+  <tr><td>Reach for it when</td><td>point clouds/images between processes on one box</td><td>simple glue, tools, cross-language plumbing</td><td>multi-machine systems needing contracts and QoS</td></tr>
+</table>
+<p>The pragmatic architecture stacks them: <strong>iceoryx</strong> for the fat intra-host pipes (lidar → odometry → mapping), <strong>Fast-DDS</strong> or <strong>ZeroMQ</strong> for the thin inter-host ones (telemetry, commands, fleet traffic) — which is, not coincidentally, roughly what ROS 2 itself assembles from these very libraries. Using them directly is not heresy; it is the same parts without the framework contract.</p>
+
+<h2><span class="sec-no">6.7</span>Threads, Queues, and the Real-Time Contract</h2>
+<p>Inside each process, the same discipline in miniature. The sensor pipeline pattern is <strong>one thread per blocking source</strong>, handing off through bounded single-producer single-consumer queues, with an explicit <em>drop policy</em> — a localization consumer wants the <em>latest</em> scan, not a growing backlog of stale ones (queue depth 1, overwrite), while a logging consumer wants <em>every</em> scan (deep queue, backpressure). Declaring which consumer is which, per edge, is the design act; middleware QoS is just this decision given names. The hot path — the loop between sensor arrival and actuator command — additionally obeys the real-time contract: no heap allocation, no unbounded locks, no printf; preallocate everything, pin the control thread to a core with elevated priority, and measure the <em>tail</em> latency, not the mean, because the 99.9th percentile is the one that misses the control deadline into a wall.</p>
+<div class="analogy">A sensor pipeline is a kitchen at rush hour. The grill cook (driver thread) never leaves the grill to garnish plates; orders move on a rail (queues) that holds only so many tickets; and when the rail overflows, the kitchen has a <em>rule</em> about which tickets die — it does not simply slow the grill. Every dropped-frame bug in robotics is a kitchen where nobody wrote down that rule.</div>
+
+<div class="setup">
+<p><strong>Setup B: measure your IPC — one evening.</strong> Goal: put numbers on Fig 6.3 with ZeroMQ — round-trip latency for small messages and throughput for sensor-sized ones — and see exactly the size-dependence that zero-copy designs delete. Prereq: <code>sudo apt install libzmq3-dev</code>. Save as <code>ipcbench.cc</code>, compile with <code>g++ -O2 -std=c++17 ipcbench.cc -o ipcbench -lzmq</code>:</p>
+<pre><code class="language-cpp">// ipcbench.cc — ZeroMQ over ipc://: REQ/REP latency + PUSH/PULL throughput.
+#include &lt;zmq.h&gt;
+#include &lt;chrono&gt;
+#include &lt;cstring&gt;
+#include &lt;iostream&gt;
+#include &lt;sys/wait.h&gt;
+#include &lt;unistd.h&gt;
+#include &lt;vector&gt;
+
+using clk = std::chrono::steady_clock;
+double ms_since(clk::time_point t0) {
+  return std::chrono::duration&lt;double, std::milli&gt;(clk::now() - t0).count();
+}
+
+int main() {
+  const int PINGS = 2000;
+  const size_t MSG = 2 * 1024 * 1024;          // a 2 MB "point cloud"
+  const int CLOUDS = 500;
+
+  if (fork() == 0) {                            // ---- child: echo + sink ----
+    void* ctx = zmq_ctx_new();
+    void* rep = zmq_socket(ctx, ZMQ_REP);
+    zmq_bind(rep, "ipc:///tmp/lat.ipc");
+    char buf[64];
+    for (int i = 0; i &lt; PINGS; ++i) {           // echo pings back
+      zmq_recv(rep, buf, sizeof buf, 0);
+      zmq_send(rep, buf, 8, 0);
+    }
+    void* pull = zmq_socket(ctx, ZMQ_PULL);
+    zmq_bind(pull, "ipc:///tmp/thr.ipc");
+    std::vector&lt;char&gt; big(MSG);
+    for (int i = 0; i &lt; CLOUDS; ++i)            // swallow the clouds
+      zmq_recv(pull, big.data(), MSG, 0);
+    zmq_close(rep); zmq_close(pull); zmq_ctx_term(ctx);
+    _exit(0);
+  }
+
+  void* ctx = zmq_ctx_new();                    // ---- parent: measure ----
+  void* req = zmq_socket(ctx, ZMQ_REQ);
+  usleep(200000);                               // let the child bind
+  zmq_connect(req, "ipc:///tmp/lat.ipc");
+  char buf[64] = "ping";
+  auto t0 = clk::now();
+  for (int i = 0; i &lt; PINGS; ++i) {
+    zmq_send(req, buf, 8, 0);
+    zmq_recv(req, buf, sizeof buf, 0);
+  }
+  std::cout &lt;&lt; "REQ/REP round trip: "
+            &lt;&lt; ms_since(t0) * 1000.0 / PINGS &lt;&lt; " µs avg\n";
+
+  void* push = zmq_socket(ctx, ZMQ_PUSH);
+  zmq_connect(push, "ipc:///tmp/thr.ipc");
+  std::vector&lt;char&gt; cloud(MSG, 42);
+  t0 = clk::now();
+  for (int i = 0; i &lt; CLOUDS; ++i)
+    zmq_send(push, cloud.data(), MSG, 0);
+  const double s = ms_since(t0) / 1000.0;
+  std::cout &lt;&lt; "PUSH/PULL 2 MB × " &lt;&lt; CLOUDS &lt;&lt; ": "
+            &lt;&lt; (MSG / 1048576.0) * CLOUDS / s &lt;&lt; " MB/s  ("
+            &lt;&lt; CLOUDS / s &lt;&lt; " clouds/s)\n";
+  zmq_close(req); zmq_close(push); zmq_ctx_term(ctx);
+  wait(nullptr);
+}</code></pre>
+<p>Expected on a modern Linux box: round trips in the tens of microseconds (good!), and throughput of a few GB/s — sounding generous until you divide: a 2 MB cloud costs on the order of a millisecond <em>per hop per subscriber</em>, so three subscribers and two pipeline stages of a 20 Hz lidar are already burning double-digit percent of a core just <em>moving bytes that never change</em>. That line of arithmetic is the entire case for iceoryx&rsquo;s pointer handoff, whose cost for the same cloud is the same handful of microseconds as for an 8-byte ping.</p>
+<p>Sanity checks: (1) rerun the throughput leg with <code>MSG = 64</code> — clouds/s explodes, MB/s collapses: you were never bandwidth-limited, you were per-message-overhead limited; both regimes matter. (2) Switch the transport strings to <code>tcp://127.0.0.1:5555</code>-style and watch latency multiply — loopback TCP is not ipc. (3) Add a second PULL subscriber and watch producer-side cost double — the per-subscriber scaling in Fig 6.3&rsquo;s caption, measured.</p>
+</div>
+
+<h2><span class="sec-no">6.8</span>Reading List</h2>
+<a class="paper" href="https://ieeexplore.ieee.org/document/6696514"><span class="p-title">Unified Temporal and Spatial Calibration for Multi-Sensor Systems</span><span class="p-meta">Furgale, Rehder &amp; Siegwart · IROS 2013</span><span class="p-why">The Kalibr paper: continuous-time B-spline batch estimation that recovers extrinsics and time offsets in one problem.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/7487628"><span class="p-title">Extending Kalibr: Calibrating the Extrinsics of Multiple IMUs and of Individual Axes</span><span class="p-meta">Rehder, Nikolic, Schneider, Hinzmann &amp; Siegwart · ICRA 2016</span><span class="p-why">IMU intrinsics (scale, misalignment, g-sensitivity) join the same framework — the paper behind Kalibr&rsquo;s IMU model zoo.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/4404126"><span class="p-title">Analysis and Modeling of Inertial Sensors Using Allan Variance</span><span class="p-meta">El-Sheimy, Hou &amp; Niu · IEEE Trans. Instrumentation &amp; Measurement 2008</span><span class="p-why">Section 6.3 with the full noise taxonomy and the slope-reading recipes Setup A implements.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/888718"><span class="p-title">A Flexible New Technique for Camera Calibration</span><span class="p-meta">Zhang · IEEE TPAMI 2000</span><span class="p-why">The planar-target calibration everyone uses: why a handful of tilted board views pin down K and distortion.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/34770"><span class="p-title">A New Technique for Fully Autonomous and Efficient 3D Robotics Hand/Eye Calibration</span><span class="p-meta">Tsai &amp; Lenz · IEEE Trans. Robotics and Automation 1989</span><span class="p-why">AX = XB, solved — the closed form under every extrinsic calibration that pairs two motion streams.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/5979561"><span class="p-title">AprilTag: A Robust and Flexible Visual Fiducial System</span><span class="p-meta">Olson · ICRA 2011</span><span class="p-why">Why tag grids displaced checkerboards: unambiguous identity per tag, robust decoding, partial-view tolerance.</span></a>
+<a class="paper" href="https://github.com/ethz-asl/lidar_align"><span class="p-title">lidar_align: LiDAR–Odometry Extrinsic Calibration</span><span class="p-meta">ETH Zurich ASL · open-source tool</span><span class="p-why">The crispness principle in tool form: the right extrinsic is the one that makes aggregated walls sharp.</span></a>
+<a class="paper" href="https://iceoryx.io/"><span class="p-title">Eclipse iceoryx: True Zero-Copy Inter-Process Communication</span><span class="p-meta">Eclipse Foundation · docs &amp; design articles</span><span class="p-why">Loaned chunks, pointer publishing, and why latency stops depending on payload size.</span></a>
+<a class="paper" href="https://zguide.zeromq.org/"><span class="p-title">The ZeroMQ Guide (zguide)</span><span class="p-meta">Hintjens · zeromq.org</span><span class="p-why">The rare middleware manual that is also a systems-design education. Patterns, failure modes, and honest trade-offs.</span></a>
+<a class="paper" href="https://fast-dds.docs.eprosima.com/"><span class="p-title">eProsima Fast DDS Documentation</span><span class="p-meta">eProsima · docs</span><span class="p-why">The full DDS machine — discovery, QoS vocabulary, shared-memory transport — usable entirely without ROS.</span></a>
+
+<h2><span class="sec-no">6.9</span>Interview Questions</h2>
+<details class="qa"><summary>A 5 ms camera–IMU time offset: walk through what it does to a VIO system.</summary><div class="a"><p>Every camera measurement is matched against the wrong slice of IMU history. The error scales with motion: at 1 rad/s yaw, 5 ms is ~0.29° of attitude disagreement injected per frame — bigger than the whole extrinsic error budget — while at rest it is invisible, which is why bench tests pass and field tests wobble. Symptoms: soft, lagging fusion; innovations correlated with angular velocity (the fingerprint); scale and bias estimates absorbing the residual and drifting. Fixes in order of rigor: hardware trigger (offset zero by construction), estimate the offset in calibration (Kalibr) or online (VINS-Fusion), and always timestamp at exposure — mid-exposure — in the driver, never at message arrival.</p></div></details>
+<details class="qa"><summary>How do you read an IMU&rsquo;s two key noise parameters off an Allan deviation plot?</summary><div class="a"><p>Record the stationary sensor for hours, plot Allan deviation σ(τ) log-log. The descending slope −½ arm is white noise: read N directly at τ = 1 s (σ = N/√τ). The flat floor is bias instability — the best the bias will ever hold. The rising slope +½ arm is rate random walk: read K via σ(τ)·√(3/τ) on that arm. N and K per axis become the process-noise entries of any Phase 2 filter. Practical gotchas: the long-τ arm is statistically starved (few windows), so short logs mis-estimate K badly, and temperature drift adds humps that a naive slope-fit will misread.</p></div></details>
+<details class="qa"><summary>Why does camera–IMU extrinsic calibration require "excitation", and what happens without it?</summary><div class="a"><p>The extrinsic translation only enters the measurements through rotation: the lever-arm effect makes the camera translate p = ω × r when the rig rotates, so with no angular velocity the translation is multiplied by zero — unobservable. A calibration log without rich rotation about all three axes leaves that direction of the parameter space unconstrained; the solver still returns numbers (optimizers always do), with a beautiful reprojection error and a translation that is fiction along the unexcited axes. The same principle generalizes: hand-eye needs two non-parallel rotation axes, mono-VIO scale needs acceleration excitation. Always check the estimator&rsquo;s reported covariance, not just its residual.</p></div></details>
+<details class="qa"><summary>What is the hand-eye calibration problem, and where does it appear outside arms?</summary><div class="a"><p>Given paired motion streams from two rigidly connected sensors — A<sub>i</sub> from one, B<sub>i</sub> from the other — find the fixed transform X with A<sub>i</sub>X = XB<sub>i</sub>. Classically it is a camera on a robot arm (arm kinematics vs camera-to-target motion), but it is equally lidar-odometry vs wheel-odometry, camera vs IMU integration, any pair that can each estimate its own motion. Standard solution: decouple — solve the rotation part first (a linear system in quaternion or rotation-vector form over motion pairs), then translation by linear least squares given the rotation. It needs at least two motions with non-parallel rotation axes, and it is the mental model behind every "target-free" extrinsic tool.</p></div></details>
+<details class="qa"><summary>How does iceoryx achieve zero-copy, and what does the design give up?</summary><div class="a"><p>All payloads live in a shared-memory pool managed by a daemon. A publisher <em>loans</em> a chunk, constructs the message in place, and "publishing" pushes only the chunk pointer onto each subscriber&rsquo;s lock-free queue; subscribers read the same physical bytes and release the chunk, with reference counting reclaiming it. No serialization, no kernel traversal, no per-byte cost — latency is microseconds regardless of payload. The trade-offs: same-host only (network needs a gateway); messages should be fixed-size-friendly and trivially relocatable (no internal pointers — hence flat types); subscribers can hold chunks hostage (pool exhaustion is a real failure mode); and minimal QoS by design. It is a scalpel for fat intra-host pipes, not a general middleware.</p></div></details>
+<details class="qa"><summary>Design the message-passing architecture for lidar → odometry → SLAM → planner without ROS.</summary><div class="a"><p>Fat, latency-critical, same-host edges get iceoryx: driver publishes point clouds into loaned chunks; odometry and SLAM subscribe zero-copy; map and ESDF layers likewise. Thin or cross-host edges get Fast-DDS (typed topics, discovery, QoS: e.g. RELIABLE + short history for commands, BEST_EFFORT + depth-1 for telemetry) or ZeroMQ if the system is small and you prefer explicit plumbing. Per-edge drop policy declared up front: depth-1 overwrite for anything a consumer only wants fresh (scans into the planner), bounded FIFO with backpressure for the logger. Hot path (odometry → controller) additionally in-process: one SPSC queue, preallocated messages, pinned threads. And one rule that outlives any middleware: every message carries the sensor timestamp from the driver, never the arrival time.</p></div></details>
+<details class="qa"><summary>Your fusion residuals are fine on the bench but degrade in the field over weeks. What&rsquo;s your differential diagnosis?</summary><div class="a"><p>Calibration is a failure mode with a schedule, so hunt the drifting rung. Innovation-vs-motion correlations: with angular rate → time sync (a cable now routed near a switching regulator, PTP degraded); with orientation → extrinsics (mount flexed, robot took a hit — re-run lidar-align style crispness checks); with temperature → IMU intrinsics (biases outside the calibrated envelope, re-run Allan/thermal characterization) or camera focus creep. Also the boring candidates: a firmware update changed driver timestamping; a new sensor batch with different latency. Process fix, not just point fix: scheduled recalibration, continuous innovation monitoring with alerts, and calibration values under version control with dates — "when was this number measured" as an operational metric.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

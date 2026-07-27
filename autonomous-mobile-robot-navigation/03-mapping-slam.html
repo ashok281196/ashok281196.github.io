@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phase 3 · Mapping &amp; SLAM Systems · Autonomous Mobile Robot Navigation</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">03</div>
+  <div class="chapter-kicker">Phase Three · Remembering the World Well Enough to Correct It</div>
+  <h1>Mapping &amp; SLAM Systems</h1>
+  <p class="chapter-sub">Phase 2 ended with drift honestly quantified but still growing. This phase builds the memory — grids, octrees, distance fields — and the correction machinery — loop closure, pose graphs — that cap it. Then it tours the systems that package the whole thing.</p>
+</header>
+
+<h2><span class="sec-no">3.1</span>From Odometry to SLAM</h2>
+<p>Odometry answers "how did I move"; a map answers "what is here"; <strong>SLAM</strong> — simultaneous localization and mapping — is the admission that on unknown ground each requires the other. You cannot place sensor readings into a map without knowing the pose that took them; you cannot correct the pose against the map until the map exists. Every SLAM system breaks that circle the same way: trust odometry locally (it is excellent over ten metres), build the map incrementally from it, and when the robot <em>recognizes a previously mapped place</em>, use the reunion to repair everything at once.</p>
+<p>Architecturally the field converged on a two-part design. The <strong>front-end</strong> is perception: Phase 2&rsquo;s odometry, plus the machinery that decides "this scan matches that old place" (a Phase 4 topic previewed here as loop closure detection). The <strong>back-end</strong> is inference: an optimization over the whole trajectory that reconciles what the front-end reported. The split matters because the two halves fail differently — front-ends lie occasionally (a wrong match), back-ends amplify whatever they are fed — and because the back-end is, to the letter, the Phase 1 loop.</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 340" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">THE ANATOMY OF A SLAM SYSTEM</text>
+  <!-- row 1 -->
+  <rect x="40" y="60" width="150" height="52" rx="8" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="58" y="82" font-size="12" fill="#23201a">sensors</text>
+  <text x="58" y="98" font-size="11" fill="#4d463a">10–1000 Hz</text>
+  <rect x="250" y="60" width="190" height="52" rx="8" fill="#faf7f0" stroke="#b3401e" stroke-width="2.5"/>
+  <text x="268" y="82" font-size="12" fill="#b3401e">odometry front-end</text>
+  <text x="268" y="98" font-size="11" fill="#4d463a">Phase 2: LIO / VIO / wheels</text>
+  <rect x="500" y="60" width="220" height="52" rx="8" fill="#0e5f5b" fill-opacity="0.06" stroke="#0e5f5b" stroke-width="2.5"/>
+  <text x="518" y="82" font-size="12" fill="#0e5f5b">submap / keyframe builder</text>
+  <text x="518" y="98" font-size="11" fill="#4d463a">the growing map</text>
+  <!-- row 2 -->
+  <rect x="250" y="230" width="190" height="56" rx="8" fill="#faf7f0" stroke="#a97b1f" stroke-width="2.5"/>
+  <text x="268" y="252" font-size="12" fill="#a97b1f">loop detection</text>
+  <text x="268" y="270" font-size="11" fill="#4d463a">place recognition (Phase 4)</text>
+  <rect x="500" y="230" width="220" height="56" rx="8" fill="#faf7f0" stroke="#23201a" stroke-width="2.5"/>
+  <text x="518" y="252" font-size="12" fill="#23201a">pose-graph back-end</text>
+  <text x="518" y="270" font-size="11" fill="#4d463a">sparse LM (Phase 1, verbatim)</text>
+  <!-- arrows -->
+  <line x1="190" y1="86" x2="246" y2="86" stroke="#23201a" stroke-width="2"/>
+  <polygon points="246,86 236,81 236,91" fill="#23201a"/>
+  <line x1="440" y1="86" x2="496" y2="86" stroke="#b3401e" stroke-width="2"/>
+  <polygon points="496,86 486,81 486,91" fill="#b3401e"/>
+  <text x="446" y="76" font-size="10.5" fill="#b3401e">poses</text>
+  <line x1="560" y1="112" x2="360" y2="226" stroke="#0e5f5b" stroke-width="2" stroke-dasharray="6 4"/>
+  <polygon points="360,226 371,222 366,214" fill="#0e5f5b"/>
+  <text x="404" y="168" font-size="10.5" fill="#0e5f5b">new + old submaps</text>
+  <line x1="440" y1="258" x2="496" y2="258" stroke="#a97b1f" stroke-width="2"/>
+  <polygon points="496,258 486,253 486,263" fill="#a97b1f"/>
+  <text x="444" y="248" font-size="10.5" fill="#a97b1f">constraints</text>
+  <path d="M 640 230 Q 700 160 636 116" fill="none" stroke="#23201a" stroke-width="2" stroke-dasharray="6 4"/>
+  <polygon points="636,116 641,127 648,119" fill="#23201a"/>
+  <text x="672" y="176" font-size="10.5" fill="#23201a">corrected</text>
+  <text x="672" y="190" font-size="10.5" fill="#23201a">poses</text>
+</svg>
+</div>
+<figcaption>Fig 3.1: the standard SLAM split. The front-end (odometry + loop detection) produces poses and constraints; the back-end optimizes the whole trajectory; corrected poses re-anchor the map. Front-ends lie occasionally, back-ends believe everything — section 3.6 is about managing that marriage.</figcaption>
+</figure>
+<dl class="jargon">
+  <dt>Full vs online SLAM</dt><dd>Estimating the entire trajectory plus map (full, what graph back-ends do) versus only the current pose plus map (online, what filters did). Modern systems are full-SLAM with real-time incremental solvers.</dd>
+  <dt>Submap / keyframe</dt><dd>The unit of map building: a small locally-consistent chunk (Cartographer&rsquo;s submaps) or a selected sensor frame with pose (ORB-SLAM&rsquo;s keyframes). Local consistency comes from odometry; global consistency from the graph.</dd>
+  <dt>Loop closure</dt><dd>Recognizing a previously visited place and computing the relative pose to it — the only measurement that ties "now" to "long ago", and therefore the only cure for drift.</dd>
+  <dt>Front-end / back-end</dt><dd>Perception (make constraints) versus inference (optimize over them). The dividing line of every architecture diagram in this field.</dd>
+</dl>
+
+<h2><span class="sec-no">3.2</span>Occupancy Grids: The Workhorse Memory</h2>
+<p>The oldest map representation is still the one your planner probably eats: carve space into cells, store per cell the probability it is occupied. Each lidar ray is evidence — the cells it traverses are probably free, the cell it ends in is probably occupied — and per-cell Bayes updates have a famous closed form once you work in <strong>log-odds</strong>, where fusing evidence becomes addition:</p>
+<pre><code class="language-text">odds = p/(1−p),   l = log(odds)                l₀ = prior (usually 0)
+
+per ray, per cell:   l ← l + l_sensor − l₀     additive! clamp to [l_min, l_max]
+
+  cells along the ray  →  l_free = log(0.3/0.7) ≈ −0.85     "probably empty"
+  cell at the endpoint →  l_occ  = log(0.7/0.3) ≈ +0.85     "probably a hit"
+
+recover probability:  p = 1 − 1/(1 + eˡ)
+cells never touched stay at p = 0.5 — unknown, and "unknown" is real
+information a planner must respect (Phase 5's frontier exploration lives on it)</code></pre>
+<p>Why log-odds instead of raw probabilities? Multiplying probabilities underflows and needs renormalizing; adding bounded integers is fast, stable, and trivially undoable. The clamp matters too: without bounds, a cell seen free ten thousand times takes ten thousand hits of evidence to flip when a pallet is parked there — clamping keeps the map <em>adaptable</em>. Rays are traced with Bresenham stepping; resolution is the knob that trades fidelity against memory and update cost, and in 2D a few centimetres is cheap. In 3D it is not — which is the next two sections.</p>
+
+<h2><span class="sec-no">3.3</span>Octrees and OctoMap: 3D Without the Memory Bill</h2>
+<p>A dense 3D grid of a warehouse at 5 cm dies fast: 100 m × 50 m × 10 m is <em>400 million cells</em>, nearly all of them air, most never observed. The <strong>octree</strong> fixes this with recursive subdivision: a cube splits into eight children only where the world has detail; huge uniform regions — free space, unknown space — stay as single fat nodes. <a href="https://octomap.github.io/">OctoMap</a> is the standard C++ implementation: probabilistic (each leaf carries the log-odds machinery of 3.2), lossless at the chosen max depth, queryable at any coarser resolution for free (ancestors summarize descendants), and serialized compactly enough to ship over a network. Setup B below builds one from simulated rays and measures the savings.</p>
+<div class="analogy">An octree stores space the way you describe your apartment: "the bedroom is empty" is one sentence, not a cubic-centimetre inventory of empty positions. Only the bookshelf gets described shelf by shelf. Resolution where the world earns it, brevity everywhere else.</div>
+
+<h2><span class="sec-no">3.4</span>TSDF and ESDF: Maps Made of Distances (Voxblox, NVBlox)</h2>
+<p>Occupancy answers "is this cell full?" — a question about cells. Planners and surface reconstruction keep asking better questions: "how far is the nearest obstacle?" and "where exactly is the surface?". <strong>Signed distance fields</strong> answer both natively. Each voxel stores its distance to the nearest surface, signed: positive in free space, negative inside objects; the surface is the <strong>zero crossing</strong>, recoverable at sub-voxel precision. The <strong>truncated</strong> SDF (TSDF) only maintains this within a band ±τ around surfaces (distance far from walls is expensive and useless for reconstruction), and fuses observations with a weighted running average that <em>averages away sensor noise</em> instead of just voting like occupancy does:</p>
+<pre><code class="language-text">per observed ray/pixel, for voxels near the endpoint:
+  d  = depth_measured − depth_of_voxel_along_ray       signed: + in front of wall
+  d  ← clamp(d, −τ, +τ)                                the truncation band
+
+fuse (weighted running average — this is why TSDF surfaces come out smooth):
+  D(v) ← ( W(v)·D(v) + w·d ) / ( W(v) + w )
+  W(v) ← W(v) + w
+
+surface  = zero crossing of D  →  marching cubes  →  mesh
+ESDF     = untruncated distance field, propagated outward from the TSDF —
+           d(x) and ∇d(x) are exactly the collision cost and gradient
+           Phase 5's trajectory optimizers want</code></pre>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 320" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">A TSDF ALONG ONE RAY</text>
+  <!-- value axis labels -->
+  <line x1="60" y1="110" x2="710" y2="110" stroke="#4d463a" stroke-width="1" stroke-dasharray="5 5"/>
+  <text x="26" y="114" font-size="12" fill="#4d463a">+τ</text>
+  <line x1="60" y1="230" x2="710" y2="230" stroke="#4d463a" stroke-width="1" stroke-dasharray="5 5"/>
+  <text x="26" y="234" font-size="12" fill="#4d463a">−τ</text>
+  <line x1="60" y1="170" x2="710" y2="170" stroke="#d8cdb4" stroke-width="1.5"/>
+  <text x="34" y="174" font-size="12" fill="#4d463a">0</text>
+  <!-- sensor + ray -->
+  <rect x="66" y="252" width="18" height="18" rx="3" fill="#faf7f0" stroke="#23201a" stroke-width="2"/>
+  <text x="52" y="292" font-size="12" fill="#23201a">sensor</text>
+  <line x1="90" y1="261" x2="490" y2="261" stroke="#23201a" stroke-width="1.5"/>
+  <polygon points="490,261 480,256 480,266" fill="#23201a"/>
+  <text x="240" y="252" font-size="11" fill="#4d463a">measured ray</text>
+  <!-- wall -->
+  <line x1="500" y1="80" x2="500" y2="280" stroke="#23201a" stroke-width="5"/>
+  <text x="514" y="286" font-size="12" fill="#23201a">wall (true surface)</text>
+  <!-- TSDF curve -->
+  <polyline points="60,110 430,110 500,170 570,230" fill="none" stroke="#b3401e" stroke-width="3"/>
+  <polyline points="570,230 660,230" fill="none" stroke="#b3401e" stroke-width="2.5" stroke-dasharray="3 5"/>
+  <text x="150" y="98" font-size="12" fill="#b3401e">D = +τ (free, far from surface)</text>
+  <text x="524" y="246" font-size="11" fill="#b3401e">unobserved: behind the wall</text>
+  <!-- zero crossing -->
+  <circle cx="500" cy="170" r="7" fill="#a97b1f"/>
+  <text x="368" y="152" font-size="12" fill="#a97b1f">D = 0 → surface</text>
+</svg>
+</div>
+<figcaption>Fig 3.2: the TSDF stores clamped signed distance in a band around the surface. Averaged over many noisy rays, the zero crossing localizes the wall at sub-voxel precision — the reason TSDF meshes look smooth where occupancy grids look like sugar cubes.</figcaption>
+</figure>
+<p><a href="https://github.com/ethz-asl/voxblox">Voxblox</a> (ETH Zurich) made this practical on CPUs for planning: projective TSDF integration, then a wavefront that propagates the TSDF band outward into a full <strong>ESDF</strong>, incrementally, as the map grows — built explicitly so that Phase 5&rsquo;s trajectory optimizers could query distance-and-gradient in microseconds. <a href="https://github.com/nvidia-isaac/nvblox">NVBlox</a> is the same idea rebuilt for GPUs — TSDF, color, ESDF layers integrated in CUDA, order-of-magnitude faster, with a decay mechanism for dynamic scenes — usable as a plain C++/CUDA library. The representation menu, summarized:</p>
+<table>
+  <tr><th>Representation</th><th>Cell stores</th><th>Native query</th><th>Shines at</th><th>Library</th></tr>
+  <tr><td>Occupancy grid (2D)</td><td>P(occupied), log-odds</td><td>is (x,y) blocked?</td><td>2D planning, cheap updates</td><td>every 2D SLAM stack</td></tr>
+  <tr><td>Octree (3D)</td><td>log-odds, hierarchical</td><td>occupancy at any resolution</td><td>big sparse 3D worlds, memory</td><td>OctoMap</td></tr>
+  <tr><td>TSDF</td><td>clamped signed distance + weight</td><td>where is the surface?</td><td>smooth reconstruction, RGB-D fusion</td><td>Voxblox, NVBlox</td></tr>
+  <tr><td>ESDF</td><td>full distance (+ gradient)</td><td>how far is the nearest obstacle?</td><td>trajectory optimization (Phase 5)</td><td>Voxblox, NVBlox</td></tr>
+  <tr><td>Point cloud + kd-tree</td><td>raw points</td><td>nearest neighbors</td><td>registration (Phase 2), LIO maps</td><td>ikd-tree, nanoflann</td></tr>
+</table>
+<div class="keypoint">Pick the map by the query, not the sensor. Registration wants nearest points, planners want distances and gradients, reconstruction wants zero crossings, coverage logic wants explicit <em>unknown</em>. Production stacks run two representations side by side and treat that as normal, not as waste.</div>
+
+<h2><span class="sec-no">3.5</span>Loop Closure: The Drift Eraser</h2>
+<p>Everything so far still inherits Phase 2&rsquo;s drift — a map built on drifting poses is a drifting map. The repair comes from one event: the robot re-enters known territory, <em>recognizes</em> it, and measures its pose relative to a place it saw long ago. That single relative measurement — pose 840 to pose 12 — carries information no amount of odometry can: it bounds the error of everything between.</p>
+<p>A loop closure is manufactured in three steps, each owned by a different phase of this book. <strong>Propose</strong>: place recognition (Phase 4&rsquo;s descriptors — DBoW, Scan Context) nominates "current scan resembles old submap k". <strong>Verify &amp; measure</strong>: Phase 2&rsquo;s registration (ICP/NDT, or PnP for cameras) aligns the two, producing the relative transform and — critically — a fitness score. <strong>Gate</strong>: accept only if the alignment is geometrically strong <em>and</em> statistically consistent with current drift estimates (a chi-squared test on the innovation). The gate exists because the downstream optimizer treats every accepted constraint as truth, and one false loop closure folds a building in half.</p>
+<div class="warfield">The failure signature of an accepted false loop: the map was fine, then two parallel corridors became one corridor with doubled walls, like a misregistered photocopy. Recovery is ugly because optimization moved <em>every</em> pose. Defense in depth, in order: make the proposer conservative (Phase 4), demand high registration fitness, gate on chi-squared innovation, wrap loop edges (never odometry) in robust kernels (3.6), and log every accepted closure so you can replay without the guilty one.</div>
+
+<h2><span class="sec-no">3.6</span>Pose Graph Optimization: The Back-End</h2>
+<p>Now assemble the estimation problem. Nodes: the trajectory&rsquo;s poses X<sub>i</sub> (one per submap or keyframe — not every sensor frame). Edges: relative-pose measurements — consecutive ones from odometry, long-range ones from loop closures — each with its information matrix. The residual of an edge asks one question: does the trajectory disagree with what was measured between i and j?</p>
+<pre><code class="language-text">edge (i, j):  measured Z_ij, information Ω_ij = Σ_ij⁻¹
+
+residual:     r_ij(X) = log( Z_ij⁻¹ · X_i⁻¹ · X_j )ᵛ        a tangent vector!
+                        (Phase 1's ⊟: "the step separating prediction from
+                         measurement", so ‖r‖ = 0 means perfect agreement)
+
+solve:        X* = argmin Σ_(i,j)  r_ijᵀ Ω_ij r_ij           + pin X₀ (gauge!)
+
+— sparse damped Gauss-Newton on the manifold: Phase 1.8, line for line.
+robust variant: wrap loop-closure terms in Huber/Cauchy ρ(·) so a false
+edge saturates instead of bending the whole trajectory to appease it.</code></pre>
+<p>Sparsity does the heavy lifting: each edge touches two poses, so the Hessian is nearly empty, and 10,000-pose graphs solve in tens of milliseconds — which is why systems can afford to re-optimize on every accepted loop. The optimization <em>redistributes</em> the accumulated drift around the loop according to each edge&rsquo;s stiffness Ω: confident odometry bends little, sloppy stretches absorb more. Before and after, in one picture:</p>
+<figure>
+<div class="svgwrap">
+<svg viewBox="0 0 760 330" xmlns="http://www.w3.org/2000/svg" font-family="IBM Plex Mono, monospace">
+  <text x="20" y="28" font-size="13" fill="#23201a" letter-spacing="2">ONE LOOP CLOSURE, BEFORE AND AFTER</text>
+  <!-- before panel -->
+  <polyline points="110,285 116,172 236,158 258,272 154,296" fill="none" stroke="#b3401e" stroke-width="3" stroke-dasharray="7 5"/>
+  <circle cx="110" cy="285" r="6" fill="#23201a"/>
+  <circle cx="154" cy="296" r="6" fill="#b3401e"/>
+  <text x="84" y="318" font-size="12" fill="#23201a">start</text>
+  <text x="168" y="316" font-size="12" fill="#b3401e">end (drifted)</text>
+  <line x1="154" y1="296" x2="110" y2="285" stroke="#a97b1f" stroke-width="2.5" stroke-dasharray="3 4"/>
+  <text x="60" y="142" font-size="12" fill="#b3401e">before: raw odometry</text>
+  <text x="188" y="252" font-size="11" fill="#a97b1f">loop closure:</text>
+  <text x="188" y="266" font-size="11" fill="#a97b1f">"end = start"</text>
+  <!-- arrow between panels -->
+  <line x1="330" y1="220" x2="420" y2="220" stroke="#23201a" stroke-width="2.5"/>
+  <polygon points="420,220 409,214 409,226" fill="#23201a"/>
+  <text x="322" y="204" font-size="11.5" fill="#23201a">optimize (LM,</text>
+  <text x="322" y="218" font-size="11.5" fill="#23201a" dy="14">sparse, ms)</text>
+  <!-- after panel -->
+  <polyline points="490,285 490,170 610,170 610,285 490,285" fill="none" stroke="#0e5f5b" stroke-width="3"/>
+  <circle cx="490" cy="285" r="6" fill="#23201a"/>
+  <text x="452" y="148" font-size="12" fill="#0e5f5b">after: error redistributed</text>
+  <text x="452" y="316" font-size="12" fill="#0e5f5b">around the loop</text>
+</svg>
+</div>
+<figcaption>Fig 3.3: odometry drove a square but drifted; the loop closure asserts end = start; optimization spreads the disagreement across all edges in proportion to their uncertainty. The map jumps — section 3.8 deals with who has to survive that jump. Setup A builds exactly this.</figcaption>
+</figure>
+
+<div class="setup">
+<p><strong>Setup A: a pose graph with Ceres + Sophus, plus one lying loop closure — one evening.</strong> Goal: build the five-pose square of Fig 3.3 with drifting odometry, snap it shut with a loop closure, then inject a <em>false</em> loop closure and watch a Huber kernel save the map that a quadratic cost destroys.</p>
+<p>Prereqs: Phase 1&rsquo;s Setups (Eigen, Sophus, Ceres). Save as <code>posegraph2d.cc</code>, reuse Phase 1 Setup B&rsquo;s CMakeLists with the target renamed:</p>
+<pre><code class="language-cpp">// posegraph2d.cc — SE(2) pose graph: drifting square + loop closure(s).
+#include &lt;ceres/ceres.h&gt;
+#include &lt;sophus/se2.hpp&gt;
+#include &lt;sophus/ceres_manifold.hpp&gt;
+#include &lt;iostream&gt;
+#include &lt;vector&gt;
+
+struct EdgeResidual {          // r = log( Z⁻¹ · Xa⁻¹ · Xb )
+  explicit EdgeResidual(const Sophus::SE2d&amp; Z) : Z_inv_(Z.inverse()) {}
+  template &lt;typename T&gt;
+  bool operator()(const T* const a, const T* const b, T* residual) const {
+    const Eigen::Map&lt;const Sophus::SE2&lt;T&gt;&gt; Xa(a), Xb(b);
+    Eigen::Map&lt;Eigen::Matrix&lt;T, 3, 1&gt;&gt; r(residual);
+    r = (Z_inv_.cast&lt;T&gt;() * (Xa.inverse() * Xb)).log();
+    return true;
+  }
+  const Sophus::SE2d Z_inv_;
+};
+
+ceres::CostFunction* make_edge(const Sophus::SE2d&amp; Z) {
+  return new ceres::AutoDiffCostFunction&lt;EdgeResidual, 3,
+      Sophus::SE2d::num_parameters, Sophus::SE2d::num_parameters&gt;(
+      new EdgeResidual(Z));
+}
+
+int main() {
+  const bool inject_false_loop = false;     // experiment 1: flip me
+  const bool use_robust        = false;     // experiment 2: then flip me
+
+  // truth: a 2 m square. odometry measures 2.1 m legs and 84.8° turns.
+  const Sophus::SE2d odom_meas(1.48, Eigen::Vector2d(2.1, 0.0));
+
+  std::vector&lt;Sophus::SE2d&gt; X(5);           // initial guess: integrate odometry
+  for (int i = 1; i &lt; 5; ++i) X[i] = X[i - 1] * odom_meas;
+
+  ceres::Problem problem;
+  for (auto&amp; x : X)
+    problem.AddParameterBlock(x.data(), Sophus::SE2d::num_parameters,
+                              new Sophus::Manifold&lt;Sophus::SE2&gt;());
+  problem.SetParameterBlockConstant(X[0].data());    // pin the gauge!
+
+  for (int i = 0; i &lt; 4; ++i)                        // odometry edges
+    problem.AddResidualBlock(make_edge(odom_meas), nullptr,
+                             X[i].data(), X[i + 1].data());
+
+  // the true loop closure: pose 4 re-observes pose 0 at identity
+  ceres::LossFunction* loss =
+      use_robust ? new ceres::HuberLoss(0.5) : nullptr;
+  problem.AddResidualBlock(make_edge(Sophus::SE2d()), loss,
+                           X[4].data(), X[0].data());
+
+  if (inject_false_loop)                    // a place-recognition mistake:
+    problem.AddResidualBlock(make_edge(Sophus::SE2d()), loss,
+                             X[2].data(), X[0].data());   // "pose2 = pose0" — lie
+
+  ceres::Solver::Options opts;
+  ceres::Solver::Summary summary;
+  ceres::Solve(opts, &amp;problem, &amp;summary);
+
+  for (int i = 0; i &lt; 5; ++i)
+    std::cout &lt;&lt; "x" &lt;&lt; i &lt;&lt; "  (" &lt;&lt; X[i].translation().x() &lt;&lt; ", "
+              &lt;&lt; X[i].translation().y() &lt;&lt; ", "
+              &lt;&lt; X[i].so2().log() * 180.0 / M_PI &lt;&lt; "°)\n";
+  std::cout &lt;&lt; summary.BriefReport() &lt;&lt; "\n";
+}</code></pre>
+<p>Run it three ways. <strong>Baseline</strong> (both flags false): before optimization the integrated odometry leaves pose 4 about 0.6 m and 21° from home; after, the printed poses form a near-perfect 2 m square — the drift got spread around the loop, no edge left more than slightly stretched. <strong>Experiment 1</strong> (<code>inject_false_loop = true</code>): the quadratic cost appeases the lie, and the "square" folds — pose 2 is dragged toward pose 0 and every other pose distorts to compensate. This is the doubled-corridor disaster at toy scale. <strong>Experiment 2</strong> (both true): Huber saturates the false edge&rsquo;s pull; the square survives visibly intact, and the false edge is left carrying a huge residual — which is exactly how you <em>find</em> it in the logs.</p>
+<p>Sanity checks: (1) comment out <code>SetParameterBlockConstant</code> — Ceres reports a rank-deficient Jacobian, or converges to a translated/rotated square: gauge freedom, live (Phase 1.7&rsquo;s warfield). (2) Robustify the <em>odometry</em> edges too and note the fit barely changes here but real systems never do this — odometry is dense and honest, and a kernel that can mute it can mute the truth. (3) Scale the loop edge&rsquo;s residual by 10 (information weighting) and watch it win every argument — covariances are the knobs, exactly as in Phase 1.</p>
+</div>
+
+<h2><span class="sec-no">3.7</span>The Systems: Cartographer, GLIM, ORB-SLAM3</h2>
+<p>Three mature, ROS-free-usable systems cover the classical SLAM design space — one lidar-first with submaps, one LIO-first with a factor graph and a GPU, one camera-first with keyframes:</p>
+<table>
+  <tr><th>System</th><th>Sensors</th><th>Local unit</th><th>Loop closure</th><th>Back-end</th><th>Character</th></tr>
+  <tr><td><a href="https://github.com/cartographer-project/cartographer">Cartographer</a></td><td>2D/3D lidar + IMU (+ odom)</td><td>Submaps: small probability grids, scan-to-submap matching</td><td>Branch-and-bound correlative search over all finished submaps — fast, deterministic, no learned descriptors</td><td>Sparse pose graph (Ceres)</td><td>The standalone C++ core of a decade of service robots; superbly engineered 2D, capable 3D</td></tr>
+  <tr><td><a href="https://github.com/koide3/glim">GLIM</a></td><td>3D lidar + IMU (+ camera)</td><td>Keyframed LIO odometry (GPU voxelized GICP)</td><td>Global matching-cost factors — registration error minimized <em>globally</em>, not just at detected loops</td><td>Factor graph (GTSAM), GPU-accelerated</td><td>The modern research-grade LIO-SLAM: extensible via callbacks, exceptional accuracy, wants a GPU</td></tr>
+  <tr><td><a href="https://github.com/UZ-SLAMLab/ORB_SLAM3">ORB-SLAM3</a></td><td>mono/stereo/RGB-D ± IMU</td><td>Keyframes + covisibility graph of ORB features</td><td>DBoW2 place recognition → geometric verification → Sim(3)/SE(3) correction</td><td>g2o: local BA + pose graph + full BA</td><td>The visual reference: three threads (tracking, local mapping, loop closing) + Atlas multi-map for tracking loss</td></tr>
+</table>
+<p>Two architectural contrasts worth internalizing. <strong>Submaps vs keyframes</strong>: Cartographer trusts odometry for the few seconds a submap takes to build, freezes the submap, and does all global reasoning submap-to-submap; ORB-SLAM keeps individual keyframes live forever and lets bundle adjustment re-shape everything. Submaps bound compute and suit dense grids; keyframes maximize accuracy and suit sparse features. <strong>Detected loops vs global matching</strong>: Cartographer and ORB-SLAM3 close loops when a detector fires; GLIM instead keeps registration-error factors between <em>all</em> overlapping submap pairs and lets the optimizer continuously grind global consistency — more compute, fewer dramatic jumps, no single make-or-break detection.</p>
+<p>And the ecosystem note that keeps this book honest: the Phase 2 LIO systems (FAST-LIO2, DLIO) are <em>odometry</em> — superb, drifting. Add a loop-closure layer and a pose graph over their output and you have built a SLAM system; GLIM is what that looks like done properly, and Phase 4&rsquo;s place recognition is the proposer it needs.</p>
+
+<h2><span class="sec-no">3.8</span>Living With the Jump</h2>
+<p>When a loop closes, thousands of poses move at once — and the map, rebuilt from corrected poses, moves with them. Something on the robot is mid-motion when that happens. The survival pattern is a <strong>two-frame contract</strong>: keep a continuous odometry frame (Phase 2&rsquo;s output, smooth, drifting, what the controller consumes) and a map frame (globally correct, jumping), and express SLAM&rsquo;s output as the slowly-updated <em>correction transform</em> between them. Controllers and local planners live entirely in the odometry frame and never feel a jump; global planners re-plan in the map frame after each correction. The same contract handles map re-rendering: Cartographer re-anchors frozen submaps (cheap — the grid content never changes, only its pose); ORB-SLAM re-projects landmarks; TSDF systems either re-integrate or accept local warping.</p>
+<div class="keypoint">SLAM&rsquo;s output is not "the pose" — it is a correction between a smooth frame and a correct one. Controllers consume the smooth frame, planners the correct one, and the jump lives in the transform where nothing dynamic can trip over it. Getting this contract wrong is how demos drive into walls at the exact moment the map improves.</div>
+
+<div class="setup">
+<p><strong>Setup B: a 3D octree map from simulated scans with OctoMap — one evening.</strong> Goal: build a probabilistic 3D map of a synthetic room with a pillar, query it, serialize it, and measure the octree&rsquo;s memory against the dense grid it replaces.</p>
+<p>Prereqs: <code>sudo apt install liboctomap-dev octovis</code>. Save as <code>room_octree.cc</code>, compile with <code>g++ -O2 -std=c++17 room_octree.cc -o room_octree -loctomap -loctomath</code>:</p>
+<pre><code class="language-cpp">// room_octree.cc — insert simulated lidar rays into an OctoMap octree.
+#include &lt;octomap/OcTree.h&gt;
+#include &lt;cmath&gt;
+#include &lt;iostream&gt;
+
+// room interior: |x|&lt;3, |y|&lt;2, 0&lt;z&lt;2.5. pillar: box 1.2&lt;x&lt;1.8, 0.5&lt;y&lt;1.1.
+double exit_t(double o, double d, double lo, double hi) {   // slab exit
+  if (std::abs(d) &lt; 1e-9) return 1e18;
+  return (d &gt; 0 ? hi - o : lo - o) / d;
+}
+bool pillar_entry(const octomap::point3d&amp; o, const octomap::point3d&amp; d,
+                  double&amp; t_hit) {                          // slab entry test
+  double t0 = 0.0, t1 = 1e18;
+  const double lo[3] = {1.2, 0.5, 0.0}, hi[3] = {1.8, 1.1, 2.5};
+  const double oo[3] = {o.x(), o.y(), o.z()}, dd[3] = {d.x(), d.y(), d.z()};
+  for (int a = 0; a &lt; 3; ++a) {
+    if (std::abs(dd[a]) &lt; 1e-9) { if (oo[a] &lt; lo[a] || oo[a] &gt; hi[a]) return false; continue; }
+    double ta = (lo[a] - oo[a]) / dd[a], tb = (hi[a] - oo[a]) / dd[a];
+    if (ta &gt; tb) std::swap(ta, tb);
+    t0 = std::max(t0, ta); t1 = std::min(t1, tb);
+  }
+  t_hit = t0;  return t0 &lt; t1 &amp;&amp; t0 &gt; 0.0;
+}
+
+int main() {
+  octomap::OcTree tree(0.05);                               // 5 cm leaves
+  const octomap::point3d origin(0.0f, 0.0f, 1.2f);          // sensor pose
+
+  for (int yaw_deg = 0; yaw_deg &lt; 360; ++yaw_deg)           // a full sweep
+    for (int pitch_deg = -30; pitch_deg &lt;= 30; pitch_deg += 2) {
+      const double yaw = yaw_deg * M_PI / 180.0, pit = pitch_deg * M_PI / 180.0;
+      const octomap::point3d dir(std::cos(pit) * std::cos(yaw),
+                                 std::cos(pit) * std::sin(yaw), std::sin(pit));
+      double t = std::min({exit_t(origin.x(), dir.x(), -3.0, 3.0),
+                           exit_t(origin.y(), dir.y(), -2.0, 2.0),
+                           exit_t(origin.z(), dir.z(),  0.0, 2.5)});
+      double tp;                                             // pillar occludes?
+      if (pillar_entry(origin, dir, tp) &amp;&amp; tp &lt; t) t = tp;
+      tree.insertRay(origin, origin + dir * (float)t);       // free + endpoint
+    }
+
+  tree.updateInnerOccupancy();
+  const auto* hit  = tree.search(octomap::point3d(3.0f, 0.0f, 1.2f));  // wall
+  const auto* mid  = tree.search(octomap::point3d(0.5f, 0.0f, 1.2f));  // air
+  const auto* shad = tree.search(octomap::point3d(2.4f, 0.8f, 1.2f));  // shadow
+  std::cout &lt;&lt; "wall   P(occ) = " &lt;&lt; (hit  ? hit-&gt;getOccupancy() : -1) &lt;&lt; "\n"
+            &lt;&lt; "air    P(occ) = " &lt;&lt; (mid  ? mid-&gt;getOccupancy() : -1) &lt;&lt; "\n"
+            &lt;&lt; "shadow          " &lt;&lt; (shad ? "observed?!" : "unknown — correct!") &lt;&lt; "\n";
+  std::cout &lt;&lt; "leaf nodes : " &lt;&lt; tree.getNumLeafNodes() &lt;&lt; "\n"
+            &lt;&lt; "memory     : " &lt;&lt; tree.memoryUsage() / 1024.0 &lt;&lt; " kB  (dense 5 cm grid of this room: "
+            &lt;&lt; 120L * 80 * 50 * 8 / 1024.0 &lt;&lt; " kB)\n";
+  tree.writeBinary("room.bt");                               // octovis room.bt
+}</code></pre>
+<p>Expected: the wall voxel reports P(occ) near 0.97 (many agreeing endpoint hits), the mid-room voxel near 0.03 (many traversals), and the point <em>behind the pillar</em> returns null — never observed, honestly unknown, exactly the tri-state a planner needs. Leaf count lands in the low tens of thousands against 480,000 dense cells, with memory to match — and the gap widens brutally with volume, which is the entire octree argument. Open <code>room.bt</code> in <code>octovis</code> and you can see the pillar&rsquo;s occlusion shadow as a cone of unknown space.</p>
+<p>Sanity checks: (1) drop resolution to 0.01 and watch nodes and time explode cubically — resolution is never free. (2) Insert the same sweep from a second origin at (−2, −1, 1.2) and the shadow fills in: mapping coverage is a <em>viewpoint</em> problem, which is why Phase 5&rsquo;s exploration planners exist. (3) Re-run the sweep 10× and note P(occ) saturates at the clamp — the adaptability bound from 3.2 in action.</p>
+</div>
+
+<h2><span class="sec-no">3.9</span>Reading List</h2>
+<a class="paper" href="https://arxiv.org/abs/1606.05830"><span class="p-title">Past, Present, and Future of Simultaneous Localization and Mapping</span><span class="p-meta">Cadena, Carlone, Carrillo, Latif, Scaramuzza, Neira, Reid &amp; Leonard · IEEE TRO 2016</span><span class="p-why">The field&rsquo;s consensus survey: the front-end/back-end anatomy of 3.1, robustness, and the open problems that became Phases 4–8.</span></a>
+<a class="paper" href="http://www2.informatik.uni-freiburg.de/~stachnis/pdf/grisetti10titsmag.pdf"><span class="p-title">A Tutorial on Graph-Based SLAM</span><span class="p-meta">Grisetti, Kümmerle, Stachniss &amp; Burgard · IEEE ITS Magazine 2010</span><span class="p-why">Section 3.6 expanded into twenty implementable pages. The standard on-ramp to pose graphs.</span></a>
+<a class="paper" href="https://link.springer.com/article/10.1007/s10514-012-9321-0"><span class="p-title">OctoMap: An Efficient Probabilistic 3D Mapping Framework Based on Octrees</span><span class="p-meta">Hornung, Wurm, Bennewitz, Stachniss &amp; Burgard · Autonomous Robots 2013</span><span class="p-why">The paper behind Setup B: probabilistic octrees, clamping, multi-resolution queries, compression.</span></a>
+<a class="paper" href="https://graphics.stanford.edu/papers/volrange/volrange.pdf"><span class="p-title">A Volumetric Method for Building Complex Models from Range Images</span><span class="p-meta">Curless &amp; Levoy · SIGGRAPH 1996</span><span class="p-why">Where the TSDF comes from — thirty years old and section 3.4&rsquo;s equations are still recognizably this paper.</span></a>
+<a class="paper" href="https://arxiv.org/abs/1611.03631"><span class="p-title">Voxblox: Incremental 3D Euclidean Signed Distance Fields for On-Board MAV Planning</span><span class="p-meta">Oleynikova, Taylor, Fehr, Siegwart &amp; Nieto · IROS 2017</span><span class="p-why">TSDF→ESDF propagation built explicitly for planners — the bridge between this phase and Phase 5.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2311.00626"><span class="p-title">nvblox: GPU-Accelerated Incremental Signed Distance Field Mapping</span><span class="p-meta">Millane, Oleynikova, Wirbel, Steiner, Ramasamy, Tingdahl &amp; Siegwart · ICRA 2024</span><span class="p-why">The same layers rebuilt in CUDA, an order of magnitude faster, with decay for dynamic scenes.</span></a>
+<a class="paper" href="https://static.googleusercontent.com/media/research.google.com/en//pubs/archive/45466.pdf"><span class="p-title">Real-Time Loop Closure in 2D LIDAR SLAM</span><span class="p-meta">Hess, Kohler, Rapp &amp; Andor · ICRA 2016</span><span class="p-why">Cartographer&rsquo;s engine: submaps, scan-to-submap matching, and branch-and-bound loop search that made deterministic real-time closure practical.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2407.10344"><span class="p-title">GLIM: 3D Range-Inertial Localization and Mapping with GPU-Accelerated Scan Matching Factors</span><span class="p-meta">Koide, Yokozuka, Oishi &amp; Banno · Robotics and Autonomous Systems 2024</span><span class="p-why">Global matching-cost minimization instead of detected loops — what LIO-SLAM looks like designed in the GPU era.</span></a>
+<a class="paper" href="https://arxiv.org/abs/2007.11898"><span class="p-title">ORB-SLAM3: An Accurate Open-Source Library for Visual, Visual-Inertial and Multi-Map SLAM</span><span class="p-meta">Campos, Elvira, Rodríguez, Montiel &amp; Tardós · IEEE TRO 2021</span><span class="p-why">The keyframe-and-covisibility architecture in full: Atlas, DBoW2 relocalization, and the three-thread design of 3.7.</span></a>
+<a class="paper" href="https://ieeexplore.ieee.org/document/6385590"><span class="p-title">Switchable Constraints for Robust Pose Graph SLAM</span><span class="p-meta">Sünderhauf &amp; Protzel · IROS 2012</span><span class="p-why">Let the optimizer itself disable loop closures it cannot reconcile — the elegant endpoint of Setup A&rsquo;s Huber experiment.</span></a>
+
+<h2><span class="sec-no">3.10</span>Interview Questions</h2>
+<details class="qa"><summary>Why do occupancy grids update in log-odds, and why clamp the values?</summary><div class="a"><p>Bayes-updating a binary cell multiplies odds ratios; in log space that multiplication becomes addition — numerically stable, fast, no renormalization, trivially invertible. Clamping bounds how certain a cell can get, which bounds how much contrary evidence is needed to flip it: an unclamped cell observed free for an hour would need an hour of hits to become occupied, so the map would stop adapting to change. Clamped, it flips after a few consistent observations — staleness is bounded by design.</p></div></details>
+<details class="qa"><summary>Occupancy grid vs TSDF vs ESDF: who wants which, and why?</summary><div class="a"><p>Match the map to the query. Occupancy answers "is this cell blocked/free/unknown" — planners doing collision checks and exploration logic (which needs explicit unknown) want it. TSDF stores where the <em>surface</em> is, with noise averaged out — reconstruction and RGB-D fusion want it, because the zero crossing localizes surfaces at sub-voxel precision. ESDF stores distance-to-nearest-obstacle everywhere, with gradients — trajectory optimizers want it, because d(x) and ∇d(x) are literally the collision cost term and its derivative. Production stacks commonly maintain occupancy (or TSDF) plus a derived ESDF, and that redundancy is the correct design, not waste.</p></div></details>
+<details class="qa"><summary>What exactly does a loop closure buy that more odometry never can?</summary><div class="a"><p>Odometry constraints chain consecutive poses, so error compounds multiplicatively along the chain without bound — more odometry just extends the chain. A loop closure constrains two temporally distant poses directly, converting the open chain into a cycle; the optimizer then redistributes the accumulated drift around the cycle, bounding the error of every pose in it. Information-theoretically it is the only measurement that correlates "now" with "long ago", which is why systems without loop closure (pure LIO/VIO) drift forever no matter how good, and why one loop closure can outweigh minutes of odometry.</p></div></details>
+<details class="qa"><summary>Walk through the defenses against a false loop closure, in order.</summary><div class="a"><p>(1) Conservative proposal: tune place recognition (Phase 4) for precision over recall — a missed loop costs accuracy, a false one costs the map. (2) Geometric verification: require registration (ICP/PnP) to succeed with strong fitness on the candidate pair. (3) Statistical gating: chi-squared test of the proposed constraint against the current graph&rsquo;s uncertainty — a closure teleporting the robot 40 m against 2 m of plausible drift should fail the gate. (4) Robust kernels on loop edges (Huber/Cauchy) or switchable constraints, so an accepted lie saturates instead of folding the map. (5) Auditability: log closures so the map can be rebuilt without any single one. Kernels are the seatbelt, not the driving.</p></div></details>
+<details class="qa"><summary>Cartographer builds submaps; ORB-SLAM keeps keyframes. Why do both designs exist?</summary><div class="a"><p>They resolve the same tension — global optimization can&rsquo;t touch every sensor frame — at different points. Submaps freeze small locally-consistent grids after seconds of odometry and optimize submap poses only: compute is bounded, dense grids ride along free, but intra-submap error is frozen forever. Keyframes keep every selected frame&rsquo;s pose live so bundle adjustment can re-shape everything: maximal accuracy, natural fit for sparse landmarks, but compute grows with map size and dense data doesn&rsquo;t fit the abstraction. Lidar grids favor submaps; sparse visual features favor keyframes — the representation choice drives the architecture.</p></div></details>
+<details class="qa"><summary>A loop closure just moved the whole map 40 cm while the robot was driving a corridor at 2 m/s. What keeps it from hitting the wall?</summary><div class="a"><p>The two-frame contract. The controller tracks its path in the continuous odometry frame, which never jumps — SLAM&rsquo;s correction is expressed as a map→odom transform that absorbs the 40 cm discretely. The local planner&rsquo;s obstacle view (built from recent sensor data in the odometry frame) is also jump-free. What must react is the global layer: the planner re-validates or re-plans the route in the corrected map frame. If instead the controller had been tracking map-frame coordinates directly, the setpoint would have teleported 40 cm sideways mid-corridor — which is precisely the classic failure this contract exists to prevent.</p></div></details>
+<details class="qa"><summary>Why is the pose-graph Hessian sparse, and what would destroy that sparsity?</summary><div class="a"><p>Each edge involves exactly two poses, so the Hessian has nonzero blocks only at (i,i), (j,j), (i,j) pairs that share an edge — a 10,000-pose graph is overwhelmingly zeros, and sparse Cholesky solves it in near-linear practical time. Two things densify it: marginalizing poses out (each removal ties all its neighbors together — the fixed-lag smoother&rsquo;s price), and dense inter-connection like GLIM&rsquo;s all-overlapping-pairs matching factors, which trades sparsity for consistency and pays with a GPU. Elimination ordering matters too: a bad ordering manufactures fill-in during factorization even when the graph itself is sparse.</p></div></details>
+<details class="qa"><summary>Your TSDF mesh looks great but the robot keeps planning paths 3 cm through walls. Where do you look?</summary><div class="a"><p>The mesh is the zero crossing; the planner consumes the ESDF — so look at the gap between them. Usual suspects: truncation distance τ too small relative to voxel size, so the ESDF propagation starts from a band too thin and underestimates distances near surfaces; voxel size too coarse for 3 cm tolerances (sub-voxel surfaces don&rsquo;t survive into a discretized ESDF); weights not yet converged in newly observed areas (young voxels lie); and the classic — the planner queries distance at the robot&rsquo;s <em>center</em> without inflating by its radius. The mesh looking good proves the TSDF; it says nothing about the derived field the planner actually reads.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>
