@@ -71,6 +71,17 @@ const SITE = {
       ]
     },
     {
+      file: 'reading/qna/index.html',
+      title: 'QnA — A Growing Interview Question Bank',
+      desc: 'A running bank of real technical-interview questions across vision, ML, robotics and systems, each answered in full — one question, one file, added whenever a new one is worth keeping.',
+      meta: [
+        { label: 'NEW', hot: true },
+        { label: 'interview prep' },
+        { label: '1 question' },
+        { label: 'updated Jul 2026' }
+      ]
+    },
+    {
       file: 'reading/state-estimation-primer.html',
       title: 'Three Ways to Know Where You Are — EKF, UKF, Factor Graphs',
       desc: 'A state estimation primer in six chapters: the problem before any algorithm, the exact Kalman filter, the EKF’s linearisation, the UKF’s sampled sigma points, factor graphs that keep everything, and the three compared and unified.',
