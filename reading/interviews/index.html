@@ -140,6 +140,19 @@
   }
   .margin-note .mn-label{ font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; font-weight: 600; }
 
+  .warfield{
+    margin: 22px 0; padding: 16px 22px; background: #F5EBE9;
+    border-left: 4px solid var(--accent); border-radius: 0 4px 4px 0;
+    font-size: 15px; color: #5C1D19;
+  }
+  .warfield::before{ content: 'FIELD LESSON / FAILURE TRAP: '; font-family: var(--mono); font-size: 11px; font-weight: 700; display: block; margin-bottom: 6px; letter-spacing: 0.08em; }
+
+  .keypoint{
+    margin: 20px 0; padding: 14px 20px; background: #E8EFF5;
+    border-left: 4px solid var(--navy); border-radius: 0 4px 4px 0;
+    font-size: 15.5px; color: var(--navy); font-weight: 500;
+  }
+
   /* figures & tables */
   figure{ margin: 28px 0; }
   figure svg{ width:100%; height:auto; display:block; background: var(--paper); }
@@ -257,12 +270,34 @@
           <div class="tag-line">rating — near-certain</div>
           <p>Google Cartographer decouples state estimation into a <strong>local real-time front-end</strong> and a <strong>global asynchronous back-end</strong>. The front-end accumulates range scans into local grid submaps using high-frequency Ceres-based non-linear scan matching, while the back-end optimizes a pose graph of submaps using branch-and-bound loop closure verification.</p>
 
+          <div class="keypoint">The fundamental architectural insight of Cartographer is that short-term local drift is small enough to build locally consistent submaps, while global drift over long trajectories is corrected asynchronously by pose graph optimization over finished submap nodes.</div>
+
           <h4>1. Local Front-End (Scan-to-Submap Matching)</h4>
-          <p>Incoming LiDAR scans $P = \{p_i\}_{i=1}^K$ in frame coordinates are mapped into the local submap coordinate frame via rigid transform $T_{\xi} = (R_\theta, t)$. The scan matcher solves a non-linear least squares problem minimizing grid probability residuals:</p>
+          <p>Incoming LiDAR scans $P = \{p_i\}_{i=1}^K$ in frame coordinates are mapped into the local submap coordinate frame via rigid transform $T_{\xi} = (R_\theta, t)$ parameterized by pose $\xi = (p_x, p_y, \theta)$. The scan matcher solves a non-linear least squares problem minimizing grid probability residuals using Ceres Solver:</p>
           <div class="math-block">
             $$\arg\min_{\xi} \sum_{i=1}^{K} \left( 1 - M_{\text{smooth}}(T_{\xi} \cdot p_i) \right)^2 + w_{\text{odom}} \| \xi \ominus \xi_{\text{odom}} \|_{\Sigma_{\text{odom}}}^2$$
           </div>
           <p>where $M_{\text{smooth}}(x)$ is a bicubicly-interpolated grid cell probability value. To prevent local minima divergence during aggressive motion, initial guess $\xi_{\text{odom}}$ is provided by high-rate IMU pre-integration or wheel odometry.</p>
+
+          <pre><code class="language-cpp">// Ceres Cost Function for 2D Scan Matching against Grid Submap
+struct ScanMatcherCostFunction {
+    ScanMatcherCostFunction(const SensorScan& scan, const ProbabilityGrid& grid)
+        : scan_(scan), grid_(grid) {}
+
+    template &lt;typename T&gt;
+    bool operator()(const T* const pose, T* residual) const {
+        T x = pose[0], y = pose[1], theta = pose[2];
+        for (size_t i = 0; i &lt; scan_.points.size(); ++i) {
+            T px = x + cos(theta) * scan_.points[i].x - sin(theta) * scan_.points[i].y;
+            T py = y + sin(theta) * scan_.points[i].x + cos(theta) * scan_.points[i].y;
+            T probability = grid_.GetBicubicProbability(px, py);
+            residual[i] = T(1.0) - probability;
+        }
+        return true;
+    }
+    const SensorScan& scan_;
+    const ProbabilityGrid& grid_;
+};</code></pre>
 
           <h4>2. Submap Generation &amp; Lifecycles</h4>
           <p>A submap starts empty as a probability grid (typically $5\text{cm}$ resolution). Each accepted scan updates grid probability via odds ratio updates $O(x) = M(x)/(1-M(x))$: $O_{\text{new}}(x) = O_{\text{old}}(x) \cdot O_{\text{hit/miss}}$. To ensure computational tractability, a submap transitions to "finished" once $N_{\text{scans}} \approx 100-200$ frames are inserted. At any time, two submaps are concurrently active: one accumulating scans and one being finalized.</p>
@@ -281,16 +316,15 @@
           </div>
           <p>where $\rho(r)$ is the <strong>Huber Robust Loss function</strong> ($\rho(r) = r^2$ for $|r|\le \delta$, $2\delta|r|-\delta^2$ for $|r|&gt;\delta$). The Huber loss down-weights erroneous loop closure constraints (false positives from perceptual aliasing), preventing map destruction.</p>
 
-          <div class="margin-note">
-            <div class="mn-label">Field Trade-off</div>
-            Decreasing submap size improves loop closure frequency and bounds local drift tighter on tight turning maneuvers, but increases pose graph node density, spiking back-end CPU consumption during Ceres optimization cycles.
-          </div>
+          <div class="warfield">A single false loop closure accepted by the back-end will bend the entire global map permanently. Always tune loop closure verification to be ultra-conservative: require geometric verification score &gt; 0.85 and Huber loss cutoff $\delta = 0.1\text{m}$.</div>
         </div>
 
         <div class="section" id="q2">
           <div class="section-head"><span class="section-num">1.2</span><h3>How would you handle GPS-denied return-to-home on a drone?</h3></div>
           <div class="tag-line">rating — near-certain</div>
           <p>A robust GPS-denied Return-To-Home (RTH) architecture relies on <strong>Visual-Inertial Odometry (VIO) keyframe graph navigation</strong> rather than absolute global coordinates. The drone records an active $SE(3)$ pose graph during outbound flight and retraces it during emergency return.</p>
+
+          <div class="keypoint">Do not trust absolute coordinates when GPS drops out. Absolute coordinates compound drift continuously. Retracing a recorded visual keyframe graph guarantees that drift shrinks as the drone approaches its launch origin because it revisits known visual features.</div>
 
           <h4>1. System State Architecture &amp; Data Structure</h4>
           <p>During normal outbound flight (GPS healthy or VIO nominal), the autonomy stack logs a lightweight topological pose graph at $2\text{Hz}$:</p>
@@ -355,6 +389,11 @@ std::vector&lt;KeyframeNode&gt; trajectory_graph;</code></pre>
 
           <h4>4. Why ArduPilot Selected EKF3</h4>
           <p>ArduPilot runs its primary flight controller loop on STM32 microcontrollers (Cortex-M7 at $216\text{MHz}$). EKF3 maintains a 24-state vector (Position, Velocity, Quaternion Attitude, Gyro/Accel Biases, Earth Magnetic Field, Body Magnetic Field, Wind Velocity). The EKF prediction/update cycle completes in $&lt;150\mu\text{s}$, fitting tightly within the $1\text{kHz}$ RTOS task loop. Factor graphs are computationally impossible on bare-metal MCU hardware due to dynamic memory requirements and unbounded optimization execution times.</p>
+
+          <div class="margin-note">
+            <div class="mn-label">ArduPilot EKF3 Layout</div>
+            EKF3 uses multiple parallel EKF instances ("lanes") running on separate IMU hardware sensors. If one IMU vibrates excessively, EKF3 automatically switches to a healthier lane mid-flight.
+          </div>
         </div>
 
         <div class="section" id="q4">
@@ -472,7 +511,7 @@ if (tracked_features_count &lt; MIN_FEATURES_THRESHOLD) {
           <p>When presenting a whiteboard architecture for emergency return under GPS disruption, structure the design into <strong>Perception Degradation Detection</strong>, <strong>Graph-Based Trajectory Inversion</strong>, and <strong>Deterministic Failover Execution</strong>.</p>
 
           <h4>1. Detection &amp; Trigger Logic</h4>
-          <p>GPS degradation is flagged when GPS horizontal dilution of precision $HDOP &gt; 2.5$, satellite count $N_{sat} &lt; 6$, or EKF position innovation variance exceeds $3\sigma$ threshold for $.&gt;500\text{ms}$.</p>
+          <p>GPS degradation is flagged when GPS horizontal dilution of precision $HDOP &gt; 2.5$, satellite count $N_{sat} &lt; 6$, or EKF position innovation variance exceeds $3\sigma$ threshold for $&gt;500\text{ms}$.</p>
 
           <h4>2. Whiteboard Module Breakdown</h4>
           <pre><code class="language-cpp">class EmergencyReturnSystem {
