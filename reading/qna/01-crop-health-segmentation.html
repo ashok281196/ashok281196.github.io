@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Q1 · Crop Health Segmentation · QnA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">01</div>
+  <div class="chapter-kicker">Vision &amp; ML · Q 1</div>
+  <h1>How would you build a segmentation pipeline for crop health monitoring, using camera imagery and the latest models?</h1>
+  <p class="chapter-sub">The sensor and the labeling strategy decide more than the model architecture does. Covers both branches: multispectral fusion with SAM2/DINOv2-assisted labeling, and the RGB-only path when there's no NIR sensor at all.</p>
+</header>
+
+<h2><span class="sec-no">1.1</span>Start From the Sensor, Not the Model</h2>
+<p>A gimbal-mounted RGB camera alone can classify visible necrosis or wilting, but most stress signals &mdash; early water deficit, nutrient deficiency &mdash; show up in the near-infrared before they're visible to the eye. Fly RGB plus a modified NIR or dedicated multispectral sensor at a controlled altitude and ground-sample distance, then compute vegetation indices (NDVI, NDRE) alongside the RGB channels as additional input planes rather than as a separate downstream product.</p>
+
+<h2><span class="sec-no">1.2</span>The Pipeline, Stage by Stage</h2>
+<figure>
+  <div class="svgwrap">
+    <svg viewBox="0 0 640 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Crop health segmentation pipeline">
+      <g font-family="Newsreader" font-size="13">
+        <rect x="40" y="10" width="560" height="36" rx="4" fill="#fdf8ec" stroke="#b3401e" stroke-width="1.4"/><text x="320" y="33" text-anchor="middle">Capture &#8212; RGB + multispectral (NDVI/NDRE), fixed altitude/GSD</text>
+        <rect x="40" y="56" width="560" height="36" rx="4" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.4"/><text x="320" y="79" text-anchor="middle">Calibration &amp; ortho-mosaic &#8212; radiometric + geometric correction, tiling</text>
+        <rect x="40" y="102" width="560" height="36" rx="4" fill="#fdf8ec" stroke="#b3401e" stroke-width="1.4"/><text x="320" y="125" text-anchor="middle">Weak-label bootstrap &#8212; SAM2 zero-shot masks + human-in-loop correction</text>
+        <rect x="40" y="148" width="560" height="36" rx="4" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.4"/><text x="320" y="171" text-anchor="middle">Segmentation model &#8212; RGB+NDVI fusion encoder &#8594; Mask2Former / DeepLabV3+ head</text>
+        <rect x="40" y="194" width="560" height="36" rx="4" fill="#fdf8ec" stroke="#b3401e" stroke-width="1.4"/><text x="320" y="217" text-anchor="middle">Per-plant aggregation &#8212; connected components, health score per plant/row</text>
+        <rect x="40" y="240" width="560" height="36" rx="4" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.4"/><text x="320" y="263" text-anchor="middle">Geo-referenced health map &#8212; reprojected onto field ortho-mosaic, exported to report</text>
+      </g>
+      <path d="M320,46 V56 M320,92 V102 M320,138 V148 M320,184 V194 M320,230 V240" stroke="#4d463a" stroke-width="1.3" marker-end="url(#arrowCV)"/>
+      <defs><marker id="arrowCV" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4d463a"/></marker></defs>
+    </svg>
+  </div>
+  <figcaption>Fig. 1 &mdash; six stages from raw capture to a grower-facing health map; the model is one stage, not the whole pipeline.</figcaption>
+</figure>
+<p>For labeling, don't hand-annotate pixel masks from scratch. <strong>SAM2</strong> gives strong zero-shot object masks from a point or box prompt, and running it over every tile turns "draw a mask" into "confirm or correct a proposed mask" &mdash; a large annotation-cost cut, especially for the long tail of disease presentations a fixed label set won't cover well. Vegetation indices double as a second, free source of weak labels for stress regions, bootstrapping the first training round before any human labeling happens at all.</p>
+
+<h2><span class="sec-no">1.3</span>Choosing a Model</h2>
+<p>The trade-off is label efficiency vs. deployability, and the choice comes down to which one is actually scarce:</p>
+<table>
+  <thead><tr><th>Model</th><th>Type</th><th>Label efficiency</th><th>Compute</th><th>Best fit</th></tr></thead>
+  <tbody>
+    <tr><td>SAM2 (prompted, zero-shot)</td><td>Promptable foundation model</td><td>None needed for proposals</td><td>Heavy ViT-H encoder; usable offline or distilled</td><td>Mask bootstrapping, human-in-loop labeling</td></tr>
+    <tr><td>DINOv2 backbone + linear/seg head</td><td>Self-supervised ViT features</td><td>Very high &mdash; a few hundred labeled tiles</td><td>Backbone heavy, head light</td><td>Early-season pilots where labeled data is scarce</td></tr>
+    <tr><td>Mask2Former / OneFormer</td><td>Transformer decoder, unified seg</td><td>Medium &mdash; needs full mask sets</td><td>Heavy, GPU training and inference</td><td>Unified per-plant instance + semantic masks</td></tr>
+    <tr><td>DeepLabV3+ / U-Net (ConvNeXt/EfficientNet backbone)</td><td>CNN encoder-decoder</td><td>Medium-high &mdash; needs full mask sets</td><td>Light, quantizes cleanly</td><td>Real-time edge inference on Jetson/RB5 during flight</td></tr>
+  </tbody>
+</table>
+<p>In practice this isn't either/or: SAM2 and DINOv2 do the heavy lifting during dataset construction and early-pilot iteration, and the model that actually ships to the field is the lightest one that hits the accuracy bar &mdash; usually a DeepLabV3+ or U-Net variant with an efficient backbone, distilled or fine-tuned from the foundation-model-labeled dataset, because that's the one that fits the edge power and thermal budget for in-field scouting rather than requiring a batch upload for offline processing.</p>
+
+<div class="keypoint">Model architecture is almost never the bottleneck here. Field lighting, growth-stage variation, and occlusion from overlapping canopy dominate error far more than swapping Mask2Former for DeepLabV3+ &mdash; spend the marginal engineering hour on dataset diversity and domain-shift testing (different fields, different weeks, different weather) before spending it on model architecture search.</div>
+
+<h2><span class="sec-no">1.4</span>Turning a Mask Into a Grower-Facing Answer</h2>
+<p>After inference, per-plant or per-row aggregation matters more than raw pixel accuracy for the output that actually gets used: connected-component analysis over the mask, reprojected onto the field ortho-mosaic with GPS metadata, turns a pixel mask into an actionable map &mdash; "these three rows are stressed" &mdash; rather than a segmentation image nobody in the field will look at directly.</p>
+
+<div class="warfield">Hands-on depth here is strongest at the edges of this pipeline &mdash; multi-camera capture, streaming, edge deployment on Jetson-class hardware &mdash; rather than having personally fine-tuned SAM2 or DINOv2 on crop imagery. Say that plainly if asked directly, then pivot to the deployment-constraint reasoning, which is real, shipped experience.</div>
+
+<h2><span class="sec-no">1.5</span>The RGB-Only Branch: No Multispectral Sensor at All</h2>
+<p>Most real deployments &mdash; a phone in a grower's hand, a fixed-wing without a NIR payload &mdash; only have a standard RGB camera. You lose NDVI/NDRE's pre-visible stress signal entirely, but a full pipeline is still viable once it's built specifically around three channels instead of assuming a fourth.</p>
+
+<h3>Camera-specific preprocessing</h3>
+<p>Field lighting, not resolution, is what breaks an RGB-only pipeline first. Convert RGB to HSV or Lab before segmenting &mdash; HSV isolates brightness into its own channel (V), so shadow and harsh-sun variation stop leaking into the hue/saturation signal the vegetation mask actually depends on. Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) to recover detail in overexposed leaf faces and under-canopy shadow without the blown-out look global histogram equalization gives. Pull focal length, aperture and sensor size from EXIF metadata to back out a millimeter-per-pixel scale at the known capture distance &mdash; without it, "lesion covers 40 pixels" has no physical meaning across photos taken from different heights or different phones.</p>
+
+<h3>Two-stage topology: isolate, then localize</h3>
+<figure>
+  <div class="svgwrap">
+    <svg viewBox="0 0 640 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two-stage leaf and lesion segmentation">
+      <rect x="20" y="70" width="160" height="50" rx="5" fill="#fdf8ec" stroke="#4d463a" stroke-width="1.3"/><text x="100" y="99" text-anchor="middle" font-family="Newsreader" font-size="13">Raw RGB frame</text>
+      <path d="M180,95 H235" stroke="#4d463a" stroke-width="1.3" marker-end="url(#arrowR1)"/>
+      <rect x="235" y="40" width="170" height="50" rx="5" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.4"/><text x="320" y="62" text-anchor="middle" font-family="Newsreader" font-size="13">Stage A &#8212; plant/leaf mask</text>
+      <text x="320" y="80" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="#4d463a">YOLOv8-seg / MobileNetV3-DeepLab</text>
+      <path d="M320,90 V125" stroke="#4d463a" stroke-width="1.1" stroke-dasharray="3,3"/>
+      <rect x="235" y="125" width="170" height="50" rx="5" fill="#fdf8ec" stroke="#b3401e" stroke-width="1.4"/><text x="320" y="147" text-anchor="middle" font-family="Newsreader" font-size="13">Stage B &#8212; lesion mask</text>
+      <text x="320" y="165" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="#4d463a">SegFormer / DeepLabV3+, on leaf ROI only</text>
+      <path d="M405,150 H460" stroke="#4d463a" stroke-width="1.3" marker-end="url(#arrowR1)"/>
+      <rect x="460" y="125" width="160" height="50" rx="5" fill="#fdf8ec" stroke="#4d463a" stroke-width="1.3"/><text x="540" y="147" text-anchor="middle" font-family="Newsreader" font-size="13">Severity % +</text><text x="540" y="163" text-anchor="middle" font-family="Newsreader" font-size="13">lesion count</text>
+      <defs><marker id="arrowR1" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4d463a"/></marker></defs>
+    </svg>
+  </div>
+  <figcaption>Fig. 2 &mdash; Stage A throws away soil, weeds and hands (mobile-app photos) before Stage B ever sees a pixel, so Stage B's whole capacity goes to the actually hard problem: a rust spot vs. a shadow, a blight lesion vs. a leaf-tip that's naturally browning.</figcaption>
+</figure>
+<table>
+  <thead><tr><th>Target</th><th>Model</th><th>Throughput</th><th>Fit</th></tr></thead>
+  <tbody>
+    <tr><td>Edge / mobile app</td><td>YOLOv8-seg, Fast-SAM (fine-tuned)</td><td>20&ndash;40 FPS on mobile chips</td><td>Real-time, on-device, no network needed</td></tr>
+    <tr><td>Server-side / batch</td><td>SegFormer (B0&ndash;B2), DeepLabV3+ (ResNet50)</td><td>Slower, GPU-bound</td><td>Captures subtle texture in rust, leaf-spot, bacterial wilt better than a lighter CNN</td></tr>
+  </tbody>
+</table>
+<p>Loss function matters more than usual because the target class is small &mdash; a rust fleck can be a few dozen pixels on a leaf that's thousands. Combine <strong>Dice Loss</strong> (rewards mask overlap directly, robust to class imbalance) with <strong>Focal Loss</strong> (down-weights easy, already-confident background pixels so gradient stays on the hard lesion boundary). Plain cross-entropy on this class ratio mostly learns to predict "healthy" everywhere and still scores deceptively well on pixel accuracy.</p>
+
+<h3>Severity, correctly oriented</h3>
+<div class="setup">
+<p><code>severity_% = (disease_mask_pixel_area / total_leaf_mask_pixel_area) &times; 100</code></p>
+<p>Disease area over total leaf area &mdash; not the other way around. Inverting the ratio is an easy mistake to paste into a doc and a bad one to ship: it turns a 4% infection into a reported 2500%.</p>
+</div>
+<p><strong>Lesion counting</strong> via connected-component labeling on the disease mask is a second, independent signal: five small, separate lesions can mean an early, spreading infection worth flagging urgently even at a severity percentage that looks mild &mdash; severity percentage and lesion count diverge in a way that matters agronomically.</p>
+
+<h3>Field noise, RGB-only indices, and quantization</h3>
+<p>Leaves move in wind, lighting shifts constantly, phones auto-adjust exposure mid-shot. Train with heavy color jitter, synthetic glare/flare, and background substitution (swap the soil/weed background behind the leaf mask) so the model doesn't quietly learn "this particular soil color = healthy." Even without NIR, <code>ExG = 2G &minus; R &minus; B</code> (Excess Green) is a cheap, RGB-only vegetation index &mdash; feed it in as an explicit fourth input channel alongside R/G/B rather than relying on the network to rediscover the same relationship from raw color. For offline field use, export to ONNX / CoreML / TFLite with FP16 or INT8 quantization &mdash; same edge-deployment reasoning as the Jetson/RB5 constraints elsewhere in this book: target hardware's power and thermal budget decides precision, not model accuracy alone.</p>
+
+<div class="keypoint">Same lesson as the multispectral branch above: the backbone swap between SegFormer and DeepLabV3+ buys less than getting the field-noise augmentation and the severity-ratio direction right. A correct model with an inverted metric is worse than a slightly weaker model with a correct one &mdash; it fails silently, in the grower's favor, right up until it doesn't.</div>
+
+<div class="warfield">Open leaf-disease datasets (PlantVillage, PlantDoc, PlantPathology) are mostly lab-shot: clean backgrounds, controlled lighting, single leaf centered in frame. A model trained only on these looks strong on validation and then degrades hard on real field photos with wind, shadow and clutter. Treat them as a pretraining source, not a finish line &mdash; budget for a field-shot fine-tuning set before trusting severity numbers on real deployments.</div>
+
+<details class="qa"><summary>Where do you get open datasets for the RGB-only branch without hand-labeling from zero?</summary><div class="a"><p><strong>PlantVillage</strong> (leaf classification, some segmentation variants) and <strong>PlantDoc</strong> (real field-condition images, weaker labels) are the two most-cited starting points. <strong>PlantPathology 2020/2021</strong> (Kaggle/FGVC) adds apple-specific foliar disease images with more label-noise realism. None are pixel-mask-labeled at scale out of the box &mdash; the practical move is the same SAM2 weak-label bootstrap from &sect;1.2: run these datasets' bounding-box or classification labels through a promptable segmentation model to generate pixel masks, then human-correct a sample rather than hand-drawing from zero.</p></div></details>
+<details class="qa"><summary>What does the PyTorch skeleton for the two-stage RGB pipeline actually look like?</summary><div class="a"><pre><code class="language-python">import torch
+from ultralytics import YOLO
+
+leaf_model = YOLO("leaf_seg.pt")          # Stage A: plant/leaf mask
+lesion_model = torch.jit.load("lesion_seg.pt").eval()  # Stage B: SegFormer/DeepLabV3+
+
+def exg(img):  # img: float tensor, C,H,W in [0,1], channels R,G,B
+    r, g, b = img[0], img[1], img[2]
+    return (2 * g - r - b).clamp(-1, 1)
+
+def score_leaf(rgb_frame):
+    leaf_mask = leaf_model(rgb_frame)[0].masks.data[0]        # Stage A
+    x0, y0, x1, y1 = bbox_from_mask(leaf_mask)
+    roi = rgb_frame[:, y0:y1, x0:x1]
+    roi_4ch = torch.cat([roi, exg(roi).unsqueeze(0)], dim=0)  # RGB + ExG
+
+    with torch.no_grad():
+        lesion_mask = lesion_model(roi_4ch.unsqueeze(0))[0].argmax(0)  # Stage B
+
+    leaf_px = leaf_mask.sum().item()
+    lesion_px = lesion_mask.sum().item()
+    severity_pct = 100.0 * lesion_px / max(leaf_px, 1)
+    lesion_count = count_connected_components(lesion_mask)
+    return severity_pct, lesion_count</code></pre>
+<p>The shape that matters: Stage A crops before Stage B ever runs, ExG rides in as a fourth channel rather than a separate output, and the severity ratio is disease-over-leaf, matching the formula above.</p></div></details>
+<details class="qa"><summary>How would you validate either branch before showing a grower real results?</summary><div class="a"><p>Hold out a set of fields the model never saw during training or fine-tuning, and calibrate the model's health categories against an agronomist's ground-truth walk of those same rows &mdash; not against a second model's output. Track precision on the "stressed" class specifically, since a grower acts on false positives by wasting a field visit and on false negatives by missing real damage; the two failure modes aren't symmetric and the validation should say which one the current model leans toward.</p></div></details>
+<details class="qa"><summary>How do you keep either model useful as disease presentations drift season to season?</summary><div class="a"><p>Treat the SAM2-assisted labeling loop as a standing capability, not a one-time bootstrap: route the tiles the current model is least confident on back through the same weak-label-then-human-correct step each season, and retrain or fine-tune on the accumulated set. This is exactly where a foundation-model backbone pays for itself twice &mdash; once at initial dataset construction, and again every season as an active-learning source, instead of re-running a from-scratch labeling effort each time.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>
