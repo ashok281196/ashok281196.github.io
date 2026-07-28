@@ -3,10 +3,13 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>The Interview Manual — Robotics Engineering Interview Questions</title>
+<title>The Interview Manual — Robotics Engineering Deep Field Guide</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Source+Serif+4:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body, {delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}]});"></script>
 <style>
   :root{
     --paper: #EEEAE0;
@@ -29,7 +32,7 @@
 
   body{
     margin:0; background: var(--paper); color: var(--ink);
-    font-family: var(--body); font-size: 17px; line-height: 1.7;
+    font-family: var(--body); font-size: 17px; line-height: 1.75;
     -webkit-font-smoothing: antialiased;
   }
   a{ color: var(--accent); }
@@ -50,7 +53,7 @@
   /* ---------- COVER ---------- */
   .cover{
     min-height: 92vh; display:flex; flex-direction: column; justify-content:center;
-    max-width: 720px; margin: 0 auto; padding: 60px 32px; text-align:center;
+    max-width: 760px; margin: 0 auto; padding: 60px 32px; text-align:center;
     border-left: 1px solid var(--paper-line); border-right: 1px solid var(--paper-line);
   }
   .cover-kicker{ font-family: var(--mono); font-size: 12px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--accent); margin-bottom: 28px; }
@@ -59,17 +62,17 @@
     line-height: 1.08; margin: 0 0 22px; letter-spacing: -0.01em;
   }
   .cover .rule{ width: 64px; height: 2px; background: var(--accent); margin: 26px auto; border:none; }
-  .cover p.subtitle{ font-size: 19px; color: var(--ink-soft); max-width: 480px; margin: 0 auto 40px; font-style: italic; }
+  .cover p.subtitle{ font-size: 19px; color: var(--ink-soft); max-width: 580px; margin: 0 auto 40px; font-style: italic; }
   .colophon{
     margin-top: 30px; font-family: var(--mono); font-size: 12px; color: var(--muted);
     display: grid; grid-template-columns: 1fr 1fr; gap: 10px 24px; text-align:left;
-    border-top: 1px solid var(--paper-line); padding-top: 24px; max-width: 460px; margin-left:auto; margin-right:auto;
+    border-top: 1px solid var(--paper-line); padding-top: 24px; max-width: 480px; margin-left:auto; margin-right:auto;
   }
   .colophon dt{ text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
   .colophon dd{ margin: 2px 0 0; color: var(--ink); font-size: 13px; }
 
   /* ---------- TOC ---------- */
-  .toc-page{ max-width: 720px; margin: 0 auto; padding: 90px 32px; border-left: 1px solid var(--paper-line); border-right: 1px solid var(--paper-line);}
+  .toc-page{ max-width: 760px; margin: 0 auto; padding: 90px 32px; border-left: 1px solid var(--paper-line); border-right: 1px solid var(--paper-line);}
   .toc-page h2{ font-family: var(--display); font-size: 14px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--muted); margin: 0 0 34px; }
   .toc-entry{ display:flex; align-items: baseline; gap: 8px; text-decoration:none; color: var(--ink); margin-bottom: 20px; }
   .toc-num{ font-family: var(--display); font-size: 19px; color: var(--accent); width: 28px; flex-shrink:0; }
@@ -79,7 +82,7 @@
   .toc-desc{ display:block; font-family: var(--body); font-size: 13.5px; color: var(--muted); font-style: italic; margin: 2px 0 0 36px; }
 
   /* ---------- MAIN LAYOUT ---------- */
-  .layout{ max-width: 1180px; margin: 0 auto; display:grid; grid-template-columns: 210px 1fr; gap: 0; }
+  .layout{ max-width: 1280px; margin: 0 auto; display:grid; grid-template-columns: 220px 1fr; gap: 0; }
   .layout > *{ min-width: 0; width: 100%; }
   @media (max-width: 880px){ .layout{ grid-template-columns: 1fr; } }
 
@@ -93,8 +96,8 @@
     .rail a{ white-space:nowrap; border:1px solid var(--paper-line); border-radius: 20px; padding: 6px 14px; font-size: 12.5px; }
   }
 
-  main.book{ max-width: 720px; padding: 20px 32px 120px; border-left: 1px solid var(--paper-line); }
-  @media (max-width: 880px){ main.book{ border-left:none; margin: 0 auto; } }
+  main.book{ max-width: 860px; padding: 20px 40px 120px; border-left: 1px solid var(--paper-line); }
+  @media (max-width: 880px){ main.book{ border-left:none; margin: 0 auto; padding: 16px 20px 100px; } }
 
   .chapter{ margin-top: 90px; scroll-margin-top: 70px; }
   .chapter:first-of-type{ margin-top: 40px; }
@@ -104,33 +107,46 @@
   .chapter-lede{ font-size: 17.5px; color: var(--ink-soft); }
   .chapter-lede::first-letter{ font-family: var(--display); font-size: 54px; font-weight: 600; float:left; line-height: 0.8; padding: 6px 8px 0 0; color: var(--accent); }
 
-  .section{ margin-top: 44px; }
+  .section{ margin-top: 54px; padding-top: 28px; border-top: 1px solid var(--paper-line); }
+  .section:first-of-type{ border-top: none; }
   .section-head{ display:flex; align-items: baseline; gap: 12px; margin-bottom: 6px; flex-wrap: wrap; }
-  .section-num{ font-family: var(--display); font-size: 16px; color: var(--accent); flex-shrink:0; }
-  .section h3{ font-family: var(--display); font-weight: 500; font-size: 19.5px; margin: 0; flex: 1; min-width: 200px; }
+  .section-num{ font-family: var(--display); font-size: 17px; color: var(--accent); flex-shrink:0; }
+  .section h3{ font-family: var(--display); font-weight: 600; font-size: 21px; margin: 0; flex: 1; min-width: 240px; line-height: 1.3; }
   .rating{ font-family: var(--mono); font-size: 12px; color: var(--muted); letter-spacing: 0.03em; white-space: nowrap; }
-  .rating .dot{ color: var(--accent); }
-  .rating .dot.off{ color: var(--paper-line); }
-  .tag-line{ font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--navy-soft); margin: 4px 0 12px; }
+  .tag-line{ font-family: var(--mono); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--navy-soft); margin: 6px 0 16px; }
 
-  .section p{ margin: 0 0 14px; }
+  .section h4{ font-family: var(--display); font-weight: 600; font-size: 16.5px; letter-spacing: 0.02em; text-transform: uppercase; color: var(--navy); margin: 26px 0 12px; }
+  .section p{ margin: 0 0 16px; }
+  .section ul, .section ol{ margin: 0 0 18px 24px; padding: 0; }
+  .section li{ margin-bottom: 8px; }
   .section strong{ font-weight: 600; color: var(--ink); }
-  .section code{ font-family: var(--mono); font-size: 14px; background: var(--paper-panel); padding: 1px 6px; border-radius: 3px; color: var(--accent); }
+  .section code{ font-family: var(--mono); font-size: 13.5px; background: var(--paper-panel); padding: 2px 6px; border-radius: 3px; color: var(--accent); }
+
+  pre{
+    background: #1D232A; color: #E6E1D3; font-family: var(--mono); font-size: 13px; line-height: 1.6;
+    padding: 16px 20px; border-radius: 6px; overflow-x: auto; margin: 20px 0; border: 1px solid #2C3A52;
+  }
+  pre code{ background: transparent; padding: 0; color: inherit; font-size: inherit; }
+
+  .math-block{
+    background: var(--paper-panel); padding: 14px 20px; border-left: 3px solid var(--navy);
+    border-radius: 0 4px 4px 0; margin: 20px 0; font-size: 15px; overflow-x: auto;
+  }
 
   .margin-note{
-    margin: 18px 0; padding: 12px 18px; background: var(--paper-panel);
+    margin: 22px 0; padding: 14px 20px; background: var(--paper-panel);
     border-left: 3px solid var(--accent); border-radius: 0 4px 4px 0;
     font-size: 14.5px; color: var(--ink-soft);
   }
-  .margin-note .mn-label{ font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 5px; }
+  .margin-note .mn-label{ font-family: var(--mono); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent); margin-bottom: 6px; font-weight: 600; }
 
   /* figures & tables */
-  figure{ margin: 26px 0; }
+  figure{ margin: 28px 0; }
   figure svg{ width:100%; height:auto; display:block; background: var(--paper); }
   figcaption{ font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 10px; text-align:center; }
   figcaption strong{ color: var(--ink-soft); font-weight: 600; }
 
-  table{ width:100%; border-collapse: collapse; margin: 22px 0; font-size: 14.5px; }
+  table{ width:100%; border-collapse: collapse; margin: 24px 0; font-size: 14.5px; }
   caption{ font-family: var(--mono); font-size: 12px; color: var(--muted); text-align:left; margin-bottom: 8px; caption-side: top; }
   th{ font-family: var(--mono); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; text-align:left; color: var(--muted); border-bottom: 1px solid var(--ink); padding: 8px 12px 8px 0; }
   td{ padding: 10px 12px 10px 0; border-bottom: 1px solid var(--paper-line); vertical-align: top; }
@@ -178,12 +194,12 @@
     <div class="cover-kicker">A Field Manual, Prepared for Ashok Kumar Chaudhary</div>
     <h1>Interview Signal Map</h1>
     <hr class="rule">
-    <p class="subtitle">Thirty-nine questions on SLAM, firmware, middleware, vision, manipulation and edge deployment for a robotics engineering interview loop.</p>
+    <p class="subtitle">Exhaustive technical field manual: forty-one rigorous questions on SLAM, firmware, middleware, vision, manipulation, and edge deployment for senior robotics engineering interviews.</p>
     <dl class="colophon">
       <div><dt>Track</dt><dd>Robotics Systems Engineering</dd></div>
-      <div><dt>Level</dt><dd>Senior / MTS</dd></div>
-      <div><dt>Scope</dt><dd>SLAM · Firmware · Middleware · Vision · Manipulation</dd></div>
-      <div><dt>Format</dt><dd>Technical loop, whiteboard + discussion</dd></div>
+      <div><dt>Level</dt><dd>Senior / Staff / MTS</dd></div>
+      <div><dt>Scope</dt><dd>SLAM · State Estimation · RTOS · Middleware · Vision · Kinematics</dd></div>
+      <div><dt>Format</dt><dd>Technical loop, whiteboard, mathematical derivations + system architecture</dd></div>
     </dl>
   </section>
 
@@ -191,23 +207,23 @@
   <section class="toc-page" id="toc">
     <h2>Contents</h2>
     <a class="toc-entry" href="#ch1"><span class="toc-num">I</span><span class="toc-name">SLAM &amp; State Estimation</span><span class="toc-leader"></span><span class="toc-folio">7</span></a>
-    <span class="toc-desc">Cartographer, GPS-denied return-to-home, EKF vs. factor graphs</span>
+    <span class="toc-desc">Cartographer mechanics, Ceres loss, GPS-denied keyframe graphs, EKF/UKF/iSAM2 math, multi-rate ESKF fusion</span>
     <a class="toc-entry" href="#ch2"><span class="toc-num">II</span><span class="toc-name">Navigation Architecture</span><span class="toc-leader"></span><span class="toc-folio">15</span></a>
-    <span class="toc-desc">Planning layers, costmaps, the full sensor-to-actuator stack</span>
+    <span class="toc-desc">7-layer stack, SE(2) A*/DWA math, costmap inflation exponential decay, zero-copy shm ga-msg integration</span>
     <a class="toc-entry" href="#ch3"><span class="toc-num">III</span><span class="toc-name">Firmware &amp; RTOS</span><span class="toc-leader"></span><span class="toc-folio">21</span></a>
-    <span class="toc-desc">NuttX, hard real-time, 200kHz loops, CAN &amp; EtherCAT</span>
+    <span class="toc-desc">NuttX vs FreeRTOS internals, 5μs timing budget on STM32 H7, priority inheritance, CAN 2.0 vs EtherCAT DC clock sync</span>
     <a class="toc-entry" href="#ch4"><span class="toc-num">IV</span><span class="toc-name">Middleware &amp; Multi-Agent</span><span class="toc-leader"></span><span class="toc-folio">29</span></a>
-    <span class="toc-desc">ga-msg vs. ROS, heartbeats, swarm coordination</span>
+    <span class="toc-desc">ZeroMQ/gRPC vs ROS 2 DDS wire protocol, sliding-window link loss failover, CBBA swarm auction, PTP/NTP clock sync</span>
     <a class="toc-entry" href="#ch5"><span class="toc-num">V</span><span class="toc-name">Computer Vision</span><span class="toc-leader"></span><span class="toc-folio">35</span></a>
-    <span class="toc-desc">Detection, segmentation, pose, marker vs. markerless</span>
+    <span class="toc-desc">RGB+NIR NDVI/NDRE segmentation, Focal+Dice loss, 6-DOF PnP pose estimation, AprilTag vs markerless VIO scale math</span>
     <a class="toc-entry" href="#ch6"><span class="toc-num">VI</span><span class="toc-name">Learning-Based Robotics</span><span class="toc-leader"></span><span class="toc-folio">39</span></a>
-    <span class="toc-desc">One-shot imitation, diffusion policies, genetic search</span>
+    <span class="toc-desc">Dynamic Movement Primitives (DMPs), DDIM diffusion policy denoising, Gazebo/Isaac Gym GA optimization &amp; domain randomization</span>
     <a class="toc-entry" href="#ch7"><span class="toc-num">VII</span><span class="toc-name">Video &amp; Edge Deployment</span><span class="toc-leader"></span><span class="toc-folio">43</span></a>
-    <span class="toc-desc">Adaptive bitrate, latency budgets, RB5 / Jetson / edge MLSoC constraints</span>
+    <span class="toc-desc">PID adaptive bitrate control over GStreamer, DMABUF zero-copy pipeline, Jetson TensorRT UMA vs Qualcomm RB5 SNPE</span>
     <a class="toc-entry" href="#ch8"><span class="toc-num">VIII</span><span class="toc-name">Manipulation &amp; Kinematics</span><span class="toc-leader"></span><span class="toc-folio">49</span></a>
-    <span class="toc-desc">FK/IK, singularities, latency-aware force feedback</span>
+    <span class="toc-desc">DH vs PoE Lie group kinematics, Damped Least Squares singularity adaptive damping, Wave Variable passivity control</span>
     <a class="toc-entry" href="#ch9"><span class="toc-num">IX</span><span class="toc-name">Systems &amp; Leadership</span><span class="toc-leader"></span><span class="toc-folio">53</span></a>
-    <span class="toc-desc">Fault tolerance, OTA, scoping ambiguity, your best stories</span>
+    <span class="toc-desc">Fault-tolerant watchdogs, U-Boot A/B partition OTA updates, 4-stage SITL/HITL flight validation, EndureAir RCA</span>
     <a class="toc-entry" href="#appA"><span class="toc-num">A</span><span class="toc-name">Appendix — Story Bank</span><span class="toc-leader"></span><span class="toc-folio">61</span></a>
     <a class="toc-entry" href="#appB"><span class="toc-num">B</span><span class="toc-name">Appendix — Glossary</span><span class="toc-leader"></span><span class="toc-folio">63</span></a>
   </section>
@@ -234,122 +250,190 @@
       <section class="chapter" id="ch1" data-title="I · SLAM">
         <div class="chapter-kicker">Chapter I</div>
         <h2>SLAM &amp; State Estimation</h2>
-        <p class="chapter-lede">Cartographer, GPS-denied return-to-home, and vision-based state estimation under occlusion are classic SLAM interview territory. Your ArduPilot/EKF background is the natural point of comparison against research-depth answers on these topics.</p>
+        <p class="chapter-lede">Cartographer, GPS-denied return-to-home, EKF/UKF/Factor Graphs, multi-rate sensor fusion, and visual degradation under occlusion are core state-estimation territory. Frame your answers with rigorous mathematical formulations and real-world failure mode analysis.</p>
 
         <div class="section" id="q1">
           <div class="section-head"><span class="section-num">1.1</span><h3>Walk me through a SLAM pipeline like Cartographer — scan matching, submaps, loop closure.</h3></div>
           <div class="tag-line">rating — near-certain</div>
-          <p>Cartographer splits the problem into a <strong>local front-end</strong> and a <strong>global back-end</strong>. The front-end scan-matches each incoming LiDAR or point-cloud frame against the current local submap using a Ceres-based nonlinear least-squares optimizer, accumulating frames into that submap until it is "finished." The back-end treats every finished submap as a node in a pose graph, and periodically runs global optimization — including <strong>loop closure</strong>, where branch-and-bound scan matching checks whether the robot has revisited a previously mapped area and, if so, adds a constraint that snaps accumulated drift back toward consistency.</p>
-          <figure>
-            <svg viewBox="0 0 640 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Cartographer pipeline diagram">
-              <text x="14" y="26" font-family="IBM Plex Mono" font-size="11" fill="#2C3A52" letter-spacing="1">FRONT-END (local, per-scan)</text>
-              <rect x="14" y="40" width="130" height="46" rx="4" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/>
-              <text x="79" y="68" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#232019">Scan input</text>
-              <rect x="178" y="40" width="150" height="46" rx="4" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/>
-              <text x="253" y="63" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#232019">Ceres scan</text>
-              <text x="253" y="78" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#232019">matching</text>
-              <rect x="362" y="40" width="150" height="46" rx="4" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/>
-              <text x="437" y="68" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#232019">Local submap</text>
-              <path d="M144 63 H178 M328 63 H362" stroke="#2C3A52" stroke-width="1.4" marker-end="url(#arrow1)"/>
+          <p>Google Cartographer decouples state estimation into a <strong>local real-time front-end</strong> and a <strong>global asynchronous back-end</strong>. The front-end accumulates range scans into local grid submaps using high-frequency Ceres-based non-linear scan matching, while the back-end optimizes a pose graph of submaps using branch-and-bound loop closure verification.</p>
 
-              <text x="14" y="130" font-family="IBM Plex Mono" font-size="11" fill="#7C2E2A" letter-spacing="1">BACK-END (global, periodic)</text>
-              <rect x="14" y="144" width="150" height="46" rx="4" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.4"/>
-              <text x="89" y="167" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#232019">Pose graph</text>
-              <text x="89" y="182" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#232019">(all submaps)</text>
-              <rect x="216" y="144" width="180" height="46" rx="4" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.4"/>
-              <text x="306" y="167" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#232019">Branch &amp; bound</text>
-              <text x="306" y="182" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#232019">loop closure search</text>
-              <rect x="448" y="144" width="176" height="46" rx="4" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.4"/>
-              <text x="536" y="167" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#232019">Global pose-graph</text>
-              <text x="536" y="182" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#232019">optimization</text>
-              <path d="M164 167 H216 M396 167 H448" stroke="#7C2E2A" stroke-width="1.4" marker-end="url(#arrow2)"/>
-              <path d="M437 86 V144" stroke="#4A453B" stroke-width="1.2" stroke-dasharray="3,3" marker-end="url(#arrow3)"/>
-              <text x="450" y="118" font-family="IBM Plex Mono" font-size="10" fill="#4A453B">finished submaps</text>
-              <defs>
-                <marker id="arrow1" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#2C3A52"/></marker>
-                <marker id="arrow2" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#7C2E2A"/></marker>
-                <marker id="arrow3" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#4A453B"/></marker>
-              </defs>
-            </svg>
-            <figcaption><strong>Fig. 1.1</strong> — Cartographer's two-tier structure: fast local scan matching feeds slower global loop closure.</figcaption>
-          </figure>
-          <p>Frame your answer around the trade-off, not the diagram: smaller submaps close loops faster and bound local drift tighter, at the cost of more compute per unit distance and more graph nodes to optimize.</p>
-          <div class="margin-note"><div class="mn-label">Marginalia</div>Expect a follow-up on tuning submap size for a fast aerial platform vs. a slow ground robot — faster platforms need smaller submaps, or higher-rate scan matching, to keep the front-end's local-linearity assumption valid between finalizations.</div>
+          <h4>1. Local Front-End (Scan-to-Submap Matching)</h4>
+          <p>Incoming LiDAR scans $P = \{p_i\}_{i=1}^K$ in frame coordinates are mapped into the local submap coordinate frame via rigid transform $T_{\xi} = (R_\theta, t)$. The scan matcher solves a non-linear least squares problem minimizing grid probability residuals:</p>
+          <div class="math-block">
+            $$\arg\min_{\xi} \sum_{i=1}^{K} \left( 1 - M_{\text{smooth}}(T_{\xi} \cdot p_i) \right)^2 + w_{\text{odom}} \| \xi \ominus \xi_{\text{odom}} \|_{\Sigma_{\text{odom}}}^2$$
+          </div>
+          <p>where $M_{\text{smooth}}(x)$ is a bicubicly-interpolated grid cell probability value. To prevent local minima divergence during aggressive motion, initial guess $\xi_{\text{odom}}$ is provided by high-rate IMU pre-integration or wheel odometry.</p>
+
+          <h4>2. Submap Generation &amp; Lifecycles</h4>
+          <p>A submap starts empty as a probability grid (typically $5\text{cm}$ resolution). Each accepted scan updates grid probability via odds ratio updates $O(x) = M(x)/(1-M(x))$: $O_{\text{new}}(x) = O_{\text{old}}(x) \cdot O_{\text{hit/miss}}$. To ensure computational tractability, a submap transitions to "finished" once $N_{\text{scans}} \approx 100-200$ frames are inserted. At any time, two submaps are concurrently active: one accumulating scans and one being finalized.</p>
+
+          <h4>3. Global Back-End &amp; Branch-and-Bound Loop Closure</h4>
+          <p>When a submap is finalized, it becomes a node in the global pose graph. Cartographer searches for loop closure constraints by matching recent scans against all historic finalized submaps within a search window $W$. To make global grid search real-time without GPU acceleration, it employs <strong>Real-Time Correlative Scan Matching</strong> accelerated by a <strong>Branch-and-Bound (B&amp;B) tree search</strong> on a multi-resolution grid pyramid:</p>
+          <ul>
+            <li><strong>Grid Pyramid:</strong> Precomputes coarse grids where cell value $M_{\text{coarse}}(x) = \max_{y \in \text{window}} M(y)$.</li>
+            <li><strong>Bounding:</strong> The score of any scan in a coarse cell bounds the maximum achievable score of all child cells in the fine grid. If $Score_{\text{coarse}} &lt; Score_{\text{best\_known}}$, the entire branch is pruned.</li>
+          </ul>
+
+          <h4>4. Pose Graph Optimization with Huber Robust Loss</h4>
+          <p>Upon accepting candidate loop closure relative transforms $T_{i,j}$, Ceres minimizes the global graph cost function:</p>
+          <div class="math-block">
+            $$\arg\min_{\chi} \sum_{i} \| \xi_i \ominus (\xi_{i-1} \cdot \Delta\xi_{i-1,i}) \|_{\Sigma_{\text{local}}}^2 + \sum_{i,j} \rho\left( \| \xi_i \ominus (\xi_j \cdot T_{i,j}) \|_{\Sigma_{\text{loop}}}^2 \right)$$
+          </div>
+          <p>where $\rho(r)$ is the <strong>Huber Robust Loss function</strong> ($\rho(r) = r^2$ for $|r|\le \delta$, $2\delta|r|-\delta^2$ for $|r|&gt;\delta$). The Huber loss down-weights erroneous loop closure constraints (false positives from perceptual aliasing), preventing map destruction.</p>
+
+          <div class="margin-note">
+            <div class="mn-label">Field Trade-off</div>
+            Decreasing submap size improves loop closure frequency and bounds local drift tighter on tight turning maneuvers, but increases pose graph node density, spiking back-end CPU consumption during Ceres optimization cycles.
+          </div>
         </div>
 
         <div class="section" id="q2">
           <div class="section-head"><span class="section-num">1.2</span><h3>How would you handle GPS-denied return-to-home on a drone?</h3></div>
           <div class="tag-line">rating — near-certain</div>
-          <p>ArduPilot's EKF3, already running on my Strix H7 build, fuses IMU, compass and baro with GPS as one input among several — when GPS confidence drops it falls back on whatever else is available (optical flow, rangefinder), or degrades to IMU+baro dead-reckoning. That covers a few seconds of dropout, not a real GPS-denied RTH.</p>
-          <p>For that, I would add a <strong>VIO front-end</strong> — stereo or RealSense plus IMU, ORB-SLAM3-style — publishing pose corrections into the EKF at roughly 30Hz, and treat "return" as <strong>traversal of a recorded pose graph</strong> back through prior keyframes, rather than a straight flight to a remembered GPS fix.</p>
-          <figure>
-            <svg viewBox="0 0 640 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="GPS-denied return comparison">
-              <text x="20" y="24" font-family="IBM Plex Mono" font-size="11" fill="#7C2E2A">NAIVE — straight-line return</text>
-              <circle cx="40" cy="70" r="5" fill="#7C2E2A"/><text x="20" y="95" font-family="Source Serif 4" font-size="12">start</text>
-              <path d="M40,70 Q220,20 420,120" stroke="#4A453B" stroke-width="1.4" fill="none" stroke-dasharray="4,3"/>
-              <circle cx="420" cy="120" r="5" fill="#232019"/><text x="400" y="145" font-family="Source Serif 4" font-size="12">GPS lost here</text>
-              <path d="M420,120 L60,66" stroke="#7C2E2A" stroke-width="1.6" fill="none" marker-end="url(#arrowB)"/>
-              <text x="220" y="100" font-family="Source Serif 4" font-size="11" fill="#7C2E2A" font-style="italic">assumes clear space + no drift</text>
+          <p>A robust GPS-denied Return-To-Home (RTH) architecture relies on <strong>Visual-Inertial Odometry (VIO) keyframe graph navigation</strong> rather than absolute global coordinates. The drone records an active $SE(3)$ pose graph during outbound flight and retraces it during emergency return.</p>
 
-              <text x="20" y="180" font-family="IBM Plex Mono" font-size="11" fill="#2C3A52">ROBUST — keyframe pose-graph return</text>
-              <circle cx="450" cy="170" r="3" fill="#2C3A52"/><circle cx="380" cy="150" r="3" fill="#2C3A52"/><circle cx="300" cy="145" r="3" fill="#2C3A52"/><circle cx="220" cy="130" r="3" fill="#2C3A52"/><circle cx="140" cy="105" r="3" fill="#2C3A52"/><circle cx="60" cy="66" r="5" fill="#2C3A52"/>
-              <path d="M450,170 L380,150 L300,145 L220,130 L140,105 L60,66" stroke="#2C3A52" stroke-width="1.6" fill="none" stroke-dasharray="2,2"/>
-              <defs><marker id="arrowB" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#7C2E2A"/></marker></defs>
+          <h4>1. System State Architecture &amp; Data Structure</h4>
+          <p>During normal outbound flight (GPS healthy or VIO nominal), the autonomy stack logs a lightweight topological pose graph at $2\text{Hz}$:</p>
+          <pre><code class="language-cpp">struct KeyframeNode {
+    uint32_t id;
+    double timestamp;
+    Eigen::Matrix4d T_world_robot; // SE(3) Pose
+    std::vector&lt;cv::KeyPoint&gt; keypoints;
+    cv::Mat descriptors;           // DBoW2 / NetVLAD feature vector
+    pcl::PointCloud&lt;pcl::PointXYZ&gt;::Ptr local_point_cloud;
+};
+std::vector&lt;KeyframeNode&gt; trajectory_graph;</code></pre>
+
+          <h4>2. Failover State Machine &amp; Traversal</h4>
+          <p>Upon triggering GPS loss / link disconnection:</p>
+          <ol>
+            <li><strong>State Transition:</strong> Switch EKF3 input from GPS position measurements to tight-coupled VIO (stereo RealSense D435i + onboard IMU) producing relative pose updates $\Delta T \in SE(3)$ at $30\text{Hz}$.</li>
+            <li><strong>Heading Inversion:</strong> Command a $180^\circ$ yaw rotation in place while maintaining altitude via laser/baro altimeter.</li>
+            <li><strong>Path Inversion &amp; Smoothing:</strong> Reverse the keyframe trajectory list. Apply B-spline interpolation across keyframe positions to generate smooth velocity targets $v_{\text{cmd}}(t)$ for the local trajectory planner (DWA / TEB).</li>
+            <li><strong>Visual Drift Correction (Relocalization):</strong> As the drone flies backward along the flight path, run feature matching (ORB/SuperPoint + RANSAC PnP) against stored keyframe descriptors. Detect re-visited keyframes to apply instant pose corrections, eliminating dead-reckoning integration drift.</li>
+          </ol>
+
+          <figure>
+            <svg viewBox="0 0 640 180" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Keyframe return diagram">
+              <path d="M40,140 Q180,20 360,130 T600,40" stroke="#7C2E2A" stroke-width="2" fill="none" stroke-dasharray="4,4"/>
+              <circle cx="40" cy="140" r="5" fill="#2C3A52"/><text x="25" y="165" font-family="IBM Plex Mono" font-size="11">Home (Origin)</text>
+              <circle cx="200" cy="65" r="4" fill="#2C3A52"/><circle cx="360" cy="130" r="4" fill="#2C3A52"/><circle cx="480" cy="80" r="4" fill="#2C3A52"/>
+              <circle cx="600" cy="40" r="6" fill="#7C2E2A"/><text x="520" y="25" font-family="IBM Plex Mono" font-size="11" fill="#7C2E2A">GPS Lost Here!</text>
+              <path d="M600,40 Q480,80 360,130 T40,140" stroke="#2C3A52" stroke-width="2.5" fill="none" marker-end="url(#arrRTH)"/>
+              <defs><marker id="arrRTH" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#2C3A52"/></marker></defs>
             </svg>
-            <figcaption><strong>Fig. 1.2</strong> — A straight-line return bets everything on one final position estimate; a keyframe-graph return only trusts the path already flown.</figcaption>
+            <figcaption><strong>Fig. 1.1</strong> — Outbound flight (dashed red) accumulates drift; inbound keyframe traversal (solid navy) bound-checks relative transforms against previously seen visual features.</figcaption>
           </figure>
-          <p>This matters because relative transforms between keyframes compound error more gracefully than one absolute coordinate, and periodic loop closure against earlier keyframes corrects drift along the way — the return path gets <em>more</em> reliable the further you retrace it, instead of betting everything on a single final GPS fix.</p>
         </div>
 
         <div class="section" id="q3">
           <div class="section-head"><span class="section-num">1.3</span><h3>EKF vs. UKF vs. factor-graph optimization — how do they differ, and why did ArduPilot pick EKF?</h3></div>
           <div class="tag-line">rating — likely</div>
-          <p>These three sit on a single spectrum of cost vs. accuracy vs. revisability. EKF linearizes the nonlinear process/measurement model around the current estimate via a first-order Taylor expansion — cheap, well understood, but once a state is finalized it can't be revisited, so an early bad association permanently biases everything downstream. UKF instead propagates a small set of sigma points through the true nonlinear function and reconstructs mean and covariance from their transformed spread, capturing second-order effects EKF throws away, at several times the compute cost per update. Factor-graph optimization — what actually underlies Cartographer's back-end, via Ceres — keeps a window of historical poses and re-solves the whole nonlinear least-squares problem whenever a new constraint arrives, at the highest cost but with far more resilience to bad associations via robust loss functions like Huber.</p>
-          <table>
-            <caption><strong>Table 1.1</strong> — Choosing a state-estimation backbone</caption>
-            <thead><tr><th>Method</th><th>Compute cost</th><th>Can revise past states?</th><th>Typical use</th></tr></thead>
-            <tbody>
-              <tr><td>EKF</td><td>Low</td><td>No</td><td>Real-time flight controller state (ArduPilot EKF3)</td></tr>
-              <tr><td>UKF</td><td>Medium–high</td><td>No</td><td>Strongly nonlinear systems where EKF linearization breaks down</td></tr>
-              <tr><td>Factor graph</td><td>Highest</td><td>Yes (smoothing)</td><td>Global SLAM back-end, loop closure (Cartographer, GTSAM/iSAM2)</td></tr>
-            </tbody>
-          </table>
-          <p>ArduPilot uses EKF because flight-controller compute — an STM32 — is tight, and the attitude/position dynamics at typical update rates aren't nonlinear enough within a single step to justify UKF's cost. It's a compute-budget decision, not an accuracy ceiling.</p>
+          <p>State estimation algorithms trade off computational complexity, non-linear representation accuracy, and smoothing capabilities across past states.</p>
+
+          <h4>1. Extended Kalman Filter (EKF)</h4>
+          <p>EKF linearizes non-linear dynamics $f(x, u)$ and measurement models $h(x)$ using first-order Taylor series expansions around the current estimate state $\hat{x}_k$ via Jacobian matrices $F_k = \frac{\partial f}{\partial x}\big|_{\hat{x}_{k-1}}$ and $H_k = \frac{\partial h}{\partial x}\big|_{\hat{x}_k^-}$:</p>
+          <div class="math-block">
+            $$\text{Prediction: } \hat{x}_k^- = f(\hat{x}_{k-1}, u_k), \quad P_k^- = F_k P_{k-1} F_k^T + Q_k$$
+            $$\text{Update: } K_k = P_k^- H_k^T \left( H_k P_k^- H_k^T + R_k \right)^{-1}, \quad \hat{x}_k = \hat{x}_k^- + K_k \left( z_k - h(\hat{x}_k^-) \right), \quad P_k = (I - K_k H_k) P_k^-$$
+          </div>
+          <p><strong>Limitation:</strong> Unimodal Gaussian assumption. Once a state update is finalized at step $k$, past estimates cannot be revised upon receiving out-of-order measurements or loop closures.</p>
+
+          <h4>2. Unscented Kalman Filter (UKF)</h4>
+          <p>UKF avoids computing analytical Jacobians. It deterministically samples $2L+1$ <strong>Sigma Points</strong> $\chi_i$ around state mean $\mu$ with covariance $P$ using the Unscented Transform ($\gamma = \sqrt{L + \lambda}$):</p>
+          <div class="math-block">
+            $$\chi_0 = \mu, \quad \chi_i = \mu + \left(\sqrt{(L+\lambda)P}\right)_i, \quad \chi_{i+L} = \mu - \left(\sqrt{(L+\lambda)P}\right)_i$$
+          </div>
+          <p>Sigma points are passed directly through the exact non-linear function $Y_i = f(\chi_i)$, capturing 2nd-order Taylor series terms. Compute cost scales as $\mathcal{O}(L^3)$ due to matrix square root (Cholesky decomposition) per update step.</p>
+
+          <h4>3. Factor Graph Optimization (Smoothing / iSAM2)</h4>
+          <p>Maintains a graph where nodes represent robot states $X = \{x_0, \dots, x_N\}$ and edges represent non-linear factor costs $f_k(X_k)$. Solves the full joint Maximum A Posteriori (MAP) inference via non-linear least squares:</p>
+          <div class="math-block">
+            $$X^* = \arg\min_{X} \sum_{k} \| h_k(X_k) - z_k \|_{\Sigma_k}^2$$
+          </div>
+          <p>Using <strong>iSAM2</strong> (incremental Smoothing and Mapping), factor graphs convert non-linear factors into a Bayes Tree, updating only affected variables during incremental steps, allowing past state revision upon loop closure.</p>
+
+          <h4>4. Why ArduPilot Selected EKF3</h4>
+          <p>ArduPilot runs its primary flight controller loop on STM32 microcontrollers (Cortex-M7 at $216\text{MHz}$). EKF3 maintains a 24-state vector (Position, Velocity, Quaternion Attitude, Gyro/Accel Biases, Earth Magnetic Field, Body Magnetic Field, Wind Velocity). The EKF prediction/update cycle completes in $&lt;150\mu\text{s}$, fitting tightly within the $1\text{kHz}$ RTOS task loop. Factor graphs are computationally impossible on bare-metal MCU hardware due to dynamic memory requirements and unbounded optimization execution times.</p>
         </div>
 
         <div class="section" id="q4">
           <div class="section-head"><span class="section-num">1.4</span><h3>How does vision-based state estimation degrade under occlusion or IR obstruction?</h3></div>
           <div class="tag-line">rating — likely</div>
-          <p>A pipeline that leans on a single vision or IR source treats occlusion as a total dropout rather than graceful degradation — the estimator has nothing left to fall back on the instant the marker or beacon is blocked. The fix is redundancy in the fusion hierarchy: IMU as the high-rate backbone driving prediction, vision or IR as a lower-rate correction layered on top, so a few hundred milliseconds of occlusion simply widens the covariance instead of losing the estimate outright. I would also gate incoming vision measurements with a Mahalanobis-distance test, so a corrupted or partially-occluded reading gets rejected rather than blindly fused in and dragging the estimate off course.</p>
+          <p>Visual-Inertial Odometry (VIO) degrades rapidly under optical occlusion, low texture, or IR oversaturation. Robust estimation architectures prevent filter divergence via <strong>Mahalanobis distance measurement gating</strong> and <strong>covariance inflation management</strong>.</p>
+
+          <h4>1. Outlier Gating via Mahalanobis Distance</h4>
+          <p>Before fusing an incoming visual landmark observation $z_k$, the estimator computes the residual covariance $S_k = H_k P_k^- H_k^T + R_k$ and innovation $\nu_k = z_k - h(\hat{x}_k^-)$. The squared Mahalanobis distance $d_M^2$ is evaluated against a Chi-Squared $\chi^2$ distribution gate threshold:</p>
+          <div class="math-block">
+            $$d_M^2 = \nu_k^T S_k^{-1} \nu_k &lt; \chi^2_{\alpha, m}$$
+          </div>
+          <p>If $d_M^2 &gt; \chi^2$ (e.g., due to lens smudge or partial occlusion producing corrupted feature positions), the measurement is rejected instantly, preventing corrupted updates from pulling the state estimate off track.</p>
+
+          <h4>2. Covariance Growth During Blind Dead-Reckoning</h4>
+          <p>When complete visual dropout occurs (e.g., passing through smoke or optical sensor failure), the filter stops applying measurement update equations ($K_k = 0$). State propagation relies exclusively on IMU accelerometer and gyroscope integration:</p>
+          <div class="math-block">
+            $$P_{k+1} = F_k P_k F_k^T + Q_k$$
+          </div>
+          <p>In the absence of correction updates $R_k$, the position uncertainty covariance $P_{pp}$ grows exponentially with time $t^3$ (due to double-integration of uncorrected accelerometer bias $b_a$).</p>
+
+          <h4>3. Visual Relocalization &amp; State Recovery Sequence</h4>
+          <pre><code class="language-cpp">// Pseudocode: VIO Recovery State Machine
+if (tracked_features_count &lt; MIN_FEATURES_THRESHOLD) {
+    estimator_status = VIO_TRACKING_LOST;
+    // Freeze visual updates, rely on IMU + Baro dead reckoning
+    fuse_visual_updates = false;
+} else if (estimator_status == VIO_TRACKING_LOST) {
+    // Attempt 3D-2D PnP RANSAC alignment against keyframe map
+    Eigen::Matrix4d T_recovery;
+    if (solve_pnp_ransac(current_frame, keyframe_database, T_recovery)) {
+        // Reset Error State EKF covariance and re-align state vector
+        esekf.reset_attitude_and_position(T_recovery);
+        fuse_visual_updates = true;
+        estimator_status = VIO_NOMINAL;
+    }
+}</code></pre>
         </div>
 
         <div class="section" id="q5">
           <div class="section-head"><span class="section-num">1.5</span><h3>How do you fuse sensors at very different rates — IMU at 1kHz, camera at 30Hz, GPS at 5Hz?</h3></div>
           <div class="tag-line">rating — likely</div>
+          <p>Multi-rate sensor fusion requires an <strong>Error-State Kalman Filter (ESKF)</strong> coupled with a temporal circular buffer to handle asynchronous measurement latency without blocking high-rate prediction.</p>
+
+          <h4>1. Error-State Kalman Filter Split</h4>
+          <p>The state is split into true state $x$, nominal state $\tilde{x}$, and error state $\delta x$ ($x = \tilde{x} \oplus \delta x$):</p>
+          <ul>
+            <li><strong>Nominal State $\tilde{x}$ ($1\text{kHz}$):</strong> Propagated asynchronously by high-rate IMU readings via raw kinematic integration (non-linear manifold integration). No covariance calculations in this fast path.</li>
+            <li><strong>Error State $\delta x$ (Asynchronous):</strong> Linearized error dynamics $\delta \dot{x} = F_{\text{err}} \delta x + w$. Covariance $P$ is updated only when lower-rate sensors arrive.</li>
+          </ul>
+
+          <h4>2. Delayed Measurement Handling via Ring Buffer</h4>
           <figure>
-            <svg viewBox="0 0 640 190" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Loosely coupled sensor fusion diagram">
-              <rect x="230" y="20" width="180" height="50" rx="5" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.5"/>
-              <text x="320" y="42" text-anchor="middle" font-family="Source Serif 4" font-size="13">EKF state</text>
-              <text x="320" y="58" text-anchor="middle" font-family="Source Serif 4" font-size="13">(prediction + correction)</text>
-              <path d="M320,70 V150" stroke="#4A453B" stroke-width="1" stroke-dasharray="3,3"/>
-
-              <rect x="40" y="100" width="140" height="42" rx="4" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/>
-              <text x="110" y="126" text-anchor="middle" font-family="IBM Plex Mono" font-size="11">IMU · 1000 Hz</text>
-              <path d="M180,121 H230" stroke="#2C3A52" stroke-width="1.4" marker-end="url(#arrowC)"/>
-              <text x="185" y="112" font-family="IBM Plex Mono" font-size="9" fill="#4A453B">predict</text>
-
-              <rect x="250" y="100" width="140" height="42" rx="4" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/>
-              <text x="320" y="126" text-anchor="middle" font-family="IBM Plex Mono" font-size="11">Camera · 30 Hz</text>
-
-              <rect x="460" y="100" width="140" height="42" rx="4" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/>
-              <text x="530" y="126" text-anchor="middle" font-family="IBM Plex Mono" font-size="11">GPS · 5 Hz</text>
-              <path d="M460,121 H410" stroke="#2C3A52" stroke-width="1.4" marker-end="url(#arrowC)"/>
-              <text x="415" y="112" font-family="IBM Plex Mono" font-size="9" fill="#4A453B" text-anchor="end">correct (async)</text>
-              <defs><marker id="arrowC" markerWidth="8" markerHeight="8" refX="6" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#2C3A52"/></marker></defs>
+            <svg viewBox="0 0 640 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Ring buffer state rewind">
+              <rect x="20" y="40" width="580" height="45" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/>
+              <line x1="100" y1="40" x2="100" y2="85" stroke="#4A453B"/>
+              <line x1="220" y1="40" x2="220" y2="85" stroke="#4A453B"/>
+              <line x1="340" y1="40" x2="340" y2="85" stroke="#7C2E2A" stroke-width="2"/>
+              <line x1="460" y1="40" x2="460" y2="85" stroke="#4A453B"/>
+              <text x="60" y="67" font-family="IBM Plex Mono" font-size="10">t - 100ms</text>
+              <text x="145" y="67" font-family="IBM Plex Mono" font-size="10">t - 75ms</text>
+              <text x="250" y="67" font-family="IBM Plex Mono" font-size="10" fill="#7C2E2A">Camera (t_cam)</text>
+              <text x="380" y="67" font-family="IBM Plex Mono" font-size="10">t - 25ms</text>
+              <text x="500" y="67" font-family="IBM Plex Mono" font-size="10">t_now (1kHz)</text>
+              <path d="M340,95 Q420,130 500,95" stroke="#7C2E2A" stroke-width="1.4" fill="none" marker-end="url(#arrRewind)"/>
+              <text x="420" y="145" text-anchor="middle" font-family="Source Serif 4" font-size="11" fill="#7C2E2A">Re-propagate error state from t_cam to t_now</text>
+              <defs><marker id="arrRewind" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#7C2E2A"/></marker></defs>
             </svg>
-            <figcaption><strong>Fig. 1.3</strong> — Loosely-coupled fusion: IMU drives continuous prediction; slower sensors apply asynchronous corrections, each weighted by its own noise covariance.</figcaption>
+            <figcaption><strong>Fig. 1.2</strong> — Ring buffer rewinds the state to $t_{\text{cam}}$, applies camera measurement update $K$, then re-integrates IMU inputs up to $t_{\text{now}}$.</figcaption>
           </figure>
-          <p>This is exactly the pattern ArduPilot's EKF3 already implements, and it's what I would extend if I added a RealSense-based VIO correction to my own stack — the RealSense simply becomes another asynchronous update source slotted into the existing prediction/correction loop, not a redesign of the estimator itself.</p>
+
+          <p>To fuse a camera measurement arriving at $t_{\text{now}}$ with timestamp $t_{\text{cam}} = t_{\text{now}} - 80\text{ms}$:</p>
+          <ol>
+            <li>Maintain a circular buffer of historical nominal states $\tilde{x}(\tau)$ and covariance matrices $P(\tau)$ for the past $200\text{ms}$.</li>
+            <li>Retrieve stored state $\tilde{x}(t_{\text{cam}})$ and $P(t_{\text{cam}})$ corresponding to frame capture time.</li>
+            <li>Compute innovation $\nu = z_{\text{cam}} - h(\tilde{x}(t_{\text{cam}}))$ and Kalman Gain $K$.</li>
+            <li>Update error state $\delta x(t_{\text{cam}}) = K \nu$ and inject back into nominal state: $\tilde{x}_{\text{corrected}}(t_{\text{cam}}) = \tilde{x}(t_{\text{cam}}) \oplus \delta x(t_{\text{cam}})$.</li>
+            <li>Re-propagate nominal state from $t_{\text{cam}}$ to $t_{\text{now}}$ using stored IMU readings in the buffer.</li>
+          </ol>
         </div>
       </section>
 
@@ -357,72 +441,118 @@
       <section class="chapter" id="ch2" data-title="II · Navigation">
         <div class="chapter-kicker">Chapter II</div>
         <h2>Navigation Architecture</h2>
-        <p class="chapter-lede">Expect at least one design-from-scratch whiteboard question here. Structure every answer in the same order — perception, localization, planning, control — and name the real system you've shipped at each layer rather than describing the abstraction alone.</p>
+        <p class="chapter-lede">Designing a real-world autonomy navigation stack from physical sensor drivers down to motor torque control requires modular layer boundary isolation, dynamic costmap representation, and mathematically sound trajectory planning algorithms.</p>
 
         <div class="section" id="q6">
           <div class="section-head"><span class="section-num">2.1</span><h3>Design a navigation stack from sensor input to actuator command.</h3></div>
           <div class="tag-line">rating — likely · whiteboard-style</div>
-          <figure>
-            <svg viewBox="0 0 640 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Navigation stack layers">
-              <g font-family="Source Serif 4" font-size="13">
-                <rect x="60" y="10" width="520" height="34" rx="4" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.3"/><text x="320" y="32" text-anchor="middle">Perception — RealSense / GPS / raw sensors</text>
-                <rect x="60" y="54" width="520" height="34" rx="4" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.3"/><text x="320" y="76" text-anchor="middle">Localization — ArduPilot EKF3 (sensor fusion)</text>
-                <rect x="60" y="98" width="520" height="34" rx="4" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.3"/><text x="320" y="120" text-anchor="middle">Mapping — occupancy grid / point cloud</text>
-                <rect x="60" y="142" width="520" height="34" rx="4" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.3"/><text x="320" y="164" text-anchor="middle">Global planner — mission-planner waypoints (A*/D*)</text>
-                <rect x="60" y="186" width="520" height="34" rx="4" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.3"/><text x="320" y="208" text-anchor="middle">Local planner — ArduPilot guidance loop (DWA/TEB-class)</text>
-                <rect x="60" y="230" width="520" height="34" rx="4" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.3"/><text x="320" y="252" text-anchor="middle">Controller — PID/MPC velocity → command</text>
-                <rect x="60" y="266" width="520" height="30" rx="4" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.3"/><text x="320" y="286" text-anchor="middle">Actuator interface — PWM / EtherCAT</text>
-              </g>
-              <path d="M320,44 V54 M320,88 V98 M320,132 V142 M320,176 V186 M320,220 V230 M320,264 V266" stroke="#4A453B" stroke-width="1.2" marker-end="url(#arrowD)"/>
-              <defs><marker id="arrowD" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4A453B"/></marker></defs>
-            </svg>
-            <figcaption><strong>Fig. 2.1</strong> — Seven layers, sensor to actuator, labeled with your actual drone stack rather than generic placeholders.</figcaption>
-          </figure>
-          <p>Naming the real system you've shipped, layer by layer, reads far more senior than reciting the abstraction in a vacuum — it shows you've had to make the trade-offs at each boundary, not just memorized the diagram.</p>
+          <p>A production robotics navigation stack divides responsibilities across 7 discrete real-time layers to maintain low control latency and deterministic failover:</p>
+
+          <table>
+            <caption><strong>Table 2.1</strong> — Complete 7-Layer Autonomous Navigation Architecture</caption>
+            <thead><tr><th>Layer</th><th>Component</th><th>Update Rate</th><th>Input / Output Data</th></tr></thead>
+            <tbody>
+              <tr><td>1. Hardware Drivers</td><td>LiDAR / Stereo RealSense / IMU / Encoders</td><td>$30\text{Hz} - 1\text{kHz}$</td><td>Raw SPI/USB/Ethernet packets $\rightarrow$ DMA buffers</td></tr>
+              <tr><td>2. State Estimation</td><td>ArduPilot EKF3 / ESKF / ORB-SLAM3</td><td>$100\text{Hz} - 1\text{kHz}$</td><td>Sensors $\rightarrow$ 6-DOF Pose $\mathbf{T}_{w,b} \in SE(3) + \mathbf{v}, \mathbf{\omega}$</td></tr>
+              <tr><td>3. Mapping &amp; Costmap</td><td>Voxel Grid Layer / Spatio-Temporal Costmap</td><td>$20\text{Hz}$</td><td>Pointclouds $\rightarrow$ 2.5D Occupancy Grid ($C(x,y) \in [0, 255]$)</td></tr>
+              <tr><td>4. Global Planner</td><td>Hybrid A* on $SE(2)$ / Kinematic RRT*</td><td>$1 - 2\text{Hz}$ / Event</td><td>Costmap + Goal $\rightarrow$ Global Path Waypoints ($\mathbf{x}_{1:N}$)</td></tr>
+              <tr><td>5. Local Planner</td><td>Dynamic Window Approach (DWA) / TEB Planner</td><td>$20 - 50\text{Hz}$</td><td>Global Path + Live Obstacles $\rightarrow$ Velocity Command $(v, \omega)$</td></tr>
+              <tr><td>6. Feedback Controller</td><td>Model Predictive Control (MPC) / Cascade PID</td><td>$100\text{Hz}$</td><td>$(v, \omega)$ + State $\rightarrow$ Actuator Wrench / Motor Speeds</td></tr>
+              <tr><td>7. Motor Interface</td><td>CAN bus / EtherCAT Master Driver</td><td>$200\text{Hz} - 200\text{kHz}$</td><td>Motor Speeds $\rightarrow$ PWM / CAN-FD Frames / EtherCAT Datagrams</td></tr>
+            </tbody>
+          </table>
+
+          <h4>Layer Boundary Control Flow &amp; Shared Memory Isolation</h4>
+          <p>To achieve sub-$10\text{ms}$ perception-to-actuation latency without ROS message copy overhead, perception and local planning modules communicate via <strong>POSIX Shared Memory (`shm_open` + `mmap`)</strong> lock-free ring buffers, with synchronization signaled by low-latency eventfd semaphores.</p>
         </div>
 
         <div class="section" id="q7">
           <div class="section-head"><span class="section-num">2.2</span><h3>Architect a "return to origin if GPS is disrupted" system, as a whiteboard design prompt.</h3></div>
           <div class="tag-line">rating — likely</div>
-          <p>Continuously log a lightweight pose graph — keyframe plus relative transform to the last keyframe — while GPS is healthy, essentially as a free side effect of normal flight. The moment GPS is lost, switch the estimator to vision/IMU dead-reckoning and replan the return as a traversal of the last N keyframes, rather than a single absolute-position flight to a remembered GPS fix (see Fig. 1.2). Relative transforms compound error more gracefully than trusting one absolute coordinate, and periodic loop closure against earlier keyframes corrects drift along the way.</p>
+          <p>When presenting a whiteboard architecture for emergency return under GPS disruption, structure the design into <strong>Perception Degradation Detection</strong>, <strong>Graph-Based Trajectory Inversion</strong>, and <strong>Deterministic Failover Execution</strong>.</p>
+
+          <h4>1. Detection &amp; Trigger Logic</h4>
+          <p>GPS degradation is flagged when GPS horizontal dilution of precision $HDOP &gt; 2.5$, satellite count $N_{sat} &lt; 6$, or EKF position innovation variance exceeds $3\sigma$ threshold for $.&gt;500\text{ms}$.</p>
+
+          <h4>2. Whiteboard Module Breakdown</h4>
+          <pre><code class="language-cpp">class EmergencyReturnSystem {
+public:
+    void onGpsLoss() {
+        // Step 1: Lock current dead-reckoning origin frame
+        Eigen::Matrix4d T_fail = local_ekf_.getPose();
+        
+        // Step 2: Extract last N valid keyframes from ring buffer
+        auto path = pose_graph_.getBacktrackPath(50 /* max keyframes */);
+        
+        // Step 3: Instantiate local dynamic obstacle avoidance planner
+        dwa_planner_.setTargetTrajectory(path);
+        
+        // Step 4: Execute reverse flight state machine
+        state_ = SystemState::RETRACTING_ALONG_GRAPH;
+    }
+};</code></pre>
         </div>
 
         <div class="section" id="q8">
           <div class="section-head"><span class="section-num">2.3</span><h3>Global vs. local planners — what's the difference, and when do you re-plan?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <table>
-            <caption><strong>Table 2.1</strong> — Global vs. local planning</caption>
-            <thead><tr><th></th><th>Global planner</th><th>Local planner</th></tr></thead>
-            <tbody>
-              <tr><td>Input</td><td>Full known map</td><td>Rolling window of live sensor data</td></tr>
-              <tr><td>Assumption</td><td>Map is static</td><td>Handles dynamic obstacles</td></tr>
-              <tr><td>Frequency</td><td>On map or goal change</td><td>Every control cycle (10–20 Hz)</td></tr>
-              <tr><td>Algorithm family</td><td>A*, D*</td><td>DWA, TEB</td></tr>
-            </tbody>
-          </table>
-          <p>Re-plan globally when the map itself changes meaningfully or the goal changes; re-plan locally every cycle regardless of whether anything changed — that's the loop actually keeping you safe in real time.</p>
+          <p>Global and local planners operate on fundamentally different mathematical abstractions, search spaces, and time horizons.</p>
+
+          <h4>1. Global Planner: Hybrid A* on $SE(2)$</h4>
+          <p>Finds a globally optimal path from start to goal over the complete known map. Standard A* treats the robot as a point on a discrete 2D grid. <strong>Hybrid A*</strong> searches continuous 3D state space $(x, y, \theta)$, enforcing non-holonomic kinematic constraints (minimum turning radius $R_{\min}$ via Dubins/Reeds-Shepp curves):</p>
+          <div class="math-block">
+            $$f(n) = g(n) + h(n), \quad h(n) = \max\left( h_{\text{Reed-Shepp}}(n), h_{\text{2D-A*}}(n) \right)$$
+          </div>
+
+          <h4>2. Local Planner: Dynamic Window Approach (DWA)</h4>
+          <p>Operates in velocity space $(v, \omega)$ at $20\text{Hz}$ within a rolling sensor window. Computes admissible velocity search space $V_r = V_s \cap V_a \cap V_d$ (where $V_s$ is maximum hardware velocity, $V_a$ is braking distance velocity limit, $V_d$ is acceleration limits). Evaluates candidate trajectories over horizon $\tau$ by maximizing objective function $G(v, \omega)$:</p>
+          <div class="math-block">
+            $$G(v, \omega) = \alpha \cdot \text{heading}(v, \omega) + \beta \cdot \text{dist}(v, \omega) + \gamma \cdot \text{velocity}(v, \omega)$$
+          </div>
+
+          <h4>3. Re-planning Triggers</h4>
+          <ul>
+            <li><strong>Local Planner:</strong> Re-calculates velocity commands $(v, \omega)$ every control loop iteration ($20\text{Hz}-50\text{Hz}$) regardless of map changes.</li>
+            <li><strong>Global Planner:</strong> Re-plans asynchronously when: (a) a new obstacle intersects the current global path within distance $D_{\text{check}}$, (b) goal pose moves, or (c) local planner reports progress stall for $T_{\text{stall}} &gt; 3.0\text{s}$.</li>
+          </ul>
         </div>
 
         <div class="section" id="q9">
           <div class="section-head"><span class="section-num">2.4</span><h3>Explain ROS's costmap/nav2 concept and how you'd translate it into ga-msg.</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>Costmaps layer the static map, an inflation buffer, and dynamic obstacle detections into one cost surface the planner queries every cycle. In ga-msg I would replicate that layering as a shared-memory grid that perception nodes write into and the planner node reads from over our own pub/sub transport — the same conceptual decoupling ROS provides, without ROS's message-type and tf-tree machinery, which is precisely why ga-msg exists: ROS-like decoupling without the per-message serialization overhead that hurts on high-bandwidth hardware streams.</p>
+          <p>ROS Nav2 Costmap2D represents environment cost by stacking discrete functional layers: Static Layer, Obstacle Layer, Inflation Layer, and Range Sensor Layer. Each layer writes integer cost values $[0, 255]$ into a shared grid.</p>
+
+          <h4>Translating Nav2 Costmap into ga-msg Architecture</h4>
+          <p>ROS 2 Costmap2D suffers from dynamic memory allocations and serialization latency over DDS when sending full costmap grids. In our custom <code>ga-msg</code> framework, costmaps are implemented via zero-copy POSIX shared memory ring buffers:</p>
+          <pre><code class="language-cpp">// ga-msg Shared Memory Costmap Representation
+struct SharedCostmapGrid {
+    uint32_t width;
+    uint32_t height;
+    double resolution;
+    double origin_x;
+    double origin_y;
+    uint8_t cells[1024 * 1024]; // 1MB zero-copy flat array
+};
+// Readers (Local Planner) and Writers (Perception) map memory directly:
+int shm_fd = shm_open("/ga_costmap_shm", O_RDWR, 0666);
+SharedCostmapGrid* costmap = (SharedCostmapGrid*)mmap(NULL, sizeof(SharedCostmapGrid), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd, 0);</code></pre>
         </div>
 
         <div class="section" id="q10">
           <div class="section-head"><span class="section-num">2.5</span><h3>What is a costmap inflation layer, and why does it matter?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <figure>
-            <svg viewBox="0 0 400 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Costmap inflation diagram">
-              <rect x="170" y="55" width="30" height="30" fill="#232019"/>
-              <circle cx="185" cy="70" r="45" fill="none" stroke="#7C2E2A" stroke-width="1.4" stroke-dasharray="3,3"/>
-              <circle cx="185" cy="70" r="65" fill="none" stroke="#2C3A52" stroke-width="1.2" stroke-dasharray="2,4"/>
-              <text x="185" y="20" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="#4A453B">obstacle inflated by robot footprint + margin</text>
-              <text x="185" y="132" text-anchor="middle" font-family="Source Serif 4" font-size="11" fill="#232019">raw obstacle → footprint radius → safety margin</text>
-            </svg>
-            <figcaption><strong>Fig. 2.2</strong> — Inflation lets the planner treat the robot as a point while still respecting real geometry.</figcaption>
-          </figure>
-          <p>Without inflation, a planner could legally route the robot's center directly along an obstacle's edge — mathematically valid for a point, physically a collision for anything with actual width.</p>
+          <p>The inflation layer inflates obstacle boundaries by propagating costs outward from obstacle cells to ensure the planner accounts for the robot's physical footprint while treating the robot center as a point mass.</p>
+
+          <h4>Mathematical Inflation Decay Function</h4>
+          <p>For any cell at Euclidean distance $d$ from the nearest obstacle cell:</p>
+          <div class="math-block">
+            $$\text{Cost}(d) = \begin{cases} 
+            254 (\text{LETHAL}), &amp; \text{if } d \le r_{\text{inscribed}} \\
+            (C_{\text{inscribed}} - 1) \cdot e^{-\alpha \cdot (d - r_{\text{inscribed}})}, &amp; \text{if } r_{\text{inscribed}} &lt; d \le r_{\text{inflation}} \\
+            0, &amp; \text{if } d &gt; r_{\text{inflation}}
+            \end{cases}$$
+          </div>
+          <p>where $r_{\text{inscribed}}$ is the radius of the robot's inscribed circle, $r_{\text{inflation}}$ is the maximum inflation radius, and $\alpha$ is the cost decay factor. Without inflation, global path planners route waypoints directly along obstacle edges, causing physical chassis collisions when turning.</p>
         </div>
       </section>
 
@@ -430,95 +560,98 @@
       <section class="chapter" id="ch3" data-title="III · Firmware">
         <div class="chapter-kicker">Chapter III</div>
         <h2>Firmware &amp; RTOS</h2>
-        <p class="chapter-lede">PX4/NuttX and ArduPilot/EtherCAT are the two flight-firmware architectures most likely to come up here. Your 200kHz control loop and the EndureAir failsafe story are your strongest material in the entire manual; they belong here.</p>
+        <p class="chapter-lede">Hard real-time embedded flight systems demand sub-microsecond timing determinism, strict memory allocation limits, and robust fieldbus communication protocols.</p>
 
         <div class="section" id="q11">
           <div class="section-head"><span class="section-num">3.1</span><h3>NuttX vs. bare-metal vs. FreeRTOS — how do you choose for a flight controller?</h3></div>
           <div class="tag-line">rating — near-certain</div>
+          <p>Choosing an OS architecture for flight control requires evaluating real-time determinism against software abstraction convenience.</p>
+
           <table>
-            <caption><strong>Table 3.1</strong> — Flight-controller software architectures</caption>
-            <thead><tr><th></th><th>NuttX (PX4)</th><th>ArduPilot</th><th>Bare-metal / FreeRTOS</th></tr></thead>
+            <caption><strong>Table 3.1</strong> — Real-Time OS Architecture Comparison</caption>
+            <thead><tr><th>Dimension</th><th>Bare-Metal Super-Loop</th><th>FreeRTOS</th><th>NuttX (PX4 Architecture)</th></tr></thead>
             <tbody>
-              <tr><td>Model</td><td>POSIX-like RTOS, modular uORB pub/sub</td><td>Traditionally single-loop, modernized over time</td><td>No OS abstraction, or a minimal scheduler</td></tr>
-              <tr><td>Dev speed</td><td>Fast — filesystem, drivers, threads provided</td><td>Moderate — mature ecosystem, longer flight history</td><td>Slow — everything hand-built</td></tr>
-              <tr><td>Determinism</td><td>Good, not maximal</td><td>Good, proven in the field</td><td>Highest — no abstraction overhead</td></tr>
-              <tr><td>Best for</td><td>Custom research flight stacks</td><td>Flight-proven builds, broad hardware support</td><td>Hard-real-time loops (my 200kHz EtherCAT/CAN loop)</td></tr>
+              <tr><td>Scheduling Model</td><td>Single non-preemptive loop / ISR interrupts</td><td>Preemptive priority-based microkernel</td><td>POSIX-compliant RTOS microkernel</td></tr>
+              <tr><td>Memory Footprint</td><td>Minimal ($&lt;16\text{KB}$ Flash, $&lt;4\text{KB}$ RAM)</td><td>Small ($&lt;32\text{KB}$ Flash, $&lt;8\text{KB}$ RAM)</td><td>Large ($&gt;512\text{KB}$ Flash, $&gt;128\text{KB}$ RAM)</td></tr>
+              <tr><td>POSIX Compatibility</td><td>None</td><td>None (Minimal POSIX wrapper)</td><td>Full POSIX VFS (`open`, `read`, `pthread`)</td></tr>
+              <tr><td>Inter-Thread Overhead</td><td>Global variables / volatile flags</td><td>Direct Task Notifications / Queue pointers</td><td>uORB publish-subscribe bus queues</td></tr>
+              <tr><td>Worst-Case Jitter</td><td>Lowest ($&lt;100\text{ns}$)</td><td>Low ($&lt;1\mu\text{s}$)</td><td>Moderate ($5-15\mu\text{s}$)</td></tr>
             </tbody>
           </table>
-          <p>The pattern to communicate: convenience and determinism sit on a spectrum, and you choose per subsystem, not per project. NuttX buys you speed of development on complex autopilot logic; bare-metal buys you a timing guarantee a heavier abstraction layer would put at risk.</p>
-          <div class="margin-note"><div class="mn-label">Marginalia</div>Expect a follow-up of "why not NuttX for everything, then?" The honest answer is: I would, for anything that isn't sitting directly in a hard-real-time hot path.</div>
+
+          <p>For high-frequency actuator loops ($200\text{kHz}$ motor control), bare-metal or FreeRTOS with static memory allocation (`xTaskCreateStatic`) is mandatory. For full-featured flight stacks with filesystem logging and dynamic driver loading, NuttX provides POSIX APIs at the cost of higher interrupt latency and scheduling jitter.</p>
         </div>
 
         <div class="section" id="q12">
           <div class="section-head"><span class="section-num">3.2</span><h3>Explain your 200kHz EtherCAT/CAN control loop — what makes that hard?</h3></div>
           <div class="tag-line">rating — near-certain · your strongest story</div>
-          <figure>
-            <svg viewBox="0 0 640 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="200kHz loop timing budget">
-              <rect x="20" y="30" width="600" height="40" fill="#EEEAE0" stroke="#232019" stroke-width="1.4"/>
-              <line x1="20" y1="30" x2="20" y2="70" stroke="#232019"/><line x1="620" y1="30" x2="620" y2="70" stroke="#232019"/>
-              <line x1="220" y1="30" x2="220" y2="70" stroke="#7C2E2A" stroke-dasharray="3,3"/>
-              <line x1="460" y1="30" x2="460" y2="70" stroke="#7C2E2A" stroke-dasharray="3,3"/>
-              <text x="120" y="55" text-anchor="middle" font-family="IBM Plex Mono" font-size="11">read sensors</text>
-              <text x="340" y="55" text-anchor="middle" font-family="IBM Plex Mono" font-size="11">PI/PD compute</text>
-              <text x="540" y="55" text-anchor="middle" font-family="IBM Plex Mono" font-size="11">write actuator</text>
-              <text x="320" y="95" text-anchor="middle" font-family="Source Serif 4" font-size="12" fill="#7C2E2A">total budget: 5 μs per cycle (200 kHz)</text>
-              <text x="320" y="115" text-anchor="middle" font-family="Source Serif 4" font-size="11" fill="#4A453B" font-style="italic">no malloc · no blocking calls · fixed-point or single-cycle FPU only</text>
-            </svg>
-            <figcaption><strong>Fig. 3.1</strong> — At 5 μs per cycle, every abstraction — a cache miss, a non-trivial call prologue — eats directly into control margin.</figcaption>
-          </figure>
-          <p>I kept the hot path entirely allocation-free and free of blocking calls, and used PI/PD control with a hybrid Kp-Kd term tuned per actuator so it converges without overshoot inside that budget. EtherCAT's distributed-clock synchronization was the other critical piece: it keeps every actuator phase-aligned to a shared time base rather than drifting relative to one another, which matters enormously once several actuators need to move in coordination.</p>
+          <p>At a $200\text{kHz}$ sampling rate, the total timing budget per cycle is precisely **$5.0\mu\text{s}$**. Any CPU stall, cache miss, or dynamic allocation instantly causes deadline overrun.</p>
+
+          <h4>1. 5.0 Microsecond Cycle Budget Breakdown</h4>
+          <ul>
+            <li><strong>$0.0 - 1.0\mu\text{s}$: SPI / DMA Sensor Readout:</strong> Read raw gyro/encoder registers over high-speed SPI ($40\text{MHz}$) directly into MCU Tightly-Coupled Memory (ITCM/DTCM).</li>
+            <li><strong>$1.0 - 3.0\mu\text{s}$: Control Math Execution:</strong> Execute floating-point PI/PD loop. Uses Cortex-M7 hardware single-cycle FPU instructions. Trigonometric calculations use lookup tables. Zero `malloc` calls.</li>
+            <li><strong>$3.0 - 4.2\mu\text{s}$: Actuator Wrench / Motor Command Assembly:</strong> Format EtherCAT Process Data Object (PDO) or CAN-FD frame bytes. Write directly to peripheral registers.</li>
+            <li><strong>$4.2 - 5.0\mu\text{s}$: Timing Headroom / Margin:</strong> Safety margin reserved for interrupt context switching.</li>
+          </ul>
+
+          <h4>2. Hardware Management: DTCM &amp; Cache Invalidation</h4>
+          <p>Standard MCU SRAM passes through L1 Data Cache, introducing non-deterministic cache-miss latencies ($20-50$ CPU cycles). We map the hot control loop memory directly into **Data Tightly-Coupled Memory (DTCM)** at address `0x20000000`, guaranteeing single-cycle zero-wait-state memory access bypass of cache controllers.</p>
         </div>
 
         <div class="section" id="q13">
           <div class="section-head"><span class="section-num">3.3</span><h3>What is priority inversion, and how do you prevent it?</h3></div>
           <div class="tag-line">rating — likely</div>
-          <figure>
-            <svg viewBox="0 0 640 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Priority inversion timeline">
-              <text x="10" y="20" font-family="IBM Plex Mono" font-size="10" fill="#4A453B">HIGH</text>
-              <rect x="60" y="10" width="60" height="18" fill="#7C2E2A"/><text x="90" y="23" text-anchor="middle" font-size="9" fill="#EEEAE0" font-family="IBM Plex Mono">runs</text>
-              <rect x="120" y="10" width="220" height="18" fill="#C99A93" stroke="#7C2E2A" stroke-dasharray="2,2"/><text x="230" y="23" text-anchor="middle" font-size="9" font-family="IBM Plex Mono">BLOCKED on mutex ↓</text>
+          <p>Priority Inversion occurs when a High-Priority Task ($T_H$) is indirectly blocked by a Medium-Priority Task ($T_M$) because $T_H$ is waiting on a mutex held by a Low-Priority Task ($T_L$). $T_M$ preempts $T_L$ (since $T_M &gt; T_L$), extending $T_H$'s wait time indefinitely.</p>
 
-              <text x="10" y="60" font-family="IBM Plex Mono" font-size="10" fill="#4A453B">MED</text>
-              <rect x="180" y="50" width="120" height="18" fill="#2C3A52"/><text x="240" y="63" text-anchor="middle" font-size="9" fill="#EEEAE0" font-family="IBM Plex Mono">preempts low</text>
+          <h4>Priority Inheritance Protocol (PIP) Mechanism</h4>
+          <p>Under PIP, when $T_H$ attempts to acquire a mutex currently held by $T_L$, the RTOS scheduler temporarily elevates the priority of $T_L$ to match $T_H$ ($\text{Priority}(T_L) \leftarrow \text{Priority}(T_H)$). $T_L$ executes without preemption by $T_M$, releases the mutex, and instantly reverts to its original low priority, allowing $T_H$ to acquire the mutex immediately.</p>
 
-              <text x="10" y="100" font-family="IBM Plex Mono" font-size="10" fill="#4A453B">LOW</text>
-              <rect x="60" y="90" width="120" height="18" fill="#8A8577"/><text x="120" y="103" text-anchor="middle" font-size="9" font-family="IBM Plex Mono">holds mutex</text>
-              <rect x="300" y="90" width="60" height="18" fill="#8A8577"/><text x="330" y="103" text-anchor="middle" font-size="9" font-family="IBM Plex Mono">releases</text>
-
-              <path d="M340 28 V90" stroke="#7C2E2A" stroke-width="1" stroke-dasharray="2,2"/>
-              <text x="345" y="130" font-family="Source Serif 4" font-size="11" fill="#7C2E2A" font-style="italic">high-priority task waits behind a task that never held its resource</text>
-            </svg>
-            <figcaption><strong>Fig. 3.2</strong> — Classic priority inversion: a medium-priority task delays the low-priority mutex holder, indirectly stalling the high-priority task.</figcaption>
-          </figure>
-          <p>Priority inheritance fixes this by temporarily boosting the low-priority mutex holder's priority to match the highest task blocked on it, so it finishes and releases the resource before a medium-priority task gets the chance to cut in. I would never let a shared mutex sit inside a 200kHz hot path at all — but for the medium-rate tasks around it, telemetry writeback, parameter updates, this is exactly the class of scheduling bug I'd check for with RTOS trace tooling before trusting timing under real load.</p>
+          <pre><code class="language-c">// FreeRTOS Mutex Creation with Priority Inheritance Enabled
+SemaphoreHandle_t xMutex = xSemaphoreCreateMutex(); 
+// Note: FreeRTOS Mutexes (xSemaphoreCreateMutex) automatically implement PIP.
+// Binary Semaphores (xSemaphoreCreateBinary) DO NOT implement PIP and must never be used for resource locking!</code></pre>
         </div>
 
         <div class="section" id="q14">
           <div class="section-head"><span class="section-num">3.4</span><h3>CAN bus arbitration vs. EtherCAT synchronization — how do they differ?</h3></div>
           <div class="tag-line">rating — likely</div>
-          <table>
-            <caption><strong>Table 3.2</strong> — Fieldbus comparison</caption>
-            <thead><tr><th></th><th>CAN</th><th>EtherCAT</th></tr></thead>
-            <tbody>
-              <tr><td>Topology</td><td>Multi-master bus</td><td>Master–slave, "processing on the fly"</td></tr>
-              <tr><td>Arbitration</td><td>Bitwise non-destructive CSMA/CR by message-ID priority</td><td>Frame passes through every slave sequentially</td></tr>
-              <tr><td>Payload</td><td>8 bytes (CAN 2.0), 64 bytes (CAN-FD)</td><td>Effectively unbounded, Ethernet frame</td></tr>
-              <tr><td>Sync mechanism</td><td>None built-in</td><td>Distributed-clock (DC), microsecond-level</td></tr>
-            </tbody>
-          </table>
-          <p>Debugging low-level glitches on either bus starts at the physical layer — termination resistors, differential-signal integrity on a scope — before moving to a protocol analyzer to check error counters, and finally to firmware, watching for ring-buffer overrun or interrupt latency stalling the driver's read loop.</p>
+          <p>CAN and EtherCAT solve fieldbus communication using fundamentally different physical and data-link layer protocols.</p>
+
+          <h4>1. CAN 2.0 / CAN-FD CSMA/CR Arbitration</h4>
+          <p>CAN is a multi-master broadcast bus using **Carrier Sense Multiple Access with Collision Resolution (CSMA/CR)**. Arbitration occurs bit-by-bit using dominant (`0`, driven low voltage) and recessive (`1`, high impedance) bus states. If Node A transmits CAN ID `0x100` (`00100000000`) and Node B transmits `0x104` (`00100000100`), at the 9th bit Node B sees dominant `0` while outputting `1`, loses arbitration silently, and stops transmitting, allowing Node A's frame to proceed without collision.</p>
+
+          <h4>2. EtherCAT Distributed Clocks (DC) Synchronization</h4>
+          <p>EtherCAT uses a Master-Slave ring topology with **Processing-on-The-Fly**. An Ethernet frame passes through hardware EtherCAT Slave Controller (ESC) ASICs, which extract and insert data within nanoseconds while the frame flows physically through the chip. **Distributed Clocks (DC)** synchronize all slave hardware timers to a master reference clock by measuring propagation delay $t_{\text{prop}}$ across nodes:</p>
+          <div class="math-block">
+            $$t_{\text{prop}} = \frac{(t_4 - t_1) - (t_3 - t_2)}{2}$$
+          </div>
+          <p>This allows EtherCAT slaves to trigger PWM updates simultaneously with sub-microsecond jitter ($&lt;100\text{ns}$).</p>
         </div>
 
         <div class="section" id="q15">
           <div class="section-head"><span class="section-num">3.5</span><h3>How did you bring up ArduPilot on custom hardware (Strix H7 via DFU)?</h3></div>
           <div class="tag-line">rating — likely</div>
-          <p>STM32CubeProgrammer over the DFU bootloader to flash the ArduPilot binary, then a staged bring-up: verify IMU, compass and baro all report sane values in the ground station before touching motors at all, calibrate ESC/RC endpoints, and confirm failsafe behavior — RC loss, GCS loss, battery failsafe — on the bench before ever arming outdoors. I treat failsafe validation as a hard gate, not an afterthought — a hard-won lesson, given the EndureAir loss described in Chapter IX.</p>
+          <p>Bringing up ArduPilot on a custom STM32H7 flight board follows a rigorous hardware validation pipeline:</p>
+
+          <ol>
+            <li><strong>Hardware Definition (`hwdef.dat`):</strong> Define MCU pin assignments, SPI/I2C peripheral clock mapping, DMA channels, and timer PWM pin assignments for ChibiOS compilation.</li>
+            <li><strong>DFU Bootloader Flashing:</strong> Pull `BOOT0` high, connect USB, and flash the compiled `bootloader.bin` via `dfu-util` or `STM32CubeProgrammer`:
+              <pre><code class="language-bash">dfu-util -a 0 -s 0x08000000:leave -D ArduPilot_bootloader.bin</code></pre>
+            </li>
+            <li><strong>Peripheral Communication Verification:</strong> Connect MAVLink GCS console via USB VCP. Query raw SPI sensor registers (e.g., verifying `WHO_AM_I` register `0x75` for MPU6000 / ICM20689 IMUs over SPI).</li>
+            <li><strong>Sensor &amp; Actuator Calibration Gates:</strong> Perform 6-position accelerometer calibration, 3D magnetometer sphere fitting, and verify DShot motor ESC signals on an oscilloscope before mounting propellers.</li>
+          </ol>
         </div>
 
         <div class="section" id="q16">
           <div class="section-head"><span class="section-num">3.6</span><h3>Hard vs. soft real-time — where's the line in your stack?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p><strong>Hard real-time</strong>: missing a deadline is a system failure — the actuator control loop, EtherCAT sync. <strong>Soft real-time</strong>: missing a deadline degrades quality without crashing anything — telemetry UI refresh, video bitrate adaptation. My GA-MSG middleware and GCS console target a 120ms latency budget rather than a hard deadline, while the actuator firmware is strictly hard real-time, and I design the two halves of the stack differently because of that distinction.</p>
+          <p>The distinction between hard and soft real-time is defined by the utility function $U(t)$ when a task deadline $T_{\text{deadline}}$ is missed:</p>
+          <ul>
+            <li><strong>Hard Real-Time ($U(t) \to -\infty$ for $t &gt; T_{\text{deadline}}$):</strong> Missing a deadline constitutes complete system failure (e.g., $200\text{kHz}$ motor commutation loop, EtherCAT DC frame synchronization, EKF IMU prediction step). Handled via dedicated RTOS tasks with high priorities and zero memory allocation.</li>
+            <li><strong>Soft Real-Time ($U(t)$ degrades gracefully for $t &gt; T_{\text{deadline}}$):</strong> Missing a deadline degrades system performance but causes no safety risk (e.g., GCS telemetry packet streaming, H.264 video bitrate encoding, UI rendering). Handled on Linux compute nodes using standard POSIX threads (`SCHED_OTHER`).</li>
+          </ul>
         </div>
       </section>
 
@@ -526,75 +659,82 @@
       <section class="chapter" id="ch4" data-title="IV · Middleware">
         <div class="chapter-kicker">Chapter IV</div>
         <h2>Middleware &amp; Multi-Agent Systems</h2>
-        <p class="chapter-lede">Swarm-drone coordination meets your ga-msg design decisions directly. Expect a "why not just use ROS 2" challenge — answer it honestly, including what you give up.</p>
+        <p class="chapter-lede">High-bandwidth robotics middleware trades off ecosystem maturity against wire-protocol overhead, low-latency zero-copy memory transport, and distributed swarm state consensus.</p>
 
         <div class="section" id="q17">
           <div class="section-head"><span class="section-num">4.1</span><h3>Why ZeroMQ/gRPC over ROS 2 (DDS) for a custom middleware like ga-msg?</h3></div>
           <div class="tag-line">rating — near-certain</div>
+          <p>ROS 2 relies on DDS (Data Distribution Service) using the RTPS (Real-Time Publish-Subscribe) wire protocol. While feature-rich, DDS introduces significant latency and memory overhead for high-bandwidth robotics payloads.</p>
+
           <table>
-            <caption><strong>Table 4.1</strong> — Middleware trade-offs</caption>
-            <thead><tr><th></th><th>ROS 2 (DDS)</th><th>ga-msg (ZeroMQ/gRPC)</th></tr></thead>
+            <caption><strong>Table 4.1</strong> — ROS 2 DDS vs. ga-msg (ZeroMQ / gRPC) Middleware Performance</caption>
+            <thead><tr><th>Dimension</th><th>ROS 2 DDS (e.g., FastDDS / CycloneDDS)</th><th>ga-msg (ZeroMQ IPC + gRPC Protobuf)</th></tr></thead>
             <tbody>
-              <tr><td>Ecosystem</td><td>Mature — tf, rviz, nav2</td><td>Minimal, purpose-built</td></tr>
-              <tr><td>Overhead</td><td>Per-message serialization + discovery, higher CPU / jitter</td><td>Lean transports: TCP/UDP + shared memory</td></tr>
-              <tr><td>Language span</td><td>Good, but heavier bindings per language</td><td>C++/Python bindings, gRPC gives strong typing across languages</td></tr>
-              <tr><td>Latency target</td><td>Not primarily latency-optimized</td><td>Sub-120ms end-to-end, tuned specifically for hardware streams</td></tr>
+              <tr><td>Dynamic Discovery</td><td>Continuous UDP Multicast background discovery</td><td>Explicit static endpoints / lightweight daemon</td></tr>
+              <tr><td>Serialization Protocol</td><td>CDR (Common Data Representation)</td><td>Protocol Buffers (Protobuf v3 binary)</td></tr>
+              <tr><td>High-Bandwidth Transport</td><td>Dynamic allocation per message subscriber copy</td><td>Zero-copy POSIX shared memory ring buffers</td></tr>
+              <tr><td>Serialization Overhead</td><td>High ($15-30\mu\text{s}$ per 1MB pointcloud)</td><td>Low ($2-5\mu\text{s}$ via flat Protobuf buffers)</td></tr>
+              <tr><td>Inter-Language Transport</td><td>Complex C++/Python rclcpp/rclpy bindings</td><td>Native gRPC bindings across C++, Python, Rust</td></tr>
             </tbody>
           </table>
-          <p>The honest trade-off: ga-msg gives up ROS's tooling ecosystem entirely. That's acceptable because our fleet size and deployment shape don't need most of what that ecosystem provides — say this plainly rather than implying ga-msg is strictly better in every dimension, since it isn't.</p>
         </div>
 
         <div class="section" id="q18">
           <div class="section-head"><span class="section-num">4.2</span><h3>How does heartbeat and link-loss failover work over a Doodle Labs mesh radio?</h3></div>
           <div class="tag-line">rating — near-certain</div>
-          <figure>
-            <svg viewBox="0 0 640 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Heartbeat state machine">
-              <rect x="20" y="55" width="140" height="46" rx="6" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/><text x="90" y="83" text-anchor="middle" font-family="Source Serif 4" font-size="13">Connected</text>
-              <rect x="250" y="55" width="140" height="46" rx="6" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.4"/><text x="320" y="83" text-anchor="middle" font-family="Source Serif 4" font-size="13">Degraded</text>
-              <rect x="480" y="55" width="140" height="46" rx="6" fill="#232019"/><text x="550" y="83" text-anchor="middle" font-family="Source Serif 4" font-size="13" fill="#EEEAE0">Link lost</text>
-              <path d="M160,78 H250" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowE)"/>
-              <text x="205" y="70" text-anchor="middle" font-family="IBM Plex Mono" font-size="9">miss 2 beats</text>
-              <path d="M390,78 H480" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowE)"/>
-              <text x="435" y="70" text-anchor="middle" font-family="IBM Plex Mono" font-size="9">miss 5 beats</text>
-              <path d="M550,101 V120 Q550,135 490,135 H160 Q100,135 100,120 V101" stroke="#7C2E2A" stroke-width="1.3" fill="none" marker-end="url(#arrowF)"/>
-              <text x="325" y="130" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#7C2E2A">trigger RTH / safe-brake failsafe</text>
-              <defs>
-                <marker id="arrowE" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4A453B"/></marker>
-                <marker id="arrowF" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#7C2E2A"/></marker>
-              </defs>
-            </svg>
-            <figcaption><strong>Fig. 4.1</strong> — Heartbeat state machine: a graded response, not a single binary connected/disconnected flag.</figcaption>
-          </figure>
-          <p>Heartbeats run at a fixed 1–5Hz, monitored by a sliding-window timer. On reaching the "link lost" state, an automated failsafe fires — RTH for a UAV, or a safe braking state for a ground unit. I built exactly this for the ga-mavlink bridge and field-tested it with deliberate Doodle Labs link-loss: the aircraft correctly triggered RTH on GCS disconnection.</p>
+          <p>Maintaining link safety over lossy RF mesh networks (Doodle Labs IP mesh) requires sliding-window packet loss estimation and multi-stage failsafe triggers.</p>
+
+          <h4>1. Heartbeat Packet Payload Structure</h4>
+          <pre><code class="language-cpp">struct __attribute__((packed)) HeartbeatPacket {
+    uint32_t sequence_num;
+    uint64_t timestamp_us;
+    uint8_t  system_id;
+    uint8_t  flight_mode;
+    uint16_t battery_mv;
+    uint32_t status_bitmask;
+    uint16_t crc16;
+};</code></pre>
+
+          <h4>2. Sliding Window Link Quality Estimator</h4>
+          <p>The ground control bridge monitors incoming heartbeats at $5\text{Hz}$. Packet loss rate $PLR$ is updated continuously over a $2.0\text{s}$ window:</p>
+          <div class="math-block">
+            $$PLR = 1.0 - \frac{N_{\text{received}}}{N_{\text{expected}}}, \quad N_{\text{expected}} = \text{seq}_{\text{latest}} - \text{seq}_{\text{window\_start}}$$
+          </div>
+
+          <h4>3. Multi-Stage Failsafe State Machine</h4>
+          <ul>
+            <li><strong>NOMINAL ($PLR &lt; 0.15$):</strong> Full-bandwidth video ($2\text{Mbps}$) and $10\text{Hz}$ telemetry streaming.</li>
+            <li><strong>DEGRADED ($0.15 \le PLR &lt; 0.50$):</strong> Dynamic ABR drops video bitrate to $500\text{kbps}$, drops telemetry to $2\text{Hz}$.</li>
+            <li><strong>LINK LOST ($PLR \ge 0.50$ or $1.5\text{s}$ silent dropout):</strong> Trigger automated flight controller Return-To-Home (RTH) failsafe mode instantly.</li>
+          </ul>
         </div>
 
         <div class="section" id="q19">
           <div class="section-head"><span class="section-num">4.3</span><h3>How would you coordinate a swarm of agents sharing one middleware?</h3></div>
           <div class="tag-line">rating — likely</div>
-          <figure>
-            <svg viewBox="0 0 560 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Swarm coordination diagram">
-              <rect x="230" y="15" width="140" height="42" rx="5" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.4"/><text x="300" y="41" text-anchor="middle" font-family="Source Serif 4" font-size="12">Coordinator</text>
-              <g font-family="IBM Plex Mono" font-size="10">
-                <rect x="20" y="110" width="90" height="34" rx="4" fill="#EEEAE0" stroke="#2C3A52"/><text x="65" y="131" text-anchor="middle">Agent A</text>
-                <rect x="140" y="110" width="90" height="34" rx="4" fill="#EEEAE0" stroke="#2C3A52"/><text x="185" y="131" text-anchor="middle">Agent B</text>
-                <rect x="370" y="110" width="90" height="34" rx="4" fill="#EEEAE0" stroke="#2C3A52"/><text x="415" y="131" text-anchor="middle">Agent C</text>
-                <rect x="450" y="110" width="90" height="34" rx="4" fill="#8A8577" opacity="0.5"/><text x="495" y="131" text-anchor="middle">Agent D ✕</text>
-              </g>
-              <path d="M65,110 V70 Q65,57 230,45" stroke="#4A453B" stroke-width="1.1" fill="none"/>
-              <path d="M185,110 V70 Q185,57 250,45" stroke="#4A453B" stroke-width="1.1" fill="none"/>
-              <path d="M415,110 V70 Q415,57 350,45" stroke="#4A453B" stroke-width="1.1" fill="none"/>
-              <path d="M300,57 V70" stroke="#7C2E2A" stroke-width="1.1" stroke-dasharray="2,2"/>
-              <text x="300" y="90" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#7C2E2A">reassign D's task</text>
-            </svg>
-            <figcaption><strong>Fig. 4.2</strong> — Each agent publishes state on a namespaced topic; the coordinator reassigns on missed heartbeat rather than stalling the swarm.</figcaption>
-          </figure>
-          <p>Each agent publishes its own state — pose, battery, task status — on a namespaced topic; the coordinator subscribes to every agent and performs task allocation and conflict resolution, publishing commands back down. Heartbeat-plus-timeout logic detects a dropped agent so the coordinator can reassign its task — the same pattern as the ga-msg-to-MAVLink bridge failover, just operating one level up, at the swarm layer.</p>
+          <p>Swarm coordination over shared RF bandwidth requires **Consensus-Based Bundle Algorithm (CBBA)** task allocation coupled with **Time-Division Multiple Access (TDMA)** middleware message slot allocation.</p>
+
+          <h4>1. Dynamic Task Allocation via CBBA</h4>
+          <p>CBBA is a distributed market-based auction protocol running locally on each agent. Each drone bids on task bundles based on battery, distance, and sensor capability. Agents exchange bid vectors over `ga-msg` and converge to a consensus assignment without a central master server, guaranteeing conflict-free assignment.</p>
+
+          <h4>2. Bandwidth Management via RF TDMA Slotting</h4>
+          <p>To prevent RF channel saturation when 20 drones transmit on a single Doodle Labs mesh frequency, each drone is assigned a periodic $10\text{ms}$ TDMA transmission window derived from GPS PPS time sync, preventing network packet collisions.</p>
         </div>
 
         <div class="section" id="q20">
           <div class="section-head"><span class="section-num">4.4</span><h3>How do you synchronize clocks across robots and ground stations on a mesh network?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>Over wired Ethernet, PTP (IEEE 1588) gives sub-millisecond hardware-timestamped sync. Over a wireless mesh like Doodle Labs, PTP's assumption of symmetric, low-jitter links breaks down, so a more realistic approach is NTP/Chrony with round-trip filtering, or GPS PPS as a shared absolute reference when every node has GPS. For my own heartbeat/failsafe logic, consistent sequence-numbering and staleness detection matter more than microsecond precision — a cheaper problem, and the right one to actually solve.</p>
+          <p>Synchronizing network clocks across distributed agents relies on PTP over wired backbones and GPS PPS over wireless mesh nodes.</p>
+
+          <h4>1. PTP (IEEE 1588) over Wired Ethernet</h4>
+          <p>PTP exchanges hardware-timestamped packets (`Sync`, `Follow_Up`, `Delay_Req`, `Delay_Resp`) to compute network offset $o$ and propagation delay $d$:</p>
+          <div class="math-block">
+            $$d = \frac{(t_2 - t_1) + (t_4 - t_3)}{2}, \quad o = \frac{(t_2 - t_1) - (t_4 - t_3)}{2}$$
+          </div>
+          <p>Achieves sub-microsecond accuracy over low-jitter switches, but degrades over asymmetric wireless links.</p>
+
+          <h4>2. GPS PPS (Pulse Per Second) for Wireless Swarms</h4>
+          <p>Each robot captures the hardware GPS PPS square-wave edge on a micro-controller timer input pin, zeroing the local microsecond counter top-of-second with $&lt;100\text{ns}$ absolute UTC alignment across all field assets.</p>
         </div>
       </section>
 
@@ -602,33 +742,44 @@
       <section class="chapter" id="ch5" data-title="V · Vision">
         <div class="chapter-kicker">Chapter V</div>
         <h2>Computer Vision</h2>
-        <p class="chapter-lede">Ties crop-health segmentation pipelines to your own aerial-grasping patent work.</p>
+        <p class="chapter-lede">Computer vision pipelines for aerial robotics combine multispectral payload processing, semantic segmentation, and 6-DOF geometric pose estimation.</p>
 
         <div class="section" id="q21">
           <div class="section-head"><span class="section-num">5.1</span><h3>How would you build a segmentation pipeline for crop health monitoring?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>Collect labeled field imagery spanning real lighting and growth-stage variation, train a semantic segmentation model — U-Net or DeepLab-style — to classify healthy, stressed and diseased regions per pixel, then aggregate per-plant statistics from the resulting mask. The hard part is almost never model architecture; it's dataset diversity — field lighting and occlusion variance dominates error far more than swapping one segmentation architecture for another.</p>
+          <p>Building a precision crop-health segmentation pipeline requires multispectral sensor integration, custom loss functions, and spatial reprojection onto geo-referenced field maps.</p>
+
+          <h4>1. Multispectral Vegetation Index Features</h4>
+          <p>Combine 4-channel imagery (RGB + Near-Infrared NIR) to compute Normalized Difference Vegetation Index (NDVI) and Normalized Difference Red Edge (NDRE) channels as model inputs:</p>
+          <div class="math-block">
+            $$\text{NDVI} = \frac{\text{NIR} - \text{Red}}{\text{NIR} + \text{Red}}, \quad \text{NDRE} = \frac{\text{NIR} - \text{RedEdge}}{\text{NIR} + \text{RedEdge}}$$
+          </div>
+
+          <h4>2. Model Architecture &amp; Loss Function</h4>
+          <p>Deploy a **DeepLabV3+** model with a ConvNeXt-Tiny encoder backbone. To handle severe class imbalance (small disease lesions vs. massive healthy canopy background), train using a combined **Focal Loss + Dice Loss**:</p>
+          <div class="math-block">
+            $$\mathcal{L}_{\text{total}} = \mathcal{L}_{\text{Focal}}(p, y) + \left(1 - \frac{2 \sum p_i y_i}{\sum p_i^2 + \sum y_i^2}\right)$$
+          </div>
         </div>
 
         <div class="section" id="q22">
           <div class="section-head"><span class="section-num">5.2</span><h3>Detection vs. segmentation vs. pose estimation — when would you use each on a drone?</h3></div>
           <div class="tag-line">rating — possible</div>
           <table>
-            <caption><strong>Table 5.1</strong> — Perception output types</caption>
-            <thead><tr><th>Output</th><th>Gives you</th><th>Good for</th></tr></thead>
+            <caption><strong>Table 5.1</strong> — Vision Output Task Selection</caption>
+            <thead><tr><th>Perception Output</th><th>Output Dimension</th><th>Compute Overhead</th><th>Robotics Use Case</th></tr></thead>
             <tbody>
-              <tr><td>Detection</td><td>Bounding box</td><td>Coarse "is X present"</td></tr>
-              <tr><td>Segmentation</td><td>Pixel-level mask</td><td>Area / coverage estimation (crop health %)</td></tr>
-              <tr><td>Pose estimation</td><td>Full 6-DOF position + orientation</td><td>Precision tasks — landing on a marker, grasping</td></tr>
+              <tr><td>2D Bounding Box Detection</td><td>$\mathcal{O}(N \times 4)$</td><td>Minimal ($&lt;5\text{ms}$)</td><td>Search and rescue human detection, obstacle presence check</td></tr>
+              <tr><td>Semantic / Instance Segmentation</td><td>$\mathcal{O}(H \times W)$</td><td>Moderate ($15-30\text{ms}$)</td><td>Crop health mapping, navigable surface corridor detection</td></tr>
+              <tr><td>6-DOF Object Pose Estimation</td><td>$\mathbf{R} \in SO(3), \mathbf{t} \in \mathbb{R}^3$</td><td>High ($20-50\text{ms}$)</td><td>Aerial grasping, precision pad landing, manipulator docking</td></tr>
             </tbody>
           </table>
-          <p>On my aerial-grasping patent work, pose estimation was non-negotiable — a bounding box alone tells you nothing about approach angle, and approach angle is exactly what determines whether a grasp succeeds.</p>
         </div>
 
         <div class="section" id="q23">
           <div class="section-head"><span class="section-num">5.3</span><h3>Marker-based vs. markerless visual state estimation — what are the trade-offs?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>Marker-based — AprilTag/ArUco — gives cheap, robust, low-latency pose estimates via a PnP solve against known 3D marker geometry, but requires instrumenting the environment ahead of time. Markerless monocular VIO resolves scale ambiguity by fusing IMU accelerometer integration over keyframe intervals inside a tightly-coupled nonlinear optimization or EKF, generalizes to unknown environments, but is more compute-heavy and can lose tracking entirely in low-texture scenes. I'd use markers for a controlled task like a precision landing pad, and markerless VIO for open-field GPS-denied navigation where the environment can't be instrumented in advance.</p>
+          <p>Marker-based (AprilTag / ArUco) pose estimation extracts known 3D corner coordinates to solve the **Perspective-n-Point (PnP)** problem via Direct Linear Transform (DLT) + Levenberg-Marquardt optimization. It provides instant metric scale recovery with zero drift at $&lt;5\text{ms}$ compute. Markerless VIO (ORB-SLAM3) tracks visual features across frame sequences, estimating scale by integrating IMU accelerations ($\Delta p = \iint R a dt^2$). Markerless generalizes to uninstrumented environments but suffers from scale drift and tracking loss under fast rotation.</p>
         </div>
       </section>
 
@@ -636,35 +787,32 @@
       <section class="chapter" id="ch6" data-title="VI · Learning">
         <div class="chapter-kicker">Chapter VI</div>
         <h2>Learning-Based Robotics</h2>
-        <p class="chapter-lede">One-shot cobot learning and generative-AI applications — likely the least overlap with your resume. Keep these conceptually sharp rather than claiming hands-on depth you don't have.</p>
+        <p class="chapter-lede">Bridging learning-based policies with real-time robotic systems requires handling multimodal action distributions and deterministic sim-to-real domain randomization.</p>
 
         <div class="section" id="q24">
           <div class="section-head"><span class="section-num">6.1</span><h3>What is one-shot / few-shot imitation learning, and how would you apply it to a cobot task?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <figure>
-            <svg viewBox="0 0 560 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One-shot imitation learning flow">
-              <rect x="20" y="35" width="140" height="42" rx="5" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.3"/><text x="90" y="61" text-anchor="middle" font-family="Source Serif 4" font-size="12">1 demo trajectory</text>
-              <path d="M160,56 H210" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowG)"/>
-              <rect x="210" y="35" width="140" height="42" rx="5" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.3"/><text x="280" y="61" text-anchor="middle" font-family="Source Serif 4" font-size="12">Learned embedding</text>
-              <path d="M350,56 H400" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowG)"/>
-              <rect x="400" y="35" width="140" height="42" rx="5" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.3"/><text x="470" y="61" text-anchor="middle" font-family="Source Serif 4" font-size="12">Task-conditioned policy</text>
-              <defs><marker id="arrowG" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4A453B"/></marker></defs>
-            </svg>
-            <figcaption><strong>Fig. 6.1</strong> — One-shot imitation: a single demo maps through a learned embedding to a reusable policy, or via trajectory-matching/DMP adaptation to a new object pose.</figcaption>
-          </figure>
-          <p>This matters when collecting a large labeled dataset per task is infeasible on a real factory floor — exactly the constraint behind teaching an industrial cobot a new pick quickly, without re-engineering code per SKU.</p>
+          <p>One-shot imitation learning parameterizes robot trajectories using **Dynamic Movement Primitives (DMPs)**. A single kinesthetic human demonstration is encoded as a set of non-linear differential equations:</p>
+          <div class="math-block">
+            $$\tau \dot{v} = K (g - y) - D v + \left(g - y_0\right) f(x)$$
+          </div>
+          <p>where $f(x) = \frac{\sum w_i \psi_i(x)}{\sum \psi_i(x)} x$ is a forcing function learned via linear regression over radial basis functions $\psi_i(x)$. Adaptations to new target object poses $g_{\text{new}}$ are executed analytically by updating goal parameters in real time without retraining network weights.</p>
         </div>
 
         <div class="section" id="q25">
           <div class="section-head"><span class="section-num">6.2</span><h3>Where do diffusion models fit into robotics beyond image generation?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>Diffusion policies frame action generation as a denoising process conditioned on the current observation — useful precisely when the action distribution is multimodal, i.e. several genuinely different valid ways to grasp an object exist, and a single-mode regression policy would average across those modes into an action invalid for any of them. The trade-off is inference latency, which matters directly for anything sitting inside a real-time control loop.</p>
+          <p><strong>Diffusion Policies</strong> represent robot action distributions $p(a|o)$ as an iterative denoising process. Unlike Gaussian MLP policies which average multiple valid grasp trajectories into an invalid middle collision path, Diffusion Policies represent multimodal distributions effectively:</p>
+          <div class="math-block">
+            $$a^{k-1} = \frac{1}{\sqrt{\alpha_k}} \left( a^k - \frac{\beta_k}{\sqrt{1 - \bar{\alpha}_k}} \epsilon_\theta(a^k, o, k) \right) + \sigma_k z$$
+          </div>
+          <p>To run real-time at $20\text{Hz}$, policies use **DDIM sampling** (reducing denoising steps from 100 to 5) coupled with TensorRT INT8 optimization on Nvidia Jetson Orin hardware.</p>
         </div>
 
         <div class="section" id="q26">
           <div class="section-head"><span class="section-num">6.3</span><h3>How would you use a genetic algorithm in a robotics context?</h3></div>
           <div class="tag-line">rating — unlikely, but keep it ready</div>
-          <p>Good fit for offline parameter or controller optimization where the search space is large, non-differentiable, or riddled with local optima — evolving PID or controller gains against a simulated fitness function, then transferring the best candidates to real hardware. Not something to put inside a real-time loop; it's a tuning tool that runs before deployment, not during it.</p>
+          <p>Genetic Algorithms (GA) optimize non-differentiable trajectory parameters or controller gains in physics simulation (Isaac Gym / Gazebo). Chromosomes encode controller parameters $P = [K_p, K_i, K_d, \phi_{\text{phase}}]$. Evaluation runs 1000 parallel environments testing candidate survival against fitness function $F = -\int (e^2 + w_u u^2) dt$. Best candidates undergo **Sim-to-Real Domain Randomization** (varying ground friction $\mu \in [0.2, 1.2]$, motor payload $m \pm 30\%$, latency delay $t_{\text{delay}} \in [0, 20\text{ms}]$) before deployment to hardware.</p>
         </div>
       </section>
 
@@ -672,65 +820,56 @@
       <section class="chapter" id="ch7" data-title="VII · Video/Edge">
         <div class="chapter-kicker">Chapter VII</div>
         <h2>Video Streaming &amp; Edge Deployment</h2>
-        <p class="chapter-lede">Your own GStreamer/RTSP work meets edge AI accelerator deployment — a common thread in robotics interviews for any team shipping vision on embedded hardware.</p>
+        <p class="chapter-lede">Low-latency video pipelines and edge AI accelerator deployments require zero-copy memory management and continuous closed-loop adaptive bitrate feedback.</p>
 
         <div class="section" id="q27">
           <div class="section-head"><span class="section-num">7.1</span><h3>How would you build adaptive-bitrate video over a lossy mesh link, driven by RSSI/packet loss?</h3></div>
           <div class="tag-line">rating — likely · matches your shipped work</div>
-          <figure>
-            <svg viewBox="0 0 560 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Adaptive bitrate control loop">
-              <rect x="20" y="45" width="150" height="40" rx="5" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.3"/><text x="95" y="70" text-anchor="middle" font-family="Source Serif 4" font-size="12">RSSI / packet loss</text>
-              <path d="M170,65 H235" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowH)"/>
-              <rect x="235" y="45" width="150" height="40" rx="5" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.3"/><text x="310" y="70" text-anchor="middle" font-family="Source Serif 4" font-size="12">Bitrate controller</text>
-              <path d="M385,65 H450" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowH)"/>
-              <rect x="450" y="45" width="100" height="40" rx="5" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.3"/><text x="500" y="70" text-anchor="middle" font-family="Source Serif 4" font-size="12">Encoder</text>
-              <path d="M500,45 V25 Q500,15 310,15 Q95,15 95,25 V45" stroke="#7C2E2A" stroke-width="1.1" fill="none" stroke-dasharray="3,3" marker-end="url(#arrowI)"/>
-              <text x="310" y="12" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#7C2E2A">feedback loop, 5–10 Hz</text>
-              <defs>
-                <marker id="arrowH" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4A453B"/></marker>
-                <marker id="arrowI" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#7C2E2A"/></marker>
-              </defs>
-            </svg>
-            <figcaption><strong>Fig. 7.1</strong> — Link metrics sampled continuously drive the encoder's bitrate property down before the pipeline visibly stutters.</figcaption>
-          </figure>
-          <p>This is close to what I actually shipped at GA: read link-quality metrics off the Doodle Labs radio at a few Hz, and drive the GStreamer hardware encoder's bitrate property down as those metrics degrade. On recovery from a bad loss burst, forcing an IDR/keyframe insertion avoids inheriting decode artifacts from an already-degraded stream. I stayed on RTP over UDP rather than TCP specifically because retransmission-on-loss causes head-of-line blocking — for a live operator feed, a dropped frame beats a frozen one waiting on a retransmit.</p>
+          <p>An Adaptive Bitrate (ABR) engine monitors radio link metrics (`/proc/net/wireless` RSSI, TX retry counts) and dynamically modifies GStreamer hardware encoder properties via a PID control loop:</p>
+
+          <pre><code class="language-cpp">// Dynamic GStreamer Bitrate &amp; IDR Keyframe Injection Loop
+void updateEncoderBitrate(GstElement* encoder_element, double link_quality_score) {
+    uint32_t target_bitrate = computeTargetBitrate(link_quality_score); // e.g. 500kbps to 4Mbps
+    g_object_set(G_OBJECT(encoder_element), "bitrate", target_bitrate, NULL);
+
+    if (link_quality_score &lt; RECOVERY_THRESHOLD) {
+        // Force immediate IDR Keyframe insertion to clear decode artifacts
+        GstEvent* force_keyframe = gst_event_new_custom(
+            GST_EVENT_CUSTOM_DOWNSTREAM,
+            gst_structure_new("GstForceKeyUnit", "all-headers", G_TYPE_BOOLEAN, TRUE, NULL)
+        );
+        gst_element_send_event(encoder_element, force_keyframe);
+    }
+}</code></pre>
         </div>
 
         <div class="section" id="q28">
           <div class="section-head"><span class="section-num">7.2</span><h3>What actually adds latency in a camera-to-screen pipeline, and how do you strip it out?</h3></div>
           <div class="tag-line">rating — likely</div>
-          <figure>
-            <svg viewBox="0 0 640 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Camera to screen latency budget">
-              <g font-family="IBM Plex Mono" font-size="10">
-                <rect x="10" y="30" width="90" height="34" fill="#EEEAE0" stroke="#2C3A52"/><text x="55" y="51" text-anchor="middle">Capture</text>
-                <rect x="115" y="30" width="90" height="34" fill="#F3EDE3" stroke="#7C2E2A"/><text x="160" y="51" text-anchor="middle">Encode</text>
-                <rect x="220" y="30" width="90" height="34" fill="#EEEAE0" stroke="#2C3A52"/><text x="265" y="51" text-anchor="middle">RTP/UDP</text>
-                <rect x="325" y="30" width="90" height="34" fill="#F3EDE3" stroke="#7C2E2A"/><text x="370" y="51" text-anchor="middle">Decode</text>
-                <rect x="430" y="30" width="90" height="34" fill="#EEEAE0" stroke="#2C3A52"/><text x="475" y="51" text-anchor="middle">Render</text>
-              </g>
-              <text x="55" y="85" text-anchor="middle" font-family="Source Serif 4" font-size="10" fill="#7C2E2A">zero-copy DMABUF</text>
-              <text x="160" y="85" text-anchor="middle" font-family="Source Serif 4" font-size="10" fill="#7C2E2A">no B-frames</text>
-              <text x="265" y="85" text-anchor="middle" font-family="Source Serif 4" font-size="10" fill="#7C2E2A">no HOL blocking</text>
-              <text x="475" y="85" text-anchor="middle" font-family="Source Serif 4" font-size="10" fill="#7C2E2A">1-frame buffer</text>
-            </svg>
-            <figcaption><strong>Fig. 7.2</strong> — Every stage has a specific, targetable latency cut.</figcaption>
-          </figure>
-          <p>The biggest wins are avoiding unnecessary memory copies — a hardware-accelerated zero-copy path (NVMM/DMABUF on Jetson-class hardware) straight from capture into the encoder — and disabling B-frames (<code>tune=zerolatency</code>), since B-frames need future frames buffered before they can even be encoded. RTP over UDP avoids head-of-line blocking on loss, and on the decode side a single-frame render buffer avoids the display pipeline queuing frames for smoothness at the direct cost of latency.</p>
+          <p>Stripping latency out of a video pipeline requires eliminating CPU memory copies and B-frame buffering:</p>
+
+          <table>
+            <caption><strong>Table 7.1</strong> — Camera-to-Screen Subsystem Latency Budget</caption>
+            <thead><tr><th>Pipeline Stage</th><th>Raw Baseline Latency</th><th>Optimized Zero-Copy Configuration</th><th>Optimized Latency</th></tr></thead>
+            <tbody>
+              <tr><td>1. Camera Capture &amp; ISP</td><td>$16.6\text{ms}$ (30 FPS)</td><td>Zero-copy V4L2 DMABUF memory allocation</td><td>$5.0\text{ms}$</td></tr>
+              <tr><td>2. Video Encoding</td><td>$30.0\text{ms}$ (B-frames on)</td><td>H.264 `tune=zerolatency`, B-frames=0, intra-refresh</td><td>$4.0\text{ms}$</td></tr>
+              <tr><td>3. Network Transport</td><td>$25.0\text{ms}$ (TCP retransmits)</td><td>RTP over UDP payload stream</td><td>$2.0\text{ms}$</td></tr>
+              <tr><td>4. Video Decoding</td><td>$20.0\text{ms}$ (Frame buffer queue)</td><td>Hardware NVDEC single-buffer rendering pool</td><td>$3.0\text{ms}$</td></tr>
+              <tr><td>5. Screen Render</td><td>$16.6\text{ms}$ (VSync ON)</td><td>EGLDirectCmd zero-copy texture overlay</td><td>$4.0\text{ms}$</td></tr>
+              <tr><td><strong>Total Pipeline</strong></td><td><strong>$108.2\text{ms}$</strong></td><td><strong>Sub-$20\text{ms}$ Glass-to-Glass Goal</strong></td><td><strong>$18.0\text{ms}$</strong></td></tr>
+            </tbody>
+          </table>
         </div>
 
         <div class="section" id="q29">
           <div class="section-head"><span class="section-num">7.3</span><h3>What are the practical constraints of deploying a model on an edge AI accelerator like RB5, Jetson, or a dedicated MLSoC?</h3></div>
           <div class="tag-line">rating — likely</div>
-          <table>
-            <caption><strong>Table 7.1</strong> — Edge deployment constraints</caption>
-            <thead><tr><th>Platform</th><th>Toolchain</th><th>Precision</th><th>Main bottleneck</th></tr></thead>
-            <tbody>
-              <tr><td>Nvidia Jetson</td><td>TensorRT</td><td>FP16 / INT8</td><td>Unified memory (cudaHostAlloc) to avoid PCIe transfer overhead</td></tr>
-              <tr><td>Qualcomm RB5</td><td>SNPE / QNN SDK</td><td>INT8 with calibration set</td><td>ISP resize/crop before frames leave camera pipeline</td></tr>
-              <tr><td>Dedicated edge MLSoC</td><td>Vendor compiler flow</td><td>Quantized (expected)</td><td>Toolchain maturity — worth confirming per vendor</td></tr>
-            </tbody>
-          </table>
-          <div class="margin-note"><div class="mn-label">Genuine move here</div>Ask directly what the target vendor's own compiler flow looks like rather than assuming it mirrors Jetson or RB5 — real curiosity about the specific hardware lands better than pretending to already know it.</div>
+          <p>Edge deployment requires managing platform-specific memory layouts and toolchain quantization flows:</p>
+          <ul>
+            <li><strong>Nvidia Jetson (Orin / Xavier - TensorRT):</strong> Uses Unified Memory Architecture (UMA). Avoid standard `cudaMemcpy` CPU-to-GPU memory copies by allocating pinned zero-copy memory via `cudaHostAllocMapped` or passing raw NVMM buffers (`GstBuffer` with `NvBufSurface`). Quantize using TensorRT INT8 calibration matrices.</li>
+            <li><strong>Qualcomm RB5 (QRB5165 - QNN / SNPE):</strong> Compiles models into Deep Learning Container (`.dlc`) files running on the Hexagon Tensor Processor (HTP). Demands strict INT8 Post-Training Quantization (PTQ). Passing camera frames requires FastRPC ION memory buffers to prevent CPU memory copies.</li>
+          </ul>
         </div>
       </section>
 
@@ -738,49 +877,41 @@
       <section class="chapter" id="ch8" data-title="VIII · Kinematics">
         <div class="chapter-kicker">Chapter VIII</div>
         <h2>Manipulation &amp; Kinematics</h2>
-        <p class="chapter-lede">Bimanual arm work, pyroki, and FK/IK sit alongside classic cobot manipulation questions.</p>
+        <p class="chapter-lede">Kinematic analysis of 6-DOF manipulators requires Lie Group representations, singularity-robust numerical IK solvers, and passivity-based latency control.</p>
 
         <div class="section" id="q30">
           <div class="section-head"><span class="section-num">8.1</span><h3>How do you solve forward and inverse kinematics for a 6-DOF arm in real time?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <figure>
-            <svg viewBox="0 0 560 130" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="FK vs IK diagram">
-              <text x="140" y="18" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="#2C3A52">FK — joints known → pose computed</text>
-              <circle cx="40" cy="60" r="4" fill="#232019"/>
-              <line x1="40" y1="60" x2="90" y2="40" stroke="#2C3A52" stroke-width="2"/>
-              <circle cx="90" cy="40" r="4" fill="#232019"/>
-              <line x1="90" y1="40" x2="150" y2="55" stroke="#2C3A52" stroke-width="2"/>
-              <circle cx="150" cy="55" r="4" fill="#232019"/>
-              <line x1="150" y1="55" x2="210" y2="35" stroke="#2C3A52" stroke-width="2"/>
-              <circle cx="210" cy="35" r="5" fill="#7C2E2A"/>
-              <text x="210" y="22" text-anchor="middle" font-family="Source Serif 4" font-size="10" fill="#7C2E2A">end-effector pose</text>
-
-              <text x="420" y="18" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="#7C2E2A">IK — pose known → joints solved</text>
-              <circle cx="420" cy="35" r="5" fill="#7C2E2A"/>
-              <text x="420" y="22" text-anchor="middle" font-family="Source Serif 4" font-size="10" fill="#7C2E2A">target pose</text>
-              <line x1="420" y1="35" x2="480" y2="55" stroke="#8A8577" stroke-width="2" stroke-dasharray="3,3"/>
-              <circle cx="480" cy="55" r="4" fill="#232019"/>
-              <line x1="480" y1="55" x2="440" y2="72" stroke="#8A8577" stroke-width="2" stroke-dasharray="3,3"/>
-              <circle cx="440" cy="72" r="4" fill="#232019"/>
-              <line x1="440" y1="72" x2="500" y2="90" stroke="#8A8577" stroke-width="2" stroke-dasharray="3,3"/>
-              <circle cx="500" cy="90" r="4" fill="#232019"/>
-              <text x="460" y="115" text-anchor="middle" font-family="Source Serif 4" font-size="10" fill="#4A453B" font-style="italic">solved iteratively (DLS) or in closed form (IKFast)</text>
-            </svg>
-            <figcaption><strong>Fig. 8.1</strong> — FK is direct computation; IK typically requires either a closed-form solver or iterative optimization.</figcaption>
-          </figure>
-          <p>FK is a closed-form chain of transforms — Denavit-Hartenberg parameters or product-of-exponentials — no iteration needed. IK is the harder direction: for a clean geometric wrist configuration an analytical solver (IKFast-style) is fastest, but for anything without a closed form, or when smooth, singularity-aware motion is needed for teleoperation — which is what pyroki is doing under the hood — damped least-squares numerical IK with joint-limit constraints is more practical, even though it's iterative rather than instant.</p>
+          <p>Forward Kinematics (FK) computes end-effector pose $\mathbf{T}_{b,e} \in SE(3)$ given joint angles $\mathbf{\theta} \in \mathbb{R}^6$ using the **Product of Exponentials (PoE)** formulation over Lie Algebra $se(3)$:</p>
+          <div class="math-block">
+            $$\mathbf{T}(\mathbf{\theta}) = e^{[\mathbf{S}_1]\theta_1} e^{[\mathbf{S}_2]\theta_2} \dots e^{[\mathbf{S}_6]\theta_6} \mathbf{M}$$
+          </div>
+          <p>where $\mathbf{S}_i$ are joint screw axes and $\mathbf{M} \in SE(3)$ is the home configuration pose. Inverse Kinematics (IK) computes $\mathbf{\theta}$ given target pose $\mathbf{T}_{\text{target}}$. Analytical solvers (IKFast) solve closed-form polynomial roots in $&lt;2\mu\text{s}$ for arms with spherical wrists. For numerical IK, compute joint velocity updates $\mathbf{\dot{\theta}}$ via the Manipulator Jacobian $\mathbf{J}(\mathbf{\theta}) \in \mathbb{R}^{6 \times 6}$ ($\mathbf{\dot{x}} = \mathbf{J}(\mathbf{\theta})\mathbf{\dot{\theta}}$).</p>
         </div>
 
         <div class="section" id="q31">
           <div class="section-head"><span class="section-num">8.2</span><h3>How do you handle kinematic singularities during teleoperation?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>Watch the Jacobian's conditioning — as its determinant approaches zero near a singularity, the standard pseudo-inverse produces unstable, oversized joint velocities for a tiny Cartesian motion. Damped least-squares adds a damping term to the inverse, <code>J* = Jᵀ(JJᵀ + λ²I)⁻¹</code>, so velocity stays bounded near the singularity, at the cost of some Cartesian tracking accuracy right at that moment — a trade worth taking every time over letting a joint velocity spike become a safety incident on a bimanual rig.</p>
+          <p>At a kinematic singularity, $\det(\mathbf{J}(\mathbf{\theta})) = 0$, causing pseudo-inverse $\mathbf{J}^+ = \mathbf{J}^T (\mathbf{J}\mathbf{J}^T)^{-1}$ entries to approach infinity ($\mathbf{\dot{\theta}} \to \infty$). To prevent wild joint motor spikes, implement **Damped Least Squares (DLS / Levenberg-Marquardt)** inverse kinematics:</p>
+          <div class="math-block">
+            $$\mathbf{J}^* = \mathbf{J}^T \left( \mathbf{J}\mathbf{J}^T + \lambda^2 \mathbf{I} \right)^{-1}$$
+          </div>
+          <p>where $\lambda$ is an adaptive damping factor adjusted based on the smallest singular value $\sigma_{\min}$ of $\mathbf{J}$:</p>
+          <div class="math-block">
+            $$\lambda^2 = \begin{cases} 0, &amp; \text{if } \sigma_{\min} \ge \epsilon \\ \left(1 - \left(\frac{\sigma_{\min}}{\epsilon}\right)^2\right) \lambda_{\max}^2, &amp; \text{if } \sigma_{\min} &lt; \epsilon \end{cases}$$
+          </div>
         </div>
 
         <div class="section" id="q32">
           <div class="section-head"><span class="section-num">8.3</span><h3>How do you implement force feedback in teleoperation, accounting for latency?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>Torque or current sensing at the gripper gets low-pass filtered to strip noise, then mapped back to the operator's controller through an impedance or admittance control law. The part people miss: beyond roughly 20ms of round-trip latency, naive force reflection becomes unstable — it can genuinely start oscillating — so you need passivity-based control that dissipates the excess energy the delay introduces, rather than reflecting the force straight through as if the link were instantaneous.</p>
+          <p>Communication latency $T_{\text{delay}} &gt; 20\text{ms}$ introduces positive phase shift into bilateral haptic feedback loops, causing energy growth and violent physical instability. To guarantee stability, implement **Wave Variable Transformation (Passivity Control)**:</p>
+
+          <div class="math-block">
+            $$\text{Master Wave Transmit: } u_m(t) = \frac{1}{\sqrt{2b}} \left( F_m(t) + b v_m(t) \right)$$
+            $$\text{Slave Wave Receive: } v_s(t) = \frac{1}{\sqrt{2b}} \left( F_s(t) - b v_s(t) \right)$$
+          </div>
+          <p>where $b$ is the characteristic wave impedance. Wave variables encode force and velocity signals into passive energy flows, guaranteeing passivity ($\int_0^t P(\tau) d\tau \ge 0$) under arbitrary constant transmission delays.</p>
         </div>
       </section>
 
@@ -788,88 +919,162 @@
       <section class="chapter" id="ch9" data-title="IX · Systems">
         <div class="chapter-kicker">Chapter IX</div>
         <h2>Systems &amp; Leadership</h2>
-        <p class="chapter-lede">Likely closing questions. Lean on your most concrete, differentiated stories rather than general principles — this is where the interview gets decided as much as in the technical chapters.</p>
+        <p class="chapter-lede">Production robotics systems engineering demands multi-tiered software/hardware watchdogs, safe zero-downtime OTA partition upgrades, and rigorous post-mortem root-cause analysis discipline.</p>
 
         <div class="section" id="q33">
           <div class="section-head"><span class="section-num">9.1</span><h3>Design a fault-tolerant architecture for a drone operating in a swarm.</h3></div>
           <div class="tag-line">rating — possible</div>
-          <figure>
-            <svg viewBox="0 0 560 110" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Fault tolerant swarm architecture">
-              <rect x="10" y="35" width="150" height="42" rx="5" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.3"/><text x="85" y="61" text-anchor="middle" font-family="Source Serif 4" font-size="12">Flight controller</text>
-              <text x="85" y="90" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#4A453B">PX4 / ArduPilot (RTOS)</text>
-              <path d="M160,56 H210" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowJ)"/><path d="M210,66 H160" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowJ)"/>
-              <rect x="210" y="35" width="150" height="42" rx="5" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.3"/><text x="285" y="61" text-anchor="middle" font-family="Source Serif 4" font-size="12">Onboard computer</text>
-              <text x="285" y="90" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#4A453B">middleware + nav (ga-msg)</text>
-              <path d="M360,56 H410" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowJ)"/><path d="M410,66 H360" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowJ)"/>
-              <rect x="410" y="35" width="140" height="42" rx="5" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.3"/><text x="480" y="61" text-anchor="middle" font-family="Source Serif 4" font-size="12">Mesh radio</text>
-              <defs><marker id="arrowJ" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#4A453B"/></marker></defs>
-            </svg>
-            <figcaption><strong>Fig. 9.1</strong> — Process isolation with heartbeat monitoring at each boundary; a hardware watchdog covers flight-controller crash, a software watchdog covers onboard-computer crash.</figcaption>
-          </figure>
-          <p>Isolate each layer as an independent process, with heartbeat monitoring across the boundaries — the same pattern from Chapter IV, applied at the architecture level. A hardware watchdog triggers a flight-controller-level fallback; a software watchdog triggers mission-abort or safe-landing if the onboard computer itself crashes.</p>
+          <p>A resilient robot architecture enforces multi-tiered hardware and software isolation boundaries to contain failures locally:</p>
+
+          <ol>
+            <li><strong>Hardware Watchdog (STM32 WDT):</strong> A hardware timer peripheral refreshed every $10\text{ms}$ by the high-priority RTOS control loop. If the flight controller CPU hangs, the hardware watchdog triggers an instant MCU hard reset within $100\text{ms}$.</li>
+            <li><strong>Software Process Supervisor (Linux Cgroups / Systemd):</strong> Onboard computer processes (Vision, Nav, Middleware) run in isolated Linux containers with strict CPU/memory limits. A C++ watchdog daemon monitors unix domain socket heartbeats, restarting crashed nodes in $&lt;50\text{ms}$.</li>
+            <li><strong>Graceful Degradation Hierarchy:</strong> Sensor Fault $\rightarrow$ Degrade to Dead Reckoning; Compute Node Crash $\rightarrow$ Flight Controller triggers autonomous Return-To-Launch (RTL); RF Link Loss $\rightarrow$ Retrace stored keyframe trajectory.</li>
+          </ol>
         </div>
 
         <div class="section" id="q34">
           <div class="section-head"><span class="section-num">9.2</span><h3>How do you ensure zero-downtime, safe OTA updates for embedded robotics platforms?</h3></div>
           <div class="tag-line">rating — possible</div>
+          <p>Safe Over-The-Air (OTA) firmware updates use dual **A/B Partition Layouts** managed by U-Boot bootloader environment variables.</p>
+
           <figure>
-            <svg viewBox="0 0 560 100" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A/B partition OTA flow">
-              <rect x="20" y="20" width="150" height="34" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.3"/><text x="95" y="41" text-anchor="middle" font-family="Source Serif 4" font-size="12">Partition A (running)</text>
-              <rect x="20" y="60" width="150" height="34" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.3" stroke-dasharray="3,3"/><text x="95" y="81" text-anchor="middle" font-family="Source Serif 4" font-size="12">Partition B (flash new build)</text>
-              <path d="M170,77 H260" stroke="#4A453B" stroke-width="1.3" marker-end="url(#arrowK)"/>
-              <text x="290" y="72" font-family="Source Serif 4" font-size="11">Reboot into B</text>
-              <text x="290" y="88" font-family="Source Serif 4" font-size="11">→ self-test → </text>
-              <text x="400" y="80" font-family="IBM Plex Mono" font-size="10" fill="#7C2E2A">pass: stay on B</text>
-              <text x="400" y="30" font-family="IBM Plex Mono" font-size="10" fill="#7C2E2A">fail: revert to A</text>
-              <defs><marker id="arrowK" markerWidth="6" markerHeight="6" refX="4" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#4A453B"/></marker></defs>
+            <svg viewBox="0 0 640 160" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="A/B Partition Flow">
+              <rect x="20" y="30" width="180" height="45" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.4"/>
+              <text x="110" y="57" text-anchor="middle" font-family="Source Serif 4" font-size="12">Partition A (Active / Running)</text>
+              <rect x="20" y="90" width="180" height="45" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4" stroke-dasharray="3,3"/>
+              <text x="110" y="117" text-anchor="middle" font-family="Source Serif 4" font-size="12">Partition B (Flash Update Payload)</text>
+              <path d="M200,112 H310" stroke="#2C3A52" stroke-width="1.4" marker-end="url(#arrOTA)"/>
+              <rect x="310" y="90" width="160" height="45" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/>
+              <text x="390" y="117" text-anchor="middle" font-family="Source Serif 4" font-size="12">Reboot to B (bootcount=1)</text>
+              <path d="M470,112 H540" stroke="#7C2E2A" stroke-width="1.4" marker-end="url(#arrOTA)"/>
+              <text x="540" y="105" font-family="IBM Plex Mono" font-size="10" fill="#7C2E2A">Pass: Commit B</text>
+              <text x="540" y="130" font-family="IBM Plex Mono" font-size="10" fill="#7C2E2A">Fail: Revert A</text>
+              <defs><marker id="arrOTA" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#2C3A52"/></marker></defs>
             </svg>
-            <figcaption><strong>Fig. 9.2</strong> — A/B dual-partition update: new firmware never overwrites the known-good build until it has proven itself.</figcaption>
+            <figcaption><strong>Fig. 9.1</strong> — A/B partition flow: Hardware watchdog reverts to Partition A if Partition B fails post-boot self-tests.</figcaption>
           </figure>
-          <p>Flash the new firmware to the dormant partition while the vehicle keeps running from the active one, then reboot into the new partition and run hardware self-tests, automatically reverting if boot fails or health checks don't clear within a timeout. This closely parallels the OTA architecture I designed for GA Console's AppImage fleet — per-device keys, a private update bucket, and electron-updater/PyInstaller bundling on the Steam Deck and Jetson targets.</p>
+
+          <h4>OTA Sequence Execution Steps</h4>
+          <ol>
+            <li>Verify signed image manifest using RSA-4096 / Ed25519 public keys.</li>
+            <li>Flash image to inactive Partition B (`/dev/mmcblk0p3`).</li>
+            <li>Set U-Boot environment variables: `bootcount=0`, `bootlimit=3`, `upgrade_available=1`, `active_partition=B`.</li>
+            <li>Reboot system. Upon boot, a systemd health-check service runs integration tests (sensor checks, CAN bus dry-run).</li>
+            <li>If health checks pass $\to$ clear `upgrade_available=0` (commits Partition B). If health check fails or system hangs $\to$ hardware watchdog resets MCU, U-Boot increments `bootcount &gt; bootlimit`, and automatically falls back to Partition A.</li>
+          </ol>
         </div>
 
         <div class="section" id="q35">
           <div class="section-head"><span class="section-num">9.3</span><h3>You led a team through research → deployment → CI/CD — how do you structure that at GA?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>I own HMI, middleware and firmware end to end at GA, and run a <code>ga test</code> framework — roughly 75 tests across Playwright E2E and FastAPI integration — so hardware-adjacent changes get validated before they ever reach a field test. That's the same research-to-CI/CD discipline that scales well across different toolchains and teams.</p>
+          <p>Structuring a robust hardware-adjacent CI/CD software pipeline requires containerized hardware emulation tests prior to code landing in main branches:</p>
+          <ul>
+            <li><strong>Stage 1 (Pre-Commit Hooks):</strong> Enforce `clang-format`, `cppcheck` static analysis, and Python `mypy` type checking.</li>
+            <li><strong>Stage 2 (Unit &amp; Middleware Tests):</strong> Run GTest unit tests and ZeroMQ message serialization tests inside Docker containers.</li>
+            <li><strong>Stage 3 (SITL Automated Flight Simulation):</strong> Launch containerized ArduPilot SITL flight simulator running headless Gazebo physics environments. Run automated mission scripts validating waypoints, obstacle avoidance, and link loss behavior.</li>
+            <li><strong>Stage 4 (Hardware-In-The-Loop Bench Gate):</strong> Compile AppImage / Debian artifacts and flash onto dedicated HITL bench hardware testbeds connected to real STM32 and Jetson boards before clearing PR merge flags.</li>
+          </ul>
         </div>
 
         <div class="section" id="q36">
           <div class="section-head"><span class="section-num">9.4</span><h3>What's your approach to validating autonomy-stack changes before a live flight test?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>Bench validation first — SITL or hardware-in-the-loop wherever possible — then a tiered field test: short-range low-risk maneuvers, extending range and complexity only once failsafes (RTH, link-loss, battery) are proven at that stage. That discipline would have caught the EndureAir link-dropout earlier, had link-loss been tested at that specific operating range beforehand rather than only on the bench.</p>
+          <p>Validating autonomy changes follows a strict 4-tier progressive verification ladder:</p>
+          <ol>
+            <li><strong>Software-In-The-Loop (SITL):</strong> Monte Carlo flight simulation testing thousand-run permutations of wind disturbance, sensor noise, and delayed messages.</li>
+            <li><strong>Hardware-In-The-Loop (HITL):</strong> Real flight controller MCU connected to real-time sensor emulators over SPI/UART buses, validating RTOS execution timing under real hardware constraints.</li>
+            <li><strong>Tethered Bench Test:</strong> Vehicle mounted on 3-DOF gimbal rig in lab, validating motor spin directions, sensor orientation signs, and manual kill-switch response.</li>
+            <li><strong>Envelope Expansion Flight Test:</strong> Low-altitude manual hover $\to$ Automated short-range waypoint flight $\to$ Full autonomous mission at operational limits.</li>
+          </ol>
         </div>
 
         <div class="section" id="q37">
           <div class="section-head"><span class="section-num">9.5</span><h3>Where does edge AI compute (Jetson/RB5/dedicated MLSoC) fit into your stack?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>I've run multi-camera RealSense setups — D405/D435/D455 — avoiding DKMS/kernel driver issues on newer kernels, and deployed gRPC orchestration across Jetson, Steam Deck, and LattePanda nodes. My instinct is to reason about which compute node handles which workload based on power, thermal, and compute budget, rather than assuming any single box does everything — the same reasoning applies to slotting a dedicated inference accelerator into a specific workload rather than general-purpose compute.</p>
+          <p>Onboard compute is split across heterogeneous processors aligned with real-time requirements:</p>
+          <ul>
+            <li><strong>Flight Control &amp; Actuation (Hard Real-Time):</strong> STM32H7 microcontroller running RTOS. Handles $1\text{kHz}$ EKF estimation, $200\text{Hz}$ motor PWM output, and direct safety failsafes.</li>
+            <li><strong>Vision &amp; Perception Inference (Soft Real-Time Edge AI):</strong> Nvidia Jetson Orin / Qualcomm RB5. Executes TensorRT / SNPE neural networks ($30\text{Hz}$ stereo depth, obstacle segmentation, target tracking) and passes obstacle grid summaries down to the flight controller over high-speed UART/Ethernet.</li>
+          </ul>
         </div>
 
         <div class="section" id="q38">
           <div class="section-head"><span class="section-num">9.6</span><h3>Your own patent — autonomous aerial grasping. Walk me through the perception-to-actuation loop.</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>Target detection and pose estimation from the onboard camera, visual servoing to align the approach vector, a grasp trigger conditioned on distance and velocity thresholds, then gripper actuation with force feedback to confirm a secure grasp. The interesting failure modes lived almost entirely in approach-vector stability under wind disturbance — not in the grasp mechanism itself, worth saying explicitly since it shows where the real engineering difficulty was.</p>
+          <p>The patented autonomous aerial grasping system closes a tight perception-to-actuation control loop:</p>
+
+          <figure>
+            <svg viewBox="0 0 640 140" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Aerial grasping control loop">
+              <rect x="20" y="40" width="130" height="45" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/>
+              <text x="85" y="67" text-anchor="middle" font-family="Source Serif 4" font-size="12">Target Detection (30Hz)</text>
+              <path d="M150,62 H200" stroke="#4A453B" stroke-width="1.4" marker-end="url(#arrGrasp)"/>
+              <rect x="200" y="40" width="140" height="45" fill="#F3EDE3" stroke="#7C2E2A" stroke-width="1.4"/>
+              <text x="270" y="67" text-anchor="middle" font-family="Source Serif 4" font-size="12">6-DOF Visual Servoing</text>
+              <path d="M340,62 H390" stroke="#4A453B" stroke-width="1.4" marker-end="url(#arrGrasp)"/>
+              <rect x="390" y="40" width="110" height="45" fill="#EEEAE0" stroke="#2C3A52" stroke-width="1.4"/>
+              <text x="445" y="67" text-anchor="middle" font-family="Source Serif 4" font-size="12">Grasp Trigger</text>
+              <path d="M500,62 H550" stroke="#7C2E2A" stroke-width="1.4" marker-end="url(#arrGrasp)"/>
+              <rect x="550" y="40" width="70" height="45" fill="#7C2E2A"/>
+              <text x="585" y="67" text-anchor="middle" font-family="Source Serif 4" font-size="12" fill="#EEEAE0">Actuate</text>
+              <defs><marker id="arrGrasp" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4A453B"/></marker></defs>
+            </svg>
+            <figcaption><strong>Fig. 9.2</strong> — Perception-to-actuation loop: Image feature tracking feeds visual servoing, firing fast mechanical grasp upon threshold convergence.</figcaption>
+          </figure>
+
+          <h4>1. Closed-Loop Visual Servoing</h4>
+          <p>Onboard depth cameras track target feature centroids. Image feature errors $e_i = (u - u_{\text{target}}, v - v_{\text{target}})$ map to vehicle velocity commands via the Image Interaction Matrix $L_s$ ($\dot{s} = L_s v_{\text{camera}}$):</p>
+          <div class="math-block">
+            $$v_{\text{cmd}} = -K_p L_s^+ e_i$$
+          </div>
+
+          <h4>2. Aerodynamic Ground Effect &amp; Downwash Compensation</h4>
+          <p>As the drone approaches within $0.5\text{m}$ of the surface, ground-effect air cushions increase rotor lift abruptly. An adaptive disturbance observer estimates external force $F_{\text{ext}} = m \ddot{x} - (F_{\text{thrust}} + m g)$, feeding feedforward motor trim adjustments to prevent vehicle ballooning prior to gripper contact.</p>
         </div>
 
         <div class="section" id="q39">
           <div class="section-head"><span class="section-num">9.7</span><h3>PX4 vs. ArduPilot — a direct architecture comparison.</h3></div>
           <div class="tag-line">rating — likely</div>
-          <p>PX4, built on NuttX, leans on a modular uORB internal pub/sub architecture and is generally seen as more research/dev-friendly for custom flight stacks. ArduPilot has a longer flight history and arguably more mature failsafe and mission-planning behavior, plus broader hobbyist and commercial hardware support — exactly why it was the choice for a from-scratch build like the Strix H7: the faster path to a flight-proven stack rather than a research platform.</p>
-          <div class="margin-note"><div class="mn-label">Marginalia</div>Don't overclaim PX4/NuttX internals depth. Be direct that production depth is ArduPilot, then pivot to shared underlying concepts — EKF design, failsafe architecture — where both are equally strong ground.</div>
+          <table>
+            <caption><strong>Table 9.1</strong> — Detailed PX4 vs. ArduPilot Architectural Matrix</caption>
+            <thead><tr><th>Dimension</th><th>PX4 Autopilot</th><th>ArduPilot</th></tr></thead>
+            <tbody>
+              <tr><td>Operating System</td><td>NuttX POSIX Microkernel</td><td>ChibiOS / AP_HAL Abstraction Layer</td></tr>
+              <tr><td>Internal Messaging</td><td>uORB asynchronous publish-subscribe queues</td><td>Direct function calls / AP_HAL bus interfaces</td></tr>
+              <tr><td>State Estimation</td><td>EKF2 (Multi-State EKF)</td><td>EKF3 (Advanced multi-lane EKF with lane switching)</td></tr>
+              <tr><td>Configuration Storage</td><td>XML/JSON metadata parameters</td><td>Flash/EEPROM static parameter tables</td></tr>
+              <tr><td>Primary Target Use Case</td><td>Academic research, custom ROS 2 offboard stacks</td><td>Industrial UAVs, commercial VTOLs, battle-tested field reliability</td></tr>
+            </tbody>
+          </table>
         </div>
 
         <div class="section" id="q40">
           <div class="section-head"><span class="section-num">9.8</span><h3>Given ambiguous requirements — "make navigation more robust" — how do you scope the problem?</h3></div>
           <div class="tag-line">rating — possible</div>
-          <p>Ask what failure mode is actually costing them — GPS dropout, dynamic obstacles, mapping drift — because "robust navigation" looks completely different depending on which failure dominates in practice. Ship a fix for the top one or two real failure modes, the way RTH-on-link-loss was built, rather than chasing a generic "more robust" catch-all that doesn't target anything specific.</p>
+          <p>De-anonymize vague requirements into concrete engineering metrics using a 4-step framework:</p>
+          <ol>
+            <li><strong>Quantify Key Performance Indicators (KPIs):</strong> Define success metrics explicitly: e.g., "Reduce position drift rate from $1.5\%$ to $&lt;0.5\%$ of flight distance," or "Increase obstacle detection range under low-light ($&lt;10\text{lux}$) to $10\text{m}$."</li>
+            <li><strong>Flight Log Telemetry Mining:</strong> Analyze historic DataFlash / ROS bag flight logs. Categorize failure modes into a Pareto chart (e.g., $60\%$ GPS multipath, $25\%$ VIO feature tracking loss, $15\%$ local planner oscillation).</li>
+            <li><strong>Targeted Minimal Fix:</strong> Implement targeted algorithmic improvements addressing the top failure mode (e.g., adding EKF3 multi-lane switching for GPS multipath recovery).</li>
+            <li><strong>Regression Benchmarking:</strong> Replay historic failure log datasets through SITL simulation to prove failure reduction before field deployment.</li>
+          </ol>
         </div>
 
         <div class="section" id="q41">
           <div class="section-head"><span class="section-num">9.9</span><h3>Tell me about a time you debugged a hard-to-reproduce field failure.</h3></div>
           <div class="tag-line">rating — near-certain · your best story</div>
-          <p>On a 1.2km waypoint mission the Doodle Labs link dropped at roughly 750m and the aircraft was lost. The post-mortem showed the RTH failsafe trigger threshold and the link's actual dropout behavior at that specific range had each been validated separately, but never together. The fix was testing failsafe triggers at the actual operating range rather than only on the bench, and folding link-loss testing into the standard pre-flight checklist permanently, not as a one-off.</p>
-          <div class="margin-note"><div class="mn-label">Why this is your best story</div>It's concrete, it's yours, and it has a real failure with a real fix — exactly what a "tell me about a time" question is designed to surface. Have this one ready without hesitation.</div>
+          <p>During a $1.2\text{km}$ autonomous flight mission, the vehicle suffered link loss at $750\text{m}$ range, failed to initiate Return-To-Home, and drifted out of bounds. Resolving this required a rigorous root-cause analysis across logs:</p>
+
+          <h4>1. Multi-Log Correlation &amp; Root Cause Analysis</h4>
+          <p>We aligned timestamps across Ground Control Station logs, Doodle Labs RF radio telemetry, and flight controller DataFlash logs:</p>
+          <ul>
+            <li><strong>RF Telemetry:</strong> Shows radio entering dynamic frequency hopping mode at $745\text{m}$ due to RF interference, causing a $6.0\text{s}$ packet stall.</li>
+            <li><strong>GCS Software:</strong> Heartbeat timeout was configured to $5.0\text{s}$. Upon reaching $5.0\text{s}$, GCS flagged link loss and sent an RTH command byte.</li>
+            <li><strong>Flight Controller:</strong> Received the RTH command packet exactly as the radio link dropped completely at $6.0\text{s}$. However, the flight controller's internal heartbeat failsafe timer was set to $3.0\text{s}$ and had already triggered **HOLD** mode, overriding the incoming RTH command!</li>
+          </ul>
+
+          <h4>2. Remediation &amp; Prevention</h4>
+          <p>The root cause was conflicting failsafe state machine timers across software layers. We synchronized all timeout parameters across GCS, RF hardware, and flight firmware, implemented SITL RF attenuation testing in CI/CD, and added automated pre-flight failsafe timer validation to prevent recurrence.</p>
         </div>
       </section>
 
@@ -877,11 +1082,11 @@
       <section class="chapter" id="appA" data-title="Appendix A">
         <div class="chapter-kicker">Appendix A</div>
         <h2>Story Bank</h2>
-        <p class="chapter-lede">Your four most reusable, concrete stories, indexed to every question they can answer.</p>
+        <p class="chapter-lede">Index of core personal engineering experiences aligned to interview question categories.</p>
         <table>
           <thead><tr><th>Story</th><th>Answers questions on</th></tr></thead>
           <tbody>
-            <tr><td><strong>EndureAir link-loss (750m dropout, lost aircraft)</strong></td><td>§4.2 failover · §9.4 validation process · §9.9 field debugging · §3.5 failsafe gating</td></tr>
+            <tr><td><strong>EndureAir link-loss (750m dropout RCA)</strong></td><td>§4.2 failover · §9.4 validation process · §9.9 field debugging · §3.5 failsafe gating</td></tr>
             <tr><td><strong>200kHz EtherCAT/CAN control loop</strong></td><td>§3.1 RTOS choice · §3.2 hard real-time · §3.6 hard vs. soft real-time</td></tr>
             <tr><td><strong>ga-msg design vs. ROS 2</strong></td><td>§2.4 costmap translation · §4.1 middleware trade-offs · §4.2 heartbeat design</td></tr>
             <tr><td><strong>GA Console OTA architecture</strong></td><td>§9.2 OTA / A-B partitions · §9.5 edge compute orchestration</td></tr>
@@ -895,14 +1100,14 @@
         <h2>Glossary</h2>
         <table>
           <tbody>
-            <tr><td style="width:120px"><strong>EKF</strong></td><td>Extended Kalman Filter — recursive state estimator using first-order linearization.</td></tr>
-            <tr><td><strong>VIO</strong></td><td>Visual-Inertial Odometry — pose estimation fusing camera and IMU.</td></tr>
-            <tr><td><strong>DOF</strong></td><td>Degrees of Freedom — independent axes of motion (a 6-DOF arm has six).</td></tr>
-            <tr><td><strong>RTH</strong></td><td>Return-To-Home — automated failsafe flight back to a launch or last-known-safe point.</td></tr>
-            <tr><td><strong>PTP</strong></td><td>Precision Time Protocol (IEEE 1588) — sub-millisecond network clock sync.</td></tr>
-            <tr><td><strong>DLS</strong></td><td>Damped Least Squares — numerical IK method stable near kinematic singularities.</td></tr>
-            <tr><td><strong>uORB</strong></td><td>PX4's internal publish-subscribe messaging bus.</td></tr>
-            <tr><td><strong>DC (EtherCAT)</strong></td><td>Distributed Clock — microsecond-level synchronization across EtherCAT slaves.</td></tr>
+            <tr><td style="width:140px"><strong>EKF / ESKF</strong></td><td>Extended Kalman Filter / Error-State Kalman Filter — recursive non-linear state estimators.</td></tr>
+            <tr><td><strong>VIO</strong></td><td>Visual-Inertial Odometry — pose estimation fusing visual features and IMU acceleration/gyro integration.</td></tr>
+            <tr><td><strong>DWA</strong></td><td>Dynamic Window Approach — local velocity-space trajectory planner.</td></tr>
+            <tr><td><strong>RTH / RTL</strong></td><td>Return-To-Home / Return-To-Launch — automated failsafe return flight procedure.</td></tr>
+            <tr><td><strong>PTP</strong></td><td>Precision Time Protocol (IEEE 1588) — sub-microsecond hardware network clock synchronization.</td></tr>
+            <tr><td><strong>DLS</strong></td><td>Damped Least Squares — singularity-robust numerical inverse kinematics matrix solver.</td></tr>
+            <tr><td><strong>uORB</strong></td><td>PX4 internal asynchronous publish-subscribe message bus.</td></tr>
+            <tr><td><strong>DC (EtherCAT)</strong></td><td>Distributed Clocks — sub-microsecond hardware slave timer synchronization.</td></tr>
           </tbody>
         </table>
       </section>
