@@ -77,7 +77,7 @@ const SITE = {
       meta: [
         { label: 'NEW', hot: true },
         { label: 'interview prep' },
-        { label: '1 question' },
+        { label: '2 questions' },
         { label: 'updated Jul 2026' }
       ]
     },

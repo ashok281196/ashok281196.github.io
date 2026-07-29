@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Q2 · Mesh Drone Swarm in GPS-Degraded Flight · QnA</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">02</div>
+  <div class="chapter-kicker">Robotics &amp; Distributed Systems &middot; Q 2</div>
+  <h1>How would you fly a mesh drone swarm from one GCS with GPS degraded?</h1>
+  <p class="chapter-sub">One ground station, N autonomous aircraft, a VIO stack and companion computer on each &mdash; and three separate problems arriving disguised as one. The radio is a shared, half-duplex medium whose capacity is divided by the whole fleet. Every drone's VIO origin is its own private frame, so "go to that point" means nothing until the frames are related. And a single GCS must sit outside every control loop, or the swarm is only as good as its worst link.</p>
+</header>
+
+<h2><span class="sec-no">2.1</span>Separate the Question Before Answering It</h2>
+<p>The instinct is to start drawing a system diagram. Resist it for a minute, because the question bundles four independent design problems, and conflating them is what produces architectures that fly beautifully with two drones and fall apart at eight:</p>
+<ol>
+  <li><strong>The medium.</strong> A Doodle Labs mesh is one shared, half-duplex RF channel. Total capacity is fixed and divided among every node, and it halves again for every relay hop. This is a bandwidth-and-airtime budgeting problem, and it is the one that hard-caps swarm size.</li>
+  <li><strong>The frame.</strong> Without GPS, each drone's VIO gives an excellent <em>local</em> pose in an origin it invented at boot. Twenty drones means twenty unrelated coordinate systems. Everything cooperative &mdash; formation, deconfliction, coverage, "the target is at X" &mdash; needs a common frame, and the residual error in that frame, not the VIO's own precision, is what sets your minimum separation distance.</li>
+  <li><strong>Authority.</strong> One GCS supervising N autonomous vehicles is a distributed-systems consistency problem: versioned intent, idempotent commands, partition behaviour, and a strict rule that no safety decision ever depends on a packet arriving.</li>
+  <li><strong>Degradation.</strong> "GPS-degraded" is not "GPS-denied." Denied is easy &mdash; the fix is gone, you switch sources and move on. Degraded means the receiver keeps reporting a plausible fix that is quietly wrong, and that is the case that crashes aircraft.</li>
+</ol>
+<div class="keypoint">Saying this decomposition out loud is most of the answer. An interviewer asking this question is checking whether you know that swarm autonomy is bottlenecked by RF airtime and frame consistency &mdash; not by the planner, the VIO algorithm, or the number of GPU TOPS on the companion computer.</div>
+
+<div class="jargon">
+<dl>
+  <dt>MANET / layer-2 mesh</dt>
+  <dd>Mobile ad-hoc network. Every radio is both an endpoint and a relay, so nodes out of direct range reach each other over multiple hops with no infrastructure. Doodle's OpenWrt-based firmware presents this as a flat layer-2 broadcast domain (802.11s or batman-adv depending on the build), which is why plain UDP sockets "just work" across the fleet &mdash; and why broadcast traffic is far more expensive than it looks.</dd>
+  <dt>Airtime</dt>
+  <dd>The real currency of a wireless network. Not bits per second &mdash; microseconds of channel occupancy. A small packet sent at a low modulation rate can cost more airtime than a large packet sent fast, and every retransmission, ACK, and relay hop spends it again.</dd>
+  <dt>MCS / rate adaptation</dt>
+  <dd>Modulation and Coding Scheme index. The radio picks a higher MCS (more bits per symbol) on a clean link and drops to a robust low MCS as SNR falls. Throughput therefore collapses non-linearly with range, and the collapse is what you feel first at the edge of a mission box.</dd>
+  <dt>TDD</dt>
+  <dd>Time-division duplex. Transmit and receive share one frequency by alternating in time, so a node cannot listen while it talks. Sending and receiving both draw from the same airtime budget.</dd>
+  <dt>DFS</dt>
+  <dd>Dynamic Frequency Selection. On radar-shared 5&nbsp;GHz channels, regulation requires the radio to detect a radar pulse and vacate the channel within seconds. Mid-mission, uncommanded, fleet-wide.</dd>
+  <dt>VIO</dt>
+  <dd>Visual-Inertial Odometry. Fuses camera feature tracks with IMU integration to estimate 6-DOF motion. Excellent short-term relative accuracy, unbounded long-term drift, and no notion of a global frame.</dd>
+</dl>
+</div>
+
+<h2><span class="sec-no">2.2</span>Per-Drone Stack: Two Chains, Not One</h2>
+<p>Each aircraft carries three compute-bearing elements: the flight controller (an STM32-class MCU running ArduPilot or PX4, owning the 400&nbsp;Hz control loop and the EKF), the companion computer (a Jetson Orin NX or Qualcomm RB5 class SoC running VIO, perception, and the swarm agent), and the Doodle Labs radio (itself a small Linux box on the network, not a dumb modem). The critical design decision is that the estimation chain and the comms chain are <em>separate</em>, and they touch in exactly two places.</p>
+<figure>
+  <div class="svgwrap">
+    <svg viewBox="0 0 640 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Per-drone estimation chain and comms chain">
+      <g font-family="Newsreader" font-size="12.5">
+        <text x="30" y="18" font-family="IBM Plex Mono" font-size="10.5" fill="#b3401e" letter-spacing="1.6">ESTIMATION CHAIN</text>
+        <text x="340" y="18" font-family="IBM Plex Mono" font-size="10.5" fill="#0e5f5b" letter-spacing="1.6">COMMS CHAIN</text>
+
+        <rect x="30" y="30" width="270" height="38" rx="4" fill="#fdf8ec" stroke="#b3401e" stroke-width="1.4"/>
+        <text x="165" y="47" text-anchor="middle">Stereo global-shutter pair + IMU</text>
+        <text x="165" y="61" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">hardware-triggered · 30 Hz img / 200 Hz imu</text>
+
+        <rect x="30" y="88" width="270" height="38" rx="4" fill="#fdf8ec" stroke="#b3401e" stroke-width="1.4"/>
+        <text x="165" y="105" text-anchor="middle">VIO back-end (sliding window / MSCKF)</text>
+        <text x="165" y="119" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">pose in its own boot-time origin</text>
+
+        <rect x="30" y="146" width="270" height="38" rx="4" fill="#fdf8ec" stroke="#b3401e" stroke-width="1.4"/>
+        <text x="165" y="163" text-anchor="middle">ODOMETRY #331 &#8594; flight controller</text>
+        <text x="165" y="177" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">30 Hz · covariance + reset_counter</text>
+
+        <rect x="30" y="204" width="270" height="38" rx="4" fill="#fdf8ec" stroke="#b3401e" stroke-width="1.4"/>
+        <text x="165" y="221" text-anchor="middle">EKF3 source arbitration</text>
+        <text x="165" y="235" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">GPS | VIO | optical flow + rangefinder</text>
+
+        <rect x="30" y="262" width="270" height="38" rx="4" fill="#fdf8ec" stroke="#b3401e" stroke-width="1.4"/>
+        <text x="165" y="279" text-anchor="middle">Guidance + attitude control</text>
+        <text x="165" y="293" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">400 Hz · never leaves the airframe</text>
+
+        <rect x="340" y="30" width="270" height="38" rx="4" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.4"/>
+        <text x="475" y="47" text-anchor="middle">Swarm agent (companion)</text>
+        <text x="475" y="61" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">state, task bids, volume leases</text>
+
+        <rect x="340" y="88" width="270" height="38" rx="4" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.4"/>
+        <text x="475" y="105" text-anchor="middle">Compact state message</text>
+        <text x="475" y="119" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">5 Hz · 72 B · DSCP-tagged, not raw MAVLink</text>
+
+        <rect x="340" y="146" width="270" height="38" rx="4" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.4"/>
+        <text x="475" y="163" text-anchor="middle">Mesh Rider radio</text>
+        <text x="475" y="177" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">shared airtime · TDD · rate-adaptive</text>
+
+        <rect x="340" y="204" width="270" height="38" rx="4" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.4"/>
+        <text x="475" y="221" text-anchor="middle">Neighbours + GCS, multi-hop</text>
+        <text x="475" y="235" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">latency and cost scale with hop count</text>
+
+        <rect x="340" y="262" width="270" height="38" rx="4" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.4"/>
+        <text x="475" y="279" text-anchor="middle">Deconfliction + task consensus</text>
+        <text x="475" y="293" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">outputs setpoints, never motor commands</text>
+      </g>
+      <path d="M165,68 V88 M165,126 V146 M165,184 V204 M165,242 V262 M475,68 V88 M475,126 V146 M475,184 V204 M475,242 V262" stroke="#4d463a" stroke-width="1.3" marker-end="url(#arrSW)"/>
+      <path d="M300,107 H320 V49 H336" stroke="#a97b1f" stroke-width="1.5" fill="none" marker-end="url(#arrSWg)"/>
+      <path d="M340,281 H304" stroke="#a97b1f" stroke-width="1.5" fill="none" marker-end="url(#arrSWg)"/>
+      <defs>
+        <marker id="arrSW" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#4d463a"/></marker>
+        <marker id="arrSWg" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#a97b1f"/></marker>
+      </defs>
+    </svg>
+  </div>
+  <figcaption>Fig. 1 &mdash; the two chains meet only twice (gold): the VIO pose feeds the swarm agent, and deconfliction returns position/velocity setpoints. Everything else is local. If the mesh disappears entirely, the left column keeps flying the aircraft unaffected.</figcaption>
+</figure>
+<p>The single most important architectural choice on this diagram is what is <em>not</em> there: no MAVLink on the mesh. The tempting build is <code>mavlink-router</code> on each companion bridging the flight controller's serial link straight onto the network, with the GCS opening N MAVLink connections. It works for two drones and dies at eight. Default ArduPilot telemetry streams run 40&ndash;60&nbsp;kB/s per vehicle of <code>ATTITUDE</code>, <code>SYS_STATUS</code>, <code>RAW_IMU</code> and friends, most of it useless to a swarm supervisor; MAVLink's ACK-and-retry semantics for parameters and missions were designed for a single point-to-point link; and multi-hop routing of per-vehicle streams means the far drone's chatter is relayed by three others before reaching the operator. Terminate MAVLink at the companion. Publish a compact, purpose-built swarm state message instead. Bridge full MAVLink to the GCS only on demand, for one vehicle at a time, when an operator explicitly opens a detail view.</p>
+
+<h2><span class="sec-no">2.3</span>The Medium Is the Constraint: Budgeting Airtime</h2>
+<div class="analogy">A mesh is not N private links; it is one conference room. Only one radio can speak at a time within earshot, and a relayed message is spoken twice &mdash; once by the originator, once by whoever repeats it for the far end of the room. Adding drones does not add bandwidth. It adds people who want to talk in the same room.</div>
+<p>Doodle Labs Mesh Rider radios are 802.11-derived: a TDD, rate-adaptive, CSMA-based PHY/MAC in a selectable band (sub-GHz through 5.x&nbsp;GHz) with configurable channel widths from roughly 3&nbsp;MHz up to 40&nbsp;MHz. In a 20&nbsp;MHz channel you might see 40&ndash;60&nbsp;Mbps PHY rate at short range, which translates to somewhere in the 20&ndash;30&nbsp;Mbps range of usable single-hop application throughput &mdash; <em>shared across the entire fleet</em>, halving with each additional hop, and degrading with range as rate adaptation walks down the MCS ladder. That aggregate number, not any per-drone figure, is the budget you spend.</p>
+<p>The trap specific to a layer-2 MANET is broadcast. It looks free &mdash; one <code>sendto()</code> to a broadcast address and every drone has your state &mdash; but broadcast frames are unacknowledged, transmitted at the low basic/multicast rate rather than the negotiated MCS, and <em>re-flooded by every forwarding node</em> so that a single logical message occupies the channel once per relay.</p>
+<div class="setup">
+<p>Airtime for one broadcast frame, 72&nbsp;B payload, multicast rate left at the 6&nbsp;Mbps default:</p>
+<p><code>t &asymp; preamble(20&micro;s) + DIFS(34&micro;s) + avg&nbsp;backoff(~67&micro;s) + payload(1024&nbsp;bits &divide; 6&nbsp;Mbps = 171&micro;s) &asymp; 290&nbsp;&micro;s</code></p>
+<p>20 drones broadcasting state at 5&nbsp;Hz = 100 frames/s &rArr; <strong>29&nbsp;ms/s &asymp; 2.9% airtime.</strong> Comfortable.</p>
+<p>Now put those 20 drones in a mesh where 6 nodes forward: each frame is re-sent 6 more times &rArr; 700 frames/s &rArr; <strong>~20% airtime, for state broadcast alone</strong> &mdash; before a single video frame, task bid, or log line moves.</p>
+<p>Raise the multicast rate to 24&nbsp;Mbps and the payload term drops to 43&nbsp;&micro;s, cutting the total to ~164&nbsp;&micro;s. Roughly a 40% airtime saving from one radio config line, at the cost of shorter broadcast reach &mdash; which is exactly the trade you want to make consciously rather than inherit.</p>
+</div>
+<p>So the design rules follow from arithmetic, not taste: keep the broadcast payload small and fixed-size, keep its rate low, raise the multicast MCS deliberately, and push anything larger than a state beacon onto unicast &mdash; unicast is routed rather than flooded, rate-adapted to the actual link, and ACKed, so a 1&nbsp;MB unicast transfer to one peer is cheaper in airtime than a 100&nbsp;kB broadcast to all of them.</p>
+
+<h3>Traffic classes and what each one is allowed to cost</h3>
+<table>
+  <thead><tr><th>Class</th><th>Rate / size</th><th>Transport</th><th>Loss tolerance</th><th>Priority</th></tr></thead>
+  <tbody>
+    <tr><td>Safety commands (abort, land, hold)</td><td>Event-driven, &lt;40&nbsp;B</td><td>Unicast + ACK, retried, plus broadcast epoch bump</td><td>Zero &mdash; must be idempotent and re-sendable</td><td>Highest (DSCP CS6 / WMM voice)</td></tr>
+    <tr><td>Swarm state beacon</td><td>5&nbsp;Hz, 72&nbsp;B fixed</td><td>Broadcast, no retry</td><td>High &mdash; next one arrives in 200&nbsp;ms</td><td>High</td></tr>
+    <tr><td>Task consensus / bids</td><td>1&ndash;2&nbsp;Hz during allocation only, ~200&nbsp;B</td><td>Broadcast, epoch-versioned</td><td>High &mdash; protocol must converge under loss</td><td>Medium</td></tr>
+    <tr><td>Mission intent (GCS &#8594; fleet)</td><td>Event-driven, 1&ndash;20&nbsp;kB</td><td>Unicast per drone + ACK on (epoch, hash)</td><td>Zero, but retry is safe by construction</td><td>Medium</td></tr>
+    <tr><td>Detections / perception metadata</td><td>1&nbsp;Hz, ~500&nbsp;B, plus thumbnails at 32&ndash;64&nbsp;kbps</td><td>Unicast to GCS</td><td>Medium</td><td>Low</td></tr>
+    <tr><td>Live video</td><td>1080p30 H.265 &asymp; 3&ndash;4&nbsp;Mbps <em>per stream</em></td><td>Unicast, GCS-arbitrated, one or two slots total</td><td>High (it is a picture, not a control input)</td><td>Lowest, and rate-capped</td></tr>
+    <tr><td>Logs / OTA payloads</td><td>Hundreds of MB</td><td>Unicast, ground-only, never in flight</td><td>n/a</td><td>Scavenger</td></tr>
+  </tbody>
+</table>
+<p>Video is the line item that decides the architecture. Four megabits per stream against a ~25&nbsp;Mbps shared single-hop ceiling means two, maybe three concurrent 1080p feeds &mdash; at one hop, at short range, with nothing else happening. At three hops it is one. Twenty simultaneous operator video feeds is not a tuning problem; it is a physics problem. The answer is that video is an arbitrated, scarce resource: every drone continuously ships cheap detection metadata and a low-rate thumbnail, and full-rate video is granted to one or two vehicles at a time on operator request, with adaptive bitrate control driving the encoder from measured link quality rather than a fixed setting.</p>
+<div class="keypoint">Airtime, not bandwidth, is the budget &mdash; and broadcast in a multi-hop mesh costs O(N &times; forwarders), not O(N). Two config decisions (multicast MCS, beacon rate) and one architectural decision (terminate MAVLink at the companion) buy more headroom than any amount of compression work downstream.</div>
+<div class="warfield">The environments that degrade GPS are the same ones that degrade RF. Urban canyon, dense canopy, indoors, under structure &mdash; the multipath and blockage that wreck a GNSS fix wreck your link budget in the same instant. Do not design as though the VIO fallback path and the comms fallback path are independent failures. They are strongly correlated, they will fire together, and a swarm architecture that needs the mesh in order to fly safely without GPS has no safe state at all.</div>
+
+<h3>The state beacon, concretely</h3>
+<p>Fixed-size, scaled integers rather than floats, sequence-numbered so receivers can measure loss, and DSCP-tagged so the radio's WMM queues actually prioritise it:</p>
+<pre><code class="language-cpp">struct __attribute__((packed)) SwarmState {   // 72 bytes on the wire
+    uint8_t  system_id;
+    uint8_t  msg_version;
+    uint16_t seq;                 // wraps; receiver derives loss rate
+    uint64_t t_mono_us;           // sender's synced monotonic clock
+
+    int32_t  pos_cm[3];           // position in the COMMON frame, cm
+    int16_t  vel_cm_s[3];         // velocity, cm/s
+    int16_t  yaw_cdeg;            // centidegrees
+
+    uint16_t pos_sigma_cm;        // 1-sigma horizontal, common-frame
+    uint16_t frame_sigma_cm;      // uncertainty of my VIO->common transform
+    uint8_t  nav_source;          // GPS_VIO | VIO | FLOW | DEAD_RECKON
+    uint8_t  vio_health;          // 0-255: feature count + covariance trace
+    uint8_t  reset_counter;       // increments on every VIO discontinuity
+
+    uint8_t  flight_mode;
+    uint8_t  battery_pct;
+    uint16_t task_id;
+    uint32_t mission_epoch;       // which intent version I am executing
+    uint8_t  reserved[8];
+};
+static_assert(sizeof(SwarmState) == 72, "wire format is frozen");
+
+// Mark it CS6 so the radio's WMM queue treats it as control traffic,
+// and cap the socket so a bug cannot flood the channel.
+int dscp = 0xC0;  // CS6 << 2
+setsockopt(fd, IPPROTO_IP, IP_TOS, &amp;dscp, sizeof(dscp));</code></pre>
+<p>Two fields in there matter more than the rest and are the ones candidates leave out. <code>frame_sigma_cm</code> makes the frame-alignment uncertainty a first-class, transmitted quantity, so every receiver can size its own safety margins correctly. And <code>reset_counter</code> propagates VIO discontinuities across the fleet, so a neighbour knows to distrust a 4-metre position jump instead of planning an avoidance manoeuvre around it.</p>
+
+<h2><span class="sec-no">2.4</span>The Frame Problem: Twenty Origins, One Mission</h2>
+<p>This is the part that separates people who have flown a GPS-denied swarm from people who have read about one. A VIO stack initialises its origin wherever the drone happened to be when it converged, with a yaw that is whatever the initialisation procedure produced. Drone&nbsp;3's "(12, 40, &minus;8)" and drone&nbsp;7's "(12, 40, &minus;8)" are different places on the earth. Until you relate the frames, no cooperative behaviour is possible &mdash; not formation, not coverage partitioning, not "drone 5, investigate what drone 2 just found," and above all not deconfliction.</p>
+<p>Formally, each drone <em>i</em> maintains an estimate of the rigid transform from its VIO frame to a shared world frame, <code>T_world_vio_i &isin; SE(3)</code>, and the operationally relevant quantity is not the accuracy of either drone's odometry but the error in the <em>relative</em> transform between any two of them. Four ways to get it, and they compose:</p>
+<table>
+  <thead><tr><th>Method</th><th>What it gives</th><th>Typical relative error</th><th>Cost</th><th>Fails when</th></tr></thead>
+  <tbody>
+    <tr><td>Surveyed launch grid</td><td>Initial <code>T_world_vio_i</code> from known takeoff positions and a common heading reference</td><td>Starts at 10&ndash;30&nbsp;cm; then grows with VIO drift, unbounded</td><td>Nearly free &mdash; ten minutes of setup</td><td>Long missions; yaw error dominates and is the hardest axis to initialise well</td></tr>
+    <tr><td>Fiducial anchors (AprilTag at surveyed points)</td><td>Direct absolute pose fix on sight, via PnP</td><td>2&ndash;10&nbsp;cm at close range, degrading with distance and viewing angle</td><td>Infrastructure placement + a camera that can see them</td><td>No line of sight; unprepared sites; tags occluded or wet</td></tr>
+    <tr><td>Opportunistic GNSS anchoring</td><td>Loose prior on <code>T_world_vio_i</code> whenever a fix passes quality gates</td><td>1&ndash;5&nbsp;m, but <em>bounded</em> &mdash; drift stops accumulating</td><td>Free; the receiver is already aboard</td><td>Truly denied environments; and dangerous if you trust a degraded fix (see &sect;2.6)</td></tr>
+    <tr><td>Inter-drone constraints (UWB ranging, or shared-landmark co-visibility)</td><td>Relative geometry directly, without any world frame</td><td>10&ndash;30&nbsp;cm (UWB); metre-level from co-visibility</td><td>Extra payload (UWB) or real bandwidth + compute (collaborative SLAM)</td><td>Sparse fleets; NLOS between drones; feature-poor scenes</td></tr>
+  </tbody>
+</table>
+<p>For a real deployment I would layer them rather than pick one: surveyed launch to bootstrap, opportunistic GNSS anchoring to bound growth wherever the sky opens up at all, fiducials at the handful of locations where precision genuinely matters (ingress point, target area, landing pad), and &mdash; only if the mission demands tight relative flight &mdash; UWB for direct inter-drone ranging. Collaborative SLAM by exchanging place-recognition descriptors and keyframe poses is the elegant answer for large-area missions, and it is bandwidth-feasible if and only if you exchange compact descriptors (DBoW2 vectors, NetVLAD embeddings) plus relative-pose constraints, and never point clouds.</p>
+<div class="keypoint">Minimum safe separation is set by the <em>relative frame uncertainty</em>, not by VIO precision. Two drones each holding 5&nbsp;cm local odometry accuracy can be 6&nbsp;metres apart in truth while both believe they are 12&nbsp;metres apart, if their frame transforms have drifted in opposite directions. Size separation as <code>sep &ge; 3&sigma;_frame + 3&sigma;_control + vehicle_radius + reaction_distance</code>, transmit <code>&sigma;_frame</code> in the state beacon, and expand the corridors automatically as it grows. A swarm that tightens formation while its frame uncertainty is quietly widening is a swarm building toward a mid-air.</div>
+
+<h3>The altitude trick worth knowing</h3>
+<p>Horizontal frame error is hard. Vertical separation is comparatively cheap, so lean on it: assign each drone a distinct altitude band and you decouple the collision risk from your worst-estimated axis. The subtlety is choosing the reference. Barometric altitude drifts with weather, but it drifts <em>common-mode</em> &mdash; so if the GCS broadcasts a single reference pressure that every drone uses for its baro conversion, absolute altitude may wander by metres while <em>relative</em> altitude between drones stays consistent to tens of centimetres. That is precisely the property deconfliction needs. Per-drone rangefinders give true AGL, which is what you want for terrain following, but AGL is a bad separation reference over sloping ground: two drones at 20&nbsp;m AGL on opposite sides of a ridge are not vertically separated at all.</p>
+
+<h2><span class="sec-no">2.5</span>The VIO Stack on the Companion</h2>
+<p>Sensor selection dominates algorithm selection, the same way it did in Q1. Non-negotiables: a <strong>global-shutter</strong> stereo pair (rolling shutter plus prop vibration produces geometric distortion that no back-end can model away), <strong>hardware-triggered</strong> exposure with the IMU on the same time base (software timestamps at 30&nbsp;Hz leave jitter that appears to the estimator as spurious acceleration), a wide field of view to keep features in frame during aggressive yaw, and an IMU physically isolated from the frame with its own mount rather than borrowed from the flight controller. Stereo over monocular, because monocular scale is unobservable without sustained acceleration &mdash; and "sustained acceleration" is exactly what a drone hovering to inspect something is not doing.</p>
+<table>
+  <thead><tr><th>Stack</th><th>Type</th><th>Drift (translation)</th><th>Relocalisation</th><th>Companion load</th><th>Best fit</th></tr></thead>
+  <tbody>
+    <tr><td>OpenVINS</td><td>MSCKF filter, tightly coupled</td><td>~0.5&ndash;1.5% of path length</td><td>None built in</td><td>Low, CPU-only, very predictable</td><td>Constrained companions; when bounded, deterministic CPU cost matters more than the last 0.3% of accuracy</td></tr>
+    <tr><td>VINS-Fusion</td><td>Sliding-window optimisation, loop closure</td><td>~0.3&ndash;1%</td><td>Yes (DBoW2)</td><td>Medium-high, multi-core CPU, bursty</td><td>Long missions revisiting the same space; the loop closure genuinely pays</td></tr>
+    <tr><td>ORB-SLAM3</td><td>Feature SLAM, map reuse, multi-map</td><td>~0.3&ndash;0.8% with loop closure</td><td>Strong &mdash; relocalises into a saved map</td><td>High; memory grows with map</td><td>Repeated missions over a pre-mapped site; the saved map is effectively free absolute localisation</td></tr>
+    <tr><td>cuVSLAM / Isaac ROS Visual SLAM</td><td>GPU stereo VIO</td><td>~0.5%</td><td>Yes</td><td>GPU-heavy, CPU-light &mdash; leaves cores for perception</td><td>Jetson platforms already carrying a detection network; the division of labour is the win</td></tr>
+    <tr><td>Downward flow + rangefinder</td><td>Not VIO &mdash; velocity only</td><td>Position drifts without bound; velocity stays honest</td><td>None</td><td>Negligible</td><td>The <em>fallback tier</em>, not the primary. Keeps a drone controllable when VIO dies outright</td></tr>
+  </tbody>
+</table>
+<p>Note what the drift column actually means operationally: 1% of path length over a 1.2&nbsp;km sortie is 12 metres of accumulated position error. If the mission plan has 8-metre corridors, the VIO was never the problem &mdash; the plan was.</p>
+
+<h3>Handing the pose to the flight controller correctly</h3>
+<p>The companion publishes MAVLink <code>ODOMETRY</code> (#331) or <code>VISION_POSITION_ESTIMATE</code> (#102) into the EKF, and there are four ways to get this wrong that all present as "the drone twitches":</p>
+<pre><code class="language-python">import time
+from pymavlink import mavutil
+
+class VioBridge:
+    """Publishes VIO pose to ArduPilot EKF3 at 30 Hz."""
+
+    def __init__(self, mav):
+        self.mav = mav
+        self.reset_counter = 0     # MUST increment on every VIO discontinuity
+        self.clock_offset_us = 0   # companion monotonic -> FC boot micros
+        self.last_vio_seq = None
+
+    def sync_clock(self):
+        # MAVLink TIMESYNC round-trip; run continuously and low-pass the
+        # estimate. Never use wall-clock time -- NTP steps will step your
+        # state estimate, and chrony can slew mid-flight.
+        t0 = time.monotonic_ns() // 1000
+        self.mav.mav.timesync_send(0, t0)
+        msg = self.mav.recv_match(type="TIMESYNC", blocking=True, timeout=0.5)
+        if msg is None:
+            return
+        t1 = time.monotonic_ns() // 1000
+        rtt = t1 - t0
+        if rtt > 20000:            # 20 ms: too jittery to trust this sample
+            return
+        remote = msg.ts1 // 1000
+        self.clock_offset_us = remote - (t0 + rtt // 2)
+
+    def publish(self, vio):
+        if vio.seq != self.last_vio_seq and vio.had_reset:
+            # A VIO restart, relocalisation jump, or origin change. Without
+            # bumping this, EKF3 treats the jump as a real 4 m translation
+            # and the position controller flies the aircraft at it.
+            self.reset_counter = (self.reset_counter + 1) % 256
+        self.last_vio_seq = vio.seq
+
+        # Covariance is not decoration: EKF3 weights the fusion by it, and
+        # a constant optimistic value is how VIO drift gets baked in as
+        # truth. Feed the real marginal covariance from the back-end,
+        # inflated when feature count drops.
+        cov = vio.pose_covariance_upper_triangle()   # 21 floats
+
+        self.mav.mav.odometry_send(
+            int(time.monotonic_ns() // 1000) + self.clock_offset_us,
+            mavutil.mavlink.MAV_FRAME_LOCAL_FRD,     # frame_id
+            mavutil.mavlink.MAV_FRAME_BODY_FRD,      # child_frame_id
+            vio.x, vio.y, vio.z,
+            vio.q,                                   # [w, x, y, z]
+            vio.vx, vio.vy, vio.vz,
+            vio.rollspeed, vio.pitchspeed, vio.yawspeed,
+            cov[:21], cov[:21],
+            self.reset_counter,
+            mavutil.mavlink.MAV_ESTIMATOR_TYPE_VIO,
+            vio.quality,                             # 0-100, -1 if unknown
+        )</code></pre>
+<p>On the flight-controller side, the parameters that have to match physical reality (names drift between releases &mdash; check against the version you are flying): the camera's lever arm in body frame, so the EKF can rotate out the rotational-velocity contribution at the sensor; the sensor-to-body orientation; and the measurement delay, because a VIO pose describing where the drone was 60&nbsp;ms ago, fused as though it describes now, becomes a phase lag in the position loop that shows up as a slow oscillation in hover.</p>
+<pre><code class="language-text"># ArduPilot: external nav + EKF3 source sets
+VISO_TYPE        2        # MAVLink ODOMETRY / VISION_POSITION_ESTIMATE
+VISO_POS_X       0.10     # camera lever arm from IMU, body frame, metres
+VISO_POS_Y       0.00
+VISO_POS_Z      -0.05
+VISO_ORIENT      0
+VISO_DELAY_MS    60       # measure this; do not guess it
+VISO_POS_M_NSE   0.20     # floor on trusted position noise
+VISO_VEL_M_NSE   0.10
+
+# Source set 1 = GNSS healthy.   Set 2 = VIO primary.   Set 3 = flow fallback.
+EK3_SRC1_POSXY   3        # GPS
+EK3_SRC1_VELXY   3
+EK3_SRC1_POSZ    1        # baro
+EK3_SRC1_YAW     1        # compass
+
+EK3_SRC2_POSXY   6        # ExternalNav (VIO)
+EK3_SRC2_VELXY   6
+EK3_SRC2_POSZ    1
+EK3_SRC2_YAW     6        # VIO yaw -- see the field note below
+
+EK3_SRC3_POSXY   0        # none
+EK3_SRC3_VELXY   5        # optical flow
+EK3_SRC3_POSZ    2        # rangefinder
+EK3_SRC3_YAW     1</code></pre>
+
+<h2><span class="sec-no">2.6</span>Degraded Is Worse Than Denied</h2>
+<p>A drone that loses GPS entirely is in a well-defined state: the receiver reports no fix, the EKF's GPS innovations blow past their gates, the source arbitrator switches to VIO, the mission continues. Handled.</p>
+<p>The dangerous case is the one the question actually names. Under multipath in an urban canyon, or partial sky blockage under canopy, or in the presence of interference or spoofing, the receiver reports a fix with a plausible HDOP and a plausible satellite count that is wrong by 20&nbsp;metres and <em>wandering</em>. The EKF fuses it happily &mdash; it looks exactly like a valid measurement &mdash; and the aircraft flies a smooth, confident trajectory into a building. GPS quality metrics reported by the receiver are self-assessment, and self-assessment is the one thing a compromised or confused sensor cannot be trusted to provide.</p>
+<figure>
+  <div class="svgwrap">
+    <svg viewBox="0 0 640 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Navigation source degradation ladder">
+      <g font-family="Newsreader" font-size="12">
+        <rect x="12" y="66" width="140" height="54" rx="5" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.5"/>
+        <text x="82" y="88" text-anchor="middle" font-size="13">GNSS + VIO</text>
+        <text x="82" y="105" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">SRC1 · frame anchored</text>
+
+        <rect x="176" y="66" width="140" height="54" rx="5" fill="#fdf8ec" stroke="#0e5f5b" stroke-width="1.5"/>
+        <text x="246" y="88" text-anchor="middle" font-size="13">VIO primary</text>
+        <text x="246" y="105" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">SRC2 · frame drifting</text>
+
+        <rect x="340" y="66" width="140" height="54" rx="5" fill="#fdf8ec" stroke="#a97b1f" stroke-width="1.5"/>
+        <text x="410" y="88" text-anchor="middle" font-size="13">Flow + range</text>
+        <text x="410" y="105" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">SRC3 · velocity only</text>
+
+        <rect x="496" y="66" width="136" height="54" rx="5" fill="#fdf8ec" stroke="#b3401e" stroke-width="1.8"/>
+        <text x="564" y="88" text-anchor="middle" font-size="13">Land in place</text>
+        <text x="564" y="105" text-anchor="middle" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">attitude hold + land</text>
+
+        <text x="164" y="46" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#b3401e">GPS gate fail</text>
+        <text x="164" y="57" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#b3401e">or VIO disagrees</text>
+        <text x="328" y="46" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#b3401e">features &lt; 20</text>
+        <text x="328" y="57" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#b3401e">or cov diverging</text>
+        <text x="488" y="46" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#b3401e">flow quality lost</text>
+        <text x="488" y="57" text-anchor="middle" font-family="IBM Plex Mono" font-size="9" fill="#b3401e">or 2 s no velocity</text>
+
+        <text x="252" y="156" font-family="IBM Plex Mono" font-size="9" fill="#0e5f5b">recover only after 10 s consistent + innovations inside gate</text>
+        <text x="24" y="182" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">Degrade fast (&lt;200 ms). Recover slow, with hysteresis. Never oscillate: a source flapping</text>
+        <text x="24" y="196" font-family="IBM Plex Mono" font-size="9.5" fill="#4d463a">between GPS and VIO at 1 Hz is more dangerous than committing to the worse of the two.</text>
+      </g>
+      <path d="M152,93 H172" stroke="#b3401e" stroke-width="1.6" marker-end="url(#arrDeg)"/>
+      <path d="M316,93 H336" stroke="#b3401e" stroke-width="1.6" marker-end="url(#arrDeg)"/>
+      <path d="M480,93 H492" stroke="#b3401e" stroke-width="1.6" marker-end="url(#arrDeg)"/>
+      <path d="M246,120 V138 H82 V120" stroke="#0e5f5b" stroke-width="1.3" fill="none" stroke-dasharray="4,3" marker-end="url(#arrRec)"/>
+      <path d="M410,120 V132 H246 V120" stroke="#0e5f5b" stroke-width="1.3" fill="none" stroke-dasharray="4,3" marker-end="url(#arrRec)"/>
+      <defs>
+        <marker id="arrDeg" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#b3401e"/></marker>
+        <marker id="arrRec" markerWidth="7" markerHeight="7" refX="5" refY="3.5" orient="auto"><path d="M0,0 L7,3.5 L0,7 Z" fill="#0e5f5b"/></marker>
+      </defs>
+    </svg>
+  </div>
+  <figcaption>Fig. 2 &mdash; the degradation ladder. Each tier gives up capability for robustness: GNSS+VIO has an anchored frame; VIO alone drifts; flow gives velocity but no position; the last tier gives up navigation entirely and lands. Asymmetric timing is the whole design &mdash; milliseconds to fall, seconds of consistent evidence to climb back.</figcaption>
+</figure>
+<p>Detection has to come from cross-validation between independent sensors, not from any one sensor's opinion of itself. The three signals worth combining:</p>
+<ul>
+  <li><strong>EKF innovation statistics.</strong> The normalised innovation squared for the GPS position measurement, gated against a chi-squared threshold, tests whether the fix is consistent with the propagated state. A slowly walking spoof or multipath bias produces innovations that are individually inside the gate but persistently biased &mdash; so track the <em>running mean</em> of the innovation, not just per-sample rejection. A zero-mean innovation sequence is healthy; a consistently positive one is a sensor lying smoothly.</li>
+  <li><strong>VIO&ndash;GNSS disagreement over a window.</strong> Over 10 seconds, VIO's <em>relative</em> displacement is far more trustworthy than GNSS's. Compare the two displacement vectors: if GNSS says the drone moved 14&nbsp;m north and VIO says 6&nbsp;m north, GNSS is wrong, regardless of what HDOP claims.</li>
+  <li><strong>Physical plausibility.</strong> Jumps exceeding the airframe's kinematic limits, satellite count changing implausibly fast, carrier-to-noise ratios that are suspiciously uniform across satellites (a classic spoofing signature), reported velocity inconsistent with the accelerometer integral.</li>
+</ul>
+<pre><code class="language-python">class GnssArbiter:
+    """Decides whether the GNSS fix deserves to be in the estimate.
+    Degrade in under 200 ms; require 10 s of consistent evidence to recover."""
+
+    GATE = 9.0              # chi-squared, 2-DOF, ~99%
+    BIAS_WINDOW = 10.0      # seconds
+    BIAS_LIMIT = 3.0        # metres of persistent innovation mean
+    VIO_DISAGREE_LIMIT = 4.0
+    RECOVER_HOLD = 10.0
+
+    def update(self, t, fix, ekf, vio):
+        reasons = []
+
+        # 1. Per-sample consistency with the propagated state.
+        nis = ekf.normalised_innovation_squared(fix)
+        if nis > self.GATE:
+            reasons.append(f"innovation gate {nis:.1f}")
+
+        # 2. Persistent bias -- the signature of multipath or a walking spoof.
+        #    Individually plausible samples, collectively impossible.
+        self.bias.push(t, ekf.innovation_vector(fix))
+        if self.bias.window_mean_norm(self.BIAS_WINDOW) > self.BIAS_LIMIT:
+            reasons.append("innovation mean biased")
+
+        # 3. Independent cross-check: relative displacement over the window.
+        d_gnss = fix.pos - self.fix_history.at(t - self.BIAS_WINDOW)
+        d_vio  = vio.pos - self.vio_history.at(t - self.BIAS_WINDOW)
+        if norm(d_gnss - d_vio) > self.VIO_DISAGREE_LIMIT and vio.healthy:
+            reasons.append("disagrees with VIO displacement")
+
+        # 4. Cheap physical plausibility.
+        if fix.jumped_further_than(self.max_speed * fix.dt * 1.5):
+            reasons.append("kinematically impossible jump")
+        if fix.cn0_variance_across_sats() < 0.5:
+            reasons.append("uniform C/N0 -- possible spoof")
+
+        if reasons:
+            self.healthy_since = None
+            if self.trusted:
+                self.trusted = False
+                log.warning("GNSS demoted: %s", ", ".join(reasons))
+                return "DEMOTE_TO_VIO"
+            return "STAY_DEMOTED"
+
+        # Recovery is deliberately slow and one-way-at-a-time.
+        if self.healthy_since is None:
+            self.healthy_since = t
+        if not self.trusted and (t - self.healthy_since) > self.RECOVER_HOLD:
+            self.trusted = True
+            log.info("GNSS restored after %.1f s clean", t - self.healthy_since)
+            return "PROMOTE_TO_GNSS"
+        return "HOLD"</code></pre>
+<div class="warfield">Yaw is the axis that kills GPS-degraded missions, and it is almost always underestimated. Position error is visible in the logs and obvious in flight. A slow yaw drift &mdash; a fraction of a degree per minute in the VIO's heading estimate &mdash; is invisible in hover and catastrophic in transit: it silently rotates every subsequent waypoint, so a drone commanded 400&nbsp;m down a corridor arrives tens of metres off-axis while its own estimate reports arriving perfectly. Magnetometers, the usual absolute heading reference, are the least trustworthy sensor on an aircraft indoors or near structure, which is exactly where you need them. Practical mitigations: hold a magnetometer-derived yaw prior with a large but non-infinite covariance rather than disabling the compass outright; use fiducials or a known-heading feature (a building face, a runway line) for periodic absolute correction; and put yaw drift rate on the operator display as a first-class number, next to battery.</div>
+<div class="warfield">Takeoff before VIO convergence is the most common single cause of a bad GPS-denied flight, and it is entirely preventable. Stereo VIO needs motion to observe its own scale and enough parallax to triangulate an initial feature set; a drone that arms and climbs the instant the process starts is flying on a covariance that has not settled. Gate arming explicitly: feature count above a threshold, covariance trace below one, a completed initialisation motion, and agreement between VIO velocity and a hand-carried or low-hover ground-truth check. Then make the gate visible &mdash; an operator waiting for a green "VIO converged" indicator is worth more than any amount of back-end tuning.</div>
+
+<h2><span class="sec-no">2.7</span>One GCS, N Autonomous Vehicles</h2>
+<p>The single-GCS requirement is where the answer becomes a distributed-systems answer. The rule: <strong>the GCS publishes intent and consumes state; it is never inside a control loop, and no safety-critical decision depends on a packet arriving.</strong></p>
+<p>Concretely, the operator does not command trajectories. The operator commands a mission specification &mdash; the area to cover, the tasks to perform, the constraint envelope (geofence, altitude bands, minimum separation, no-go volumes), and the rules of engagement for degradation. That specification carries a monotonically increasing <code>mission_epoch</code> and a content hash. It goes out by unicast to each drone, which acknowledges <code>(epoch, hash)</code>. Retransmission is safe by construction because applying the same epoch twice is a no-op, which means the protocol needs no exactly-once delivery guarantee &mdash; and over a lossy mesh, "make retries idempotent" is a far more robust engineering choice than "make delivery reliable."</p>
+<p>The state beacon flows the other way, and the GCS reconstructs the fleet picture from it. Note the asymmetry that makes this scale: intent is large but rare and unicast; state is small but continuous and broadcast.</p>
+
+<h3>The failsafe timer ladder</h3>
+<p>This is where fleets bite you, and the failure is always the same shape: two layers each independently decide to act, and the wrong one wins. A GCS configured with a 5-second link-loss timeout that sends a return-to-home command is useless if the flight controller's own 3-second failsafe has already forced a mode change that overrides it. Both timers were individually reasonable. Together they produced a drone that neither returned home nor held position.</p>
+<p>The rule that prevents it: <strong>the layer that owns a decision must fire first, and every backstop layer must have a timeout of at least twice the layer inside it, plus worst-case network jitter.</strong> Write the ladder down as a table, put it under version control, and make it a review gate &mdash; because these numbers live in three different config files on three different processors, and nothing in any build system will tell you they have drifted out of order.</p>
+<table>
+  <thead><tr><th>Timeout</th><th>Owner</th><th>Detects</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td>200&nbsp;ms</td><td>Companion</td><td>Flight-controller serial link stale</td><td>Stop sending setpoints; let the FC's own position hold take over</td></tr>
+    <tr><td>600&nbsp;ms</td><td>Companion</td><td>Neighbour state stale (3 missed beacons)</td><td>Inflate that neighbour's position uncertainty; shrink own permitted volume</td></tr>
+    <tr><td>2&nbsp;s</td><td>Companion</td><td>Neighbour presumed lost</td><td>Suspend cooperative manoeuvres; hold inside own leased volume only</td></tr>
+    <tr><td>5&nbsp;s</td><td>Companion</td><td>GCS unreachable</td><td>Continue the current mission autonomously &mdash; this is the designed case, not a fault</td></tr>
+    <tr><td>60&nbsp;s</td><td>Companion</td><td>GCS still unreachable</td><td>Complete current task, then return to the rendezvous point per mission ROE</td></tr>
+    <tr><td>120&nbsp;s</td><td>Flight controller</td><td>No companion heartbeat at all</td><td>Independent RTL / land &mdash; the backstop, and it must not be reachable by any earlier layer</td></tr>
+  </tbody>
+</table>
+<div class="keypoint">Losing the GCS link mid-mission is a <em>designed operating mode</em>, not an emergency. If the swarm cannot complete a mission with the ground station switched off, the autonomy lives in the wrong place. The corollary is the harder discipline: every safety property &mdash; geofence, battery reserve, separation minima, terrain floor &mdash; must be enforced onboard, by the vehicle itself, with no dependency on a packet arriving from anywhere.</div>
+
+<h3>Task allocation and deconfliction under partition</h3>
+<p>Assignment uses a distributed market-based auction (CBBA and its variants): each drone bids on task bundles from its own battery state, distance, and sensor fit; agents exchange bid vectors over the mesh and converge on a conflict-free assignment with no central scheduler. This matters for the single-GCS requirement specifically, because it means the operator's laptop is not the allocator &mdash; the swarm reassigns itself when a drone drops out, whether or not the GCS is watching.</p>
+<p>What people miss is that the auction must be designed for a network that loses messages and partitions. That means bids are idempotent and epoch-versioned, convergence is eventual rather than synchronous, and a partition must be safe rather than merely unlikely. The mechanism I would use for the safety half is <strong>volume leases</strong>: each drone holds a time-bounded reservation on a spatial volume, renewed continuously while it can talk to its neighbours. If the mesh partitions, leases expire on their own, and each drone falls back to the volume it last held uncontested. Two isolated halves of a partitioned swarm cannot both claim the same airspace, because neither can renew a lease the other holds. Safety comes from the expiry, which needs no network at all, rather than from an agreement that needs one.</p>
+<p>For tactical avoidance, the sharp edge is stale data. A drone executing a reciprocal-velocity-obstacle manoeuvre against a neighbour position from 3 seconds ago is actively dangerous &mdash; it is confidently avoiding where that neighbour used to be. Stale state is worse than absent state, because absent state at least triggers the conservative path. The fix is to make staleness explicit in the geometry:</p>
+<pre><code class="language-python">def neighbour_keepout_radius(nbr, t_now, self_frame_sigma):
+    """Radius to keep clear of a neighbour, given everything we do not know.
+    Each term is a distinct source of ignorance; they add, they do not max."""
+    age = t_now - nbr.t_mono_us * 1e-6
+
+    # Where it could have travelled since we last heard from it.
+    reachable = nbr.speed * age + 0.5 * MAX_ACCEL * age ** 2
+
+    # Frame uncertainty is pairwise: our transform error plus theirs.
+    frame = 3.0 * hypot(self_frame_sigma, nbr.frame_sigma_cm / 100.0)
+
+    # Their own estimator's uncertainty, in their own frame.
+    est = 3.0 * nbr.pos_sigma_cm / 100.0
+
+    r = VEHICLE_RADIUS + reachable + frame + est + CONTROL_ERROR_MARGIN
+
+    if age > NEIGHBOUR_LOST_S:
+        # Past this point the reachable-set term is so large that "avoid" is
+        # meaningless. Stop cooperating and retreat to our own leased volume:
+        # a manoeuvre computed from a 3-second-old position is worse than
+        # no manoeuvre at all.
+        raise NeighbourLost(nbr.system_id, age)
+
+    return r</code></pre>
+
+<h2><span class="sec-no">2.8</span>Clock Sync, and Why It Is Load-Bearing</h2>
+<p>Four things in this system need a common time base: cross-drone state fusion (a neighbour's position is meaningless without knowing when it was true), any application-layer transmit scheduling, post-flight multi-log correlation during incident analysis, and &mdash; most tightly &mdash; camera-to-IMU alignment inside each VIO instance.</p>
+<p>With GNSS available, the pulse-per-second output gives every drone a sub-microsecond common epoch, which is more than enough for all four. GPS-degraded is precisely the case where that goes away, so the fallback matters. PTP with hardware timestamping is not available across an 802.11 mesh, so the realistic fallback is NTP or a lightweight round-trip offset protocol against a designated leader &mdash; the GCS, or whichever drone currently holds the best fix &mdash; landing somewhere in the 1&ndash;10&nbsp;ms range over a wireless multi-hop link. Ask whether that is good enough and the answer splits by use case: at 15&nbsp;m/s, 10&nbsp;ms is 15&nbsp;cm of position ambiguity, which is fine for swarm state and deconfliction margins, and nowhere near good enough to fuse visual observations across drones into a shared map. Design accordingly &mdash; per-drone VIO can rely on hardware-triggered local sync, and anything cross-drone must be built to tolerate millisecond-scale timestamp error.</p>
+<div class="warfield">Never build control or estimation logic on wall-clock time. NTP steps the clock; chrony slews it; a GPS fix arriving mid-flight can jump <code>CLOCK_REALTIME</code> by seconds. Any timer, timeout, or timestamp difference on the critical path uses <code>CLOCK_MONOTONIC</code>, with an explicitly estimated offset to whatever shared epoch you need. This is a one-line bug that produces a fleet-wide incident, and it is invisible on the bench because the bench clock is already synced.</div>
+
+<h2><span class="sec-no">2.9</span>What Breaks at Each Scale</h2>
+<p>Swarm architectures do not degrade smoothly with fleet size; they hit distinct walls. Knowing which wall arrives when is the difference between an architecture and a demo:</p>
+<table>
+  <thead><tr><th>Fleet size</th><th>What breaks first</th><th>What it forces</th></tr></thead>
+  <tbody>
+    <tr><td>2&ndash;3</td><td>Nothing. Naive designs work: bridged MAVLink, per-drone GCS connections, no frame alignment beyond a shared takeoff point.</td><td>Nothing &mdash; which is exactly why demos at this scale teach you nothing about the real system.</td></tr>
+    <tr><td>5&ndash;8</td><td>Bridged MAVLink telemetry saturates the channel; the operator UI becomes unusable as N windows.</td><td>Terminate MAVLink at the companion. Compact state beacon. Exception-based UI instead of N telemetry panes.</td></tr>
+    <tr><td>10&ndash;20</td><td>Broadcast re-flooding dominates airtime; multi-hop latency becomes visible; frame drift between the most-separated pair exceeds planned corridor widths.</td><td>Raise multicast MCS, cut beacon rate, unicast anything large. Active frame-alignment (anchors, opportunistic GNSS) rather than survey-and-hope. Video becomes an arbitrated resource.</td></tr>
+    <tr><td>25&ndash;50</td><td>Mesh routing overhead and route flapping under mobility; auction convergence time approaches the mission's replanning interval; one operator cannot supervise the fleet cognitively regardless of what the network does.</td><td>Hierarchy: sub-swarms with designated relay/leader nodes, aggregated upward. Operator supervises groups and exceptions, never individual aircraft. Consider a second RF channel or band for the backhaul tier.</td></tr>
+  </tbody>
+</table>
+<div class="warfield">A handful of physical realities that bite regardless of how good the software is. <strong>Thermal:</strong> VIO at 30&nbsp;Hz plus an H.265 encode plus a detection network will thermally throttle a Jetson in still air &mdash; and throttling drops VIO frames, which increases drift, in flight, silently. Instrument SoC temperature and VIO frame-drop rate as flight-critical telemetry, and test in the worst ambient conditions you will fly in. <strong>Vibration:</strong> prop-induced IMU noise aliases into the VIO's integration and is the single most common cause of "the algorithm works on the dataset but not on the aircraft"; soft-mount the IMU, notch-filter, and verify with a real spectrum from a real hover. <strong>DFS:</strong> a radar detection on a 5&nbsp;GHz channel will vacate your entire fleet's channel mid-mission, uncommanded. Prefer non-DFS or licensed bands, and if you cannot, pre-agree a fallback channel plan with a timeout-based rendezvous so the swarm reconverges on channel B rather than fragmenting. <strong>Ground-side interference:</strong> do not run the GCS radio and the operator's laptop Wi-Fi in the same band, on the same table, and then debug for two days.</div>
+
+<h2><span class="sec-no">2.10</span>How You Would Actually Validate It</h2>
+<p>The validation ladder matters as much as the architecture, because almost every failure mode above is invisible in simulation unless you deliberately simulate the network, and invisible on the bench unless you deliberately degrade the RF:</p>
+<ol>
+  <li><strong>Replay.</strong> Recorded flight data through the VIO stack with synthetically injected GPS degradation &mdash; slow biases, sudden jumps, plausible-but-wrong fixes. This is the only cheap way to test &sect;2.6, and the only way to test it repeatably.</li>
+  <li><strong>Swarm SITL, with the network modelled.</strong> N flight-controller SITL instances plus N real companion stacks, connected through emulated links &mdash; <code>tc netem</code> for loss, latency, jitter and bandwidth caps, plus a topology model so multi-hop and partition are real. Simulating the vehicles but not the network is the most common gap, and it hides every interesting bug in this system.</li>
+  <li><strong>HITL on the bench.</strong> Real flight controllers, real companions, real Doodle Labs radios, with programmable RF attenuators sweeping the link budget from full-rate down to link loss. This is where the failsafe ladder in &sect;2.7 gets verified with a stopwatch, and where you find the two timers that are in the wrong order.</li>
+  <li><strong>Incremental field.</strong> One drone GPS-denied. Then two, separated far beyond any plausible frame error, measuring actual relative frame drift against surveyed ground truth. Only then tighten separation, and only to the margin the measurements justify. The measured <code>&sigma;_frame</code> is what earns a corridor width &mdash; not the VIO paper's drift number.</li>
+  <li><strong>Adversarial rehearsal.</strong> Deliberately partition the mesh mid-mission. Kill a drone's VIO mid-transit. Spoof a GPS bias in flight if you have the range clearance to do it safely. Every one of these must be a rehearsed, observed outcome before it is a surprise.</li>
+</ol>
+
+<div class="warfield">Where the first-hand depth here is real and where it is design reasoning, said plainly: mesh-radio link management, sliding-window loss estimation and failover, telemetry and video transport under RF degradation, edge deployment on Jetson and RB5 class hardware, and multi-log RCA on a real link-loss incident are shipped experience. Distributed collaborative SLAM with online inter-drone map merging, and UWB-based relative localisation, are architecture I would design and stage rather than systems I have flown at fleet scale. State that boundary directly if asked &mdash; then pivot to the airtime budgeting and the failsafe-ladder ordering, which is where the hard-won knowledge actually lives.</div>
+
+<details class="qa"><summary>Why not just run ROS 2 over the mesh and let DDS handle discovery and QoS?</summary><div class="a"><p>Because default DDS discovery is multicast-flooded and scales as O(N&sup2;) in participant pairs, and every one of those flooded packets pays the broadcast airtime penalty from &sect;2.3 &mdash; sent at the basic rate, re-flooded by every forwarder. A fleet of twenty ROS 2 nodes-per-drone can spend a substantial fraction of the channel on discovery and liveliness traffic before publishing anything useful. DDS's reliability QoS also assumes a link where retransmission is cheap; over a multi-hop mesh, aggressive ACKNACK repair turns a lossy link into a congested one.</p><p>It is workable with real effort &mdash; static discovery peer lists, a discovery server, careful QoS profiles per topic, and a domain/partition layout that keeps intra-drone traffic off the air entirely. But the honest version is that you end up hand-configuring away most of what DDS does automatically. Running ROS 2 <em>within</em> each drone, where the transport is loopback or shared memory and its ergonomics are a real win, and a purpose-built compact protocol over the mesh between drones, gives you explicit control of exactly the resource that is scarce. The general principle: on a shared, lossy, half-duplex medium, prefer a protocol whose wire cost you can compute by hand.</p></div></details>
+
+<details class="qa"><summary>How do you know the relative frame error in flight, rather than hoping it is small?</summary><div class="a"><p>Make it an observable, not an assumption. Four cheap sources: (1) when two drones see the same fiducial or the same distinctive landmark, the disagreement between their two computed world poses is a direct sample of the pairwise frame error; (2) whenever any drone gets a GNSS fix that passes the &sect;2.6 gates, the residual against its VIO-predicted position bounds its own transform error; (3) UWB ranging, if fitted, measures inter-drone distance directly, and the discrepancy against the distance implied by the two reported positions is exactly the pairwise frame error along that baseline; (4) as a floor, propagate each VIO's covariance and the elapsed distance travelled through the drift model to get a conservative bound with no measurement at all.</p><p>Then do the part that most designs skip: transmit it (<code>frame_sigma_cm</code> in the beacon), display it to the operator alongside battery, and <em>let it drive behaviour</em> &mdash; corridors and separation minima widen automatically as it grows, and the mission degrades to a more conservative pattern when it exceeds what the plan assumed. A number that is measured but does not change any decision is telemetry theatre.</p></div></details>
+
+<details class="qa"><summary>The operator wants manual stick control of one drone inside the GPS-degraded area. What do you give them?</summary><div class="a"><p>Velocity commands in the drone's body frame, at a modest rate, with a hard stale-command timeout and an onboard envelope &mdash; never attitude or rate commands. Attitude control over a multi-hop mesh with variable latency and jitter is closing a fast loop over a link with unbounded delay, and the operator's inner ear is not in the loop the way it is with a direct RC link.</p><p>The specifics: cap command age at 200&ndash;300&nbsp;ms and transition to position hold when it is exceeded (position hold, not "keep the last velocity" &mdash; a drone that keeps flying the last commanded velocity after link loss is a runaway). Enforce the geofence, terrain floor, separation minima and the drone's leased volume onboard, so the manual input is a request the autonomy clips rather than an authority that overrides it. And bump the video allocation to that vehicle for the duration, because manual control without a live picture is worse than no manual control, and be explicit that the operator is now consuming most of the fleet's video budget.</p></div></details>
+
+<details class="qa"><summary>How do you push a firmware or config update to twenty drones over this mesh?</summary><div class="a"><p>Never in flight, and never to all twenty at once. On the ground, with A/B partitioned images so a bad update rolls back on next boot rather than bricking an airframe: write to the inactive partition, verify a hash, mark it try-once, boot, and only commit after the new image proves itself healthy. Bandwidth-wise, sequential unicast to each drone beats broadcast &mdash; unicast is rate-adapted to each link and does not flood, so twenty sequential 200&nbsp;MB transfers move more total bytes per unit airtime than one broadcast attempt, and a failed transfer retries against one drone instead of restarting the fleet.</p><p>Operationally: canary first. One drone updates, flies a short validation sortie, and only then does the rest of the fleet follow. The fleet-wide failure mode you are protecting against is a config change that is individually valid on every aircraft but breaks an <em>inter-drone</em> assumption &mdash; a wire-format change, a timer that is now out of ladder order, a beacon rate that pushes airtime over budget. Those are invisible to per-drone testing by construction, which is why a version-compatibility check belongs in the beacon (<code>msg_version</code>) and mixed-version operation should be either explicitly supported or explicitly refused at arm time.</p></div></details>
+
+<details class="qa"><summary>How many drones can one operator actually supervise, as opposed to how many the network supports?</summary><div class="a"><p>Fewer than the network allows, and the two limits should be discussed separately. Network capacity in this architecture runs out somewhere in the 20&ndash;50 range depending on hop count and video policy. Operator capacity, if the UI presents one panel per aircraft, runs out around four to six &mdash; and no amount of RF engineering moves that number.</p><p>The design answer is exception-based supervision: the default view is the mission and its progress, not the vehicles. Individual aircraft surface only when they need a decision &mdash; a task that cannot be reassigned, a frame uncertainty that has outgrown the plan, a battery that will not make the rendezvous, a vehicle that has fallen off the ladder in Fig.&nbsp;2. Everything else the swarm handles itself, which is the same requirement as &sect;2.7's "losing the GCS is a designed mode" seen from the human side. If the swarm needs the operator, it also needs the link &mdash; and then you have no safe state.</p></div></details>
+
+<details class="qa"><summary>What if you only have a single downward-facing camera per drone instead of a stereo pair?</summary><div class="a"><p>You lose metric scale, which is the property the whole architecture depends on. Monocular VIO recovers scale only from IMU-observed acceleration, so it needs sustained excitation &mdash; and a drone hovering to inspect something, or flying a smooth coverage lawnmower at constant velocity, provides almost none. Scale then drifts, and scale drift is uniquely nasty because it corrupts distance rather than adding a bias: a 10% scale error means every commanded 100&nbsp;m leg is actually 90 or 110&nbsp;m, so the error grows with the mission instead of averaging out.</p><p>The workable single-camera build is downward camera plus a downward rangefinder: the range measurement provides the metric reference that makes scale observable, which is exactly the classic optical-flow-plus-lidar configuration and why it appears as the fallback tier in Fig.&nbsp;2. Its limits are geometric &mdash; it degrades over textureless or self-similar ground (water, fresh snow, uniform crop canopy, a smooth warehouse floor), and it is blind to anything not directly below, so it gives you velocity rather than a map and contributes nothing to obstacle awareness or to the co-visibility-based frame alignment in &sect;2.4. As a safety fallback it is excellent and cheap. As the primary sensor for a cooperative swarm that needs a shared frame, it is not enough.</p></div></details>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

@@ -22,6 +22,14 @@ const BOOK = {
       navTitle: 'Q1 · Crop Health Segmentation',
       sub: 'Building a segmentation pipeline for crop health monitoring from drone camera imagery, covering both multispectral fusion and RGB-only cameras, with the latest models.',
       tag: 'Vision'
+    },
+    {
+      file: '02-mesh-drone-swarm-gps-degraded.html',
+      num: '02',
+      title: 'Mesh Drone Swarm, GPS-Degraded',
+      navTitle: 'Q2 · Mesh Drone Swarm',
+      sub: 'A swarm of mesh-radio drones flown from one GCS on autonomous missions without reliable GPS: airtime budgeting, VIO frame alignment across aircraft, and command authority that survives a partitioned link.',
+      tag: 'Swarm'
     }
   ]
 };
