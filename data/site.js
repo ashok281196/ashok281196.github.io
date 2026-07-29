@@ -73,11 +73,11 @@ const SITE = {
     {
       file: 'reading/qna/index.html',
       title: 'QnA — A Growing Interview Question Bank',
-      desc: 'A running bank of real technical-interview questions across vision, ML, robotics and systems, each answered in full — one question, one file, added whenever a new one is worth keeping.',
+      desc: 'A running bank of real technical-interview questions across vision, ML, robotics, systems and languages — including fifty-question C++ and Python drill chapters — each answered in full.',
       meta: [
         { label: 'NEW', hot: true },
         { label: 'interview prep' },
-        { label: '2 questions' },
+        { label: '4 questions' },
         { label: 'updated Jul 2026' }
       ]
     },

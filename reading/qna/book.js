@@ -30,6 +30,22 @@ const BOOK = {
       navTitle: 'Q2 · Mesh Drone Swarm',
       sub: 'A swarm of mesh-radio drones flown from one GCS on autonomous missions without reliable GPS: airtime budgeting, VIO frame alignment across aircraft, and command authority that survives a partitioned link.',
       tag: 'Swarm'
+    },
+    {
+      file: '03-cpp-fifty-questions.html',
+      num: '03',
+      title: 'Fifty C++ Questions',
+      navTitle: 'Q3 · Fifty C++ Questions',
+      sub: 'The fifty questions a C++ interview actually walks through — object model and memory, RAII and ownership, move semantics, virtual dispatch, templates, the standard library, and the concurrency model.',
+      tag: 'C++'
+    },
+    {
+      file: '04-python-fifty-questions.html',
+      num: '04',
+      title: 'Fifty Python Questions',
+      navTitle: 'Q4 · Fifty Python Questions',
+      sub: 'The fifty questions a Python interview actually walks through — the data model, closures and decorators, the MRO, complexity and idioms, exceptions and context managers, the GIL and asyncio, then typing and tooling.',
+      tag: 'Python'
     }
   ]
 };
