@@ -1,0 +1,862 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yashika — The Complete Style Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300;0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,300;1,9..144,400&family=Karla:ital,wght@0,300;0,400;0,500;0,600;0,700;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --cream:#faf5ec;
+  --ivory:#f3ead9;
+  --ink:#3a2a1c;
+  --ink-soft:#6b5744;
+  --gold:#c08a2d;
+  --gold-deep:#9a6b1a;
+  --coral:#d96b4f;
+  --maroon:#7e2f34;
+  --teal:#2f6862;
+  --sage:#8a9a6b;
+  --serif:'Fraunces', Georgia, serif;
+  --sans:'Karla', sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  background:var(--cream);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-weight:400;
+  line-height:1.65;
+  overflow-x:hidden;
+}
+body::before{
+  content:"";
+  position:fixed;inset:0;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+  pointer-events:none;z-index:999;
+}
+.container{max-width:1100px;margin:0 auto;padding:0 28px}
+
+/* ---------- HERO ---------- */
+header{position:relative;padding:90px 0 70px;overflow:hidden}
+header::after{
+  content:"";position:absolute;right:-140px;top:-140px;
+  width:480px;height:480px;border-radius:50%;
+  background:radial-gradient(circle at 35% 35%, rgba(217,107,79,.28), rgba(192,138,45,.14) 55%, transparent 72%);
+  filter:blur(2px);
+}
+.eyebrow{
+  font-size:12px;letter-spacing:.34em;text-transform:uppercase;
+  color:var(--gold-deep);font-weight:600;
+  display:flex;align-items:center;gap:14px;
+  animation:fadeUp .8s .1s both;
+}
+.eyebrow::before{content:"";width:44px;height:1px;background:var(--gold)}
+h1{
+  font-family:var(--serif);font-weight:300;
+  font-size:clamp(56px,9vw,104px);line-height:.98;letter-spacing:-.02em;
+  margin:22px 0 8px;animation:fadeUp .8s .25s both;
+}
+h1 em{font-style:italic;color:var(--coral);font-weight:400}
+.hero-sub{max-width:560px;font-size:17px;color:var(--ink-soft);margin-top:18px;animation:fadeUp .8s .4s both}
+.hero-tags{display:flex;gap:10px;flex-wrap:wrap;margin-top:34px;animation:fadeUp .8s .55s both}
+.hero-tags span{
+  border:1px solid rgba(154,107,26,.4);color:var(--gold-deep);
+  padding:7px 16px;border-radius:100px;
+  font-size:12.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:600;
+  background:rgba(243,234,217,.6);
+}
+
+/* ---------- SECTION HEAD ---------- */
+.section-head{display:flex;align-items:baseline;gap:22px;margin:0 0 30px}
+.section-head h2{font-family:var(--serif);font-weight:400;font-size:clamp(30px,4.4vw,44px);letter-spacing:-.015em;white-space:nowrap}
+.section-head h2 em{font-style:italic;color:var(--gold-deep)}
+.section-head .rule{flex:1;height:1px;background:linear-gradient(to right, rgba(154,107,26,.5), transparent)}
+.section-head .kicker{font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--gold-deep);font-weight:600;white-space:nowrap}
+
+/* ---------- ANALYSIS ---------- */
+.analysis{display:grid;grid-template-columns:repeat(3,1fr);gap:22px;margin:30px 0 0}
+.a-card{
+  background:var(--ivory);border:1px solid rgba(58,42,28,.08);border-radius:4px;
+  padding:34px 28px 30px;position:relative;
+  transition:transform .35s ease, box-shadow .35s ease;
+}
+.a-card:hover{transform:translateY(-5px);box-shadow:0 18px 44px -18px rgba(58,42,28,.28)}
+.a-card::before{
+  content:attr(data-num);font-family:var(--serif);font-style:italic;
+  font-size:15px;color:var(--gold);position:absolute;top:16px;right:20px;
+}
+.a-card h3{font-family:var(--serif);font-weight:500;font-size:23px;margin-bottom:10px;letter-spacing:-.01em}
+.a-card p{font-size:14.5px;color:var(--ink-soft)}
+.a-card p b{color:var(--ink);font-weight:600}
+.a-card ul{margin:10px 0 0;padding:0;list-style:none}
+.a-card ul li{
+  font-size:13.8px;color:var(--ink-soft);padding:6px 0 6px 20px;position:relative;
+  border-top:1px dashed rgba(58,42,28,.12);
+}
+.a-card ul li::before{content:"◆";position:absolute;left:0;top:7px;font-size:8px;color:var(--gold)}
+.a-card ul li b{color:var(--ink);font-weight:600}
+
+/* ---------- PALETTE ---------- */
+.palette-section{margin:96px 0 0}
+.swatches{display:grid;grid-template-columns:repeat(9,1fr);gap:12px}
+.swatch{
+  border-radius:3px;aspect-ratio:1/1.55;position:relative;cursor:default;
+  transition:transform .3s ease;box-shadow:inset 0 0 0 1px rgba(58,42,28,.06);
+}
+.swatch:hover{transform:translateY(-6px) rotate(-1.2deg)}
+.swatch small{
+  position:absolute;bottom:-24px;left:1px;
+  font-size:10px;letter-spacing:.05em;text-transform:uppercase;
+  color:var(--ink-soft);font-weight:600;white-space:nowrap;
+}
+.mini-swatches{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+.mini-swatches .chip{
+  display:flex;align-items:center;gap:8px;
+  background:var(--ivory);border:1px solid rgba(58,42,28,.1);
+  padding:6px 14px 6px 8px;border-radius:100px;font-size:12.5px;font-weight:600;color:var(--ink-soft);
+}
+.mini-swatches .chip i{width:18px;height:18px;border-radius:50%;display:block;box-shadow:inset 0 0 0 1px rgba(58,42,28,.1)}
+.mini-swatches .chip.no{text-decoration:line-through;opacity:.7}
+.palette-cols{display:grid;grid-template-columns:1fr 1fr;gap:26px;margin-top:56px}
+.palette-col h4{
+  font-size:12px;letter-spacing:.26em;text-transform:uppercase;font-weight:700;margin-bottom:8px;
+}
+.palette-col.yes h4{color:var(--teal)}
+.palette-col.no h4{color:var(--maroon)}
+.palette-col p{font-size:14px;color:var(--ink-soft)}
+.palette-note{
+  margin-top:48px;font-family:var(--serif);font-style:italic;font-weight:300;
+  font-size:20px;color:var(--ink-soft);max-width:640px;
+}
+.palette-note b{color:var(--gold-deep);font-weight:500}
+
+/* ---------- OCCASIONS ---------- */
+.occasion{margin:110px 0 0;display:grid;grid-template-columns:270px 1fr;gap:44px;align-items:start}
+.occasion.alt{grid-template-columns:1fr 270px}
+.occasion.alt .o-side{order:2}
+.o-side{position:sticky;top:36px}
+.o-num{font-family:var(--serif);font-style:italic;font-weight:300;font-size:72px;line-height:1;color:rgba(192,138,45,.35)}
+.o-side h2{
+  font-family:var(--serif);font-weight:400;font-size:clamp(30px,3.6vw,40px);
+  line-height:1.06;letter-spacing:-.015em;margin:6px 0 14px;
+}
+.o-side .mood{color:var(--ink-soft);font-style:italic;font-family:var(--serif);font-weight:300;font-size:17px}
+.o-strip{display:flex;gap:6px;margin-top:22px}
+.o-strip i{width:30px;height:30px;border-radius:50%;display:block;box-shadow:inset 0 0 0 1px rgba(58,42,28,.08)}
+.o-body{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.o-item{
+  background:var(--ivory);border:1px solid rgba(58,42,28,.08);
+  border-left:3px solid var(--gold);padding:22px 22px 20px;border-radius:3px;
+  transition:transform .3s ease;
+}
+.o-item:hover{transform:translateX(4px)}
+.o-item.wide{grid-column:1/-1}
+.o-item h4{font-size:11.5px;letter-spacing:.26em;text-transform:uppercase;color:var(--gold-deep);font-weight:700;margin-bottom:8px}
+.o-item p{font-size:14.5px;line-height:1.6}
+.o-item p b{font-weight:600}
+.o-item ul{margin:8px 0 0;padding:0;list-style:none}
+.o-item ul li{
+  font-size:13.8px;color:var(--ink);padding:7px 0 7px 20px;position:relative;line-height:1.55;
+  border-top:1px dashed rgba(58,42,28,.14);
+}
+.o-item ul li:first-child{border-top:none;padding-top:2px}
+.o-item ul li::before{content:"◆";position:absolute;left:0;top:9px;font-size:8px;color:var(--gold)}
+.o-item ul li:first-child::before{top:4px}
+.o-item ul li b{font-weight:700}
+.o-item ul li em{font-style:italic;color:var(--ink-soft)}
+
+/* formula cards */
+.formula{
+  background:linear-gradient(135deg, rgba(192,138,45,.10), rgba(217,107,79,.07));
+  border:1px solid rgba(154,107,26,.28);border-left:3px solid var(--gold-deep);
+}
+.formula h4::before{content:"★ ";letter-spacing:0}
+.avoid{
+  background:rgba(126,47,52,.05);border:1px dashed rgba(126,47,52,.35);border-left:3px solid var(--maroon);
+}
+.avoid h4{color:var(--maroon)}
+.avoid ul li::before{content:"✕";color:var(--maroon);font-size:9px}
+
+/* occasion accents */
+.occasion[data-accent="maroon"] .o-item{border-left-color:var(--maroon)}
+.occasion[data-accent="maroon"] .o-item h4{color:var(--maroon)}
+.occasion[data-accent="coral"] .o-item{border-left-color:var(--coral)}
+.occasion[data-accent="coral"] .o-item h4{color:#b8502f}
+.occasion[data-accent="teal"] .o-item{border-left-color:var(--teal)}
+.occasion[data-accent="teal"] .o-item h4{color:var(--teal)}
+.occasion[data-accent="sage"] .o-item{border-left-color:var(--sage)}
+.occasion[data-accent="sage"] .o-item h4{color:#5f7040}
+.occasion .o-item.avoid{border-left-color:var(--maroon)}
+.occasion .o-item.avoid h4{color:var(--maroon)}
+.occasion .o-item.formula{border-left-color:var(--gold-deep)}
+.occasion .o-item.formula h4{color:var(--gold-deep)}
+
+/* ---------- CAPSULE TABLE ---------- */
+.capsule{margin:110px 0 0}
+.capsule-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.cap-card{
+  background:var(--ivory);border:1px solid rgba(58,42,28,.08);border-radius:4px;padding:26px 24px;
+}
+.cap-card h4{
+  font-family:var(--serif);font-weight:500;font-size:19px;margin-bottom:4px;
+}
+.cap-card .tag{
+  font-size:10.5px;letter-spacing:.24em;text-transform:uppercase;color:var(--gold-deep);font-weight:700;
+}
+.cap-card ul{margin-top:12px;list-style:none}
+.cap-card ul li{
+  font-size:13.5px;color:var(--ink);padding:6px 0 6px 18px;position:relative;
+  border-top:1px dashed rgba(58,42,28,.12);
+}
+.cap-card ul li:first-child{border-top:none}
+.cap-card ul li::before{content:"—";position:absolute;left:0;color:var(--gold)}
+
+/* ---------- RULES ---------- */
+.rules{
+  margin:110px 0 0;background:var(--ink);color:var(--cream);border-radius:6px;
+  padding:60px 54px 56px;position:relative;overflow:hidden;
+}
+.rules::before{
+  content:"";position:absolute;left:-90px;bottom:-120px;width:340px;height:340px;border-radius:50%;
+  background:radial-gradient(circle, rgba(192,138,45,.35), transparent 70%);
+}
+.rules h2{font-family:var(--serif);font-weight:300;font-size:clamp(28px,4vw,40px);margin-bottom:34px}
+.rules h2 em{font-style:italic;color:#e2b45f}
+.rules ol{list-style:none;counter-reset:r;display:grid;grid-template-columns:1fr 1fr;gap:20px 44px;position:relative}
+.rules li{counter-increment:r;padding-left:52px;position:relative;font-size:15px;color:rgba(250,245,236,.85);line-height:1.6}
+.rules li::before{
+  content:counter(r,decimal-leading-zero);position:absolute;left:0;top:1px;
+  font-family:var(--serif);font-style:italic;color:#e2b45f;font-size:19px;
+}
+.rules li b{color:var(--cream);font-weight:600}
+
+footer{padding:64px 0 56px;text-align:center}
+footer .mono{font-family:var(--serif);font-style:italic;font-weight:300;font-size:22px;color:var(--ink-soft)}
+footer .sig{margin-top:14px;font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:var(--gold-deep);font-weight:600}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .8s ease, transform .8s ease}
+.reveal.in{opacity:1;transform:none}
+
+@media(max-width:880px){
+  .analysis,.capsule-grid{grid-template-columns:1fr}
+  .swatches{grid-template-columns:repeat(3,1fr);gap:14px 12px;row-gap:40px}
+  .palette-cols{grid-template-columns:1fr}
+  .occasion,.occasion.alt{grid-template-columns:1fr;gap:26px}
+  .occasion.alt .o-side{order:0}
+  .o-side{position:static}
+  .o-body{grid-template-columns:1fr}
+  .rules{padding:44px 28px}
+  .rules ol{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="container">
+    <div class="eyebrow">The Complete Personal Style Edit · 2026</div>
+    <h1>Yashika,<br><em>in warm light.</em></h1>
+    <p class="hero-sub">An extremely detailed styling manual built from your features and your actual wardrobe — a soft oval face, a balanced 5'4" frame, and warm golden skin made for mustard, cream, camel, and quiet-luxury polish.</p>
+    <div class="hero-tags">
+      <span>Soft Oval Face</span><span>5'4" · Balanced Frame</span><span>Warm Golden Undertone</span><span>Hero Color: Mustard</span><span>Aesthetic: Old Money</span>
+    </div>
+  </div>
+</header>
+
+<main class="container">
+
+  <!-- ============ ANALYSIS ============ -->
+  <section class="palette-section" style="margin-top:20px">
+    <div class="section-head reveal">
+      <h2>Style <em>analysis</em></h2>
+      <div class="rule"></div>
+      <span class="kicker">Know your canvas</span>
+    </div>
+    <div class="analysis" style="margin-top:0">
+      <div class="a-card reveal" data-num="i.">
+        <h3>Face Shape</h3>
+        <p>A <b>soft oval face</b> with gentle roundness — the goal is subtle elongation.</p>
+        <ul>
+          <li><b>Best necklines:</b> V-neck, scoop, sweetheart, open collar, notch-neck kurtas, deep-U blouses.</li>
+          <li><b>Use carefully:</b> high crew necks, turtlenecks, choker-style necklaces — soften them with long earrings or open hair.</li>
+          <li><b>Earrings:</b> slim danglers, drop earrings, oval jhumkas, thin elongated hoops. Skip large round studs and button earrings.</li>
+          <li><b>Hair:</b> keep your face-framing layers; soft side-parts, loose waves, and high buns with face strands all flatter. Avoid blunt chin-length bobs.</li>
+          <li><b>Sunglasses:</b> cat-eye, rectangular, or slightly angular frames in tortoise/amber; avoid perfectly round frames.</li>
+        </ul>
+      </div>
+      <div class="a-card reveal" data-num="ii.">
+        <h3>Body Structure</h3>
+        <p>At <b>5'4" and 64 kg</b>, a balanced frame that loves definition at the waist and length in the leg line.</p>
+        <ul>
+          <li><b>Golden formula:</b> fitted or semi-fitted top + high-waisted wide-leg bottom — you already wear this; keep it.</li>
+          <li><b>Instant upgrades:</b> half-tuck, French tuck, or a slim belt at the natural waist.</li>
+          <li><b>Lengthening tricks:</b> high-waisted everything, monochrome columns (top and bottom in the same tone), ankle-length pants with a small heel, vertical seams and plackets.</li>
+          <li><b>Sleeves:</b> elbow and 3/4 sleeves are your sweet spot; cap sleeves and full sleeves rolled once also work.</li>
+          <li><b>Fits to limit:</b> boxy oversized tops over baggy bottoms (volume on volume), drop-shoulder tents, low-rise anything.</li>
+        </ul>
+      </div>
+      <div class="a-card reveal" data-num="iii.">
+        <h3>Color Profile</h3>
+        <p><b>Warm golden undertone</b> — confirmed emphatically by your mustard kurta photo.</p>
+        <ul>
+          <li><b>Hero shades:</b> mustard, turmeric, marigold, amber — your single most powerful family.</li>
+          <li><b>Strong support:</b> brick red, terracotta, deep coral, rust, warm maroon, olive, forest green, warm teal.</li>
+          <li><b>Neutrals:</b> cream, ivory, beige, camel, chocolate, warm taupe — cream is your "white".</li>
+          <li><b>Metal:</b> gold, brass, antique gold. Silver only when mixed with gold.</li>
+          <li><b>Lips:</b> terracotta, brick, warm rose, plum-brown. Skip cool fuchsia and blue-pinks.</li>
+          <li><b>Limit:</b> stark white, icy pastels, neon shades, cool greys near the face.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ PALETTE ============ -->
+  <section class="palette-section">
+    <div class="section-head reveal">
+      <h2>Your <em>palette</em></h2>
+      <div class="rule"></div>
+      <span class="kicker">Wear these often</span>
+    </div>
+    <div class="swatches reveal">
+      <div class="swatch" style="background:#e3a10f"><small>Mustard ★</small></div>
+      <div class="swatch" style="background:#b8452c"><small>Brick Red</small></div>
+      <div class="swatch" style="background:#c1652f"><small>Terracotta</small></div>
+      <div class="swatch" style="background:#e56a4b"><small>Deep Coral</small></div>
+      <div class="swatch" style="background:#f4ead6"><small>Cream</small></div>
+      <div class="swatch" style="background:#6b7250"><small>Olive</small></div>
+      <div class="swatch" style="background:#2f6862"><small>Warm Teal</small></div>
+      <div class="swatch" style="background:#6d4a2a"><small>Chocolate</small></div>
+      <div class="swatch" style="background:linear-gradient(135deg,#e9c46a,#b8862b)"><small>Gold Metal</small></div>
+    </div>
+
+    <div class="palette-cols reveal">
+      <div class="palette-col yes">
+        <h4>✓ Reach For</h4>
+        <p>Anything that looks like autumn, honey, spice, or terracotta pottery.</p>
+        <div class="mini-swatches">
+          <span class="chip"><i style="background:#e3a10f"></i>Turmeric</span>
+          <span class="chip"><i style="background:#d3961e"></i>Marigold</span>
+          <span class="chip"><i style="background:#8a4a1f"></i>Rust</span>
+          <span class="chip"><i style="background:#7e2f34"></i>Warm Maroon</span>
+          <span class="chip"><i style="background:#1e5c48"></i>Forest Green</span>
+          <span class="chip"><i style="background:#c9a86a"></i>Camel</span>
+          <span class="chip"><i style="background:#a8b48a"></i>Sage</span>
+          <span class="chip"><i style="background:#e8b88f"></i>Warm Peach</span>
+        </div>
+      </div>
+      <div class="palette-col no">
+        <h4>✕ Use Sparingly</h4>
+        <p>Cool, icy, or stark shades pull the glow out of golden skin — keep them away from the face, or anchor them with gold jewelry.</p>
+        <div class="mini-swatches">
+          <span class="chip no"><i style="background:#ffffff;border:1px solid #ddd"></i>Stark White</span>
+          <span class="chip no"><i style="background:#d81b7a"></i>Cool Fuchsia</span>
+          <span class="chip no"><i style="background:#b9c8e0"></i>Icy Blue</span>
+          <span class="chip no"><i style="background:#e6d9ef"></i>Icy Lilac</span>
+          <span class="chip no"><i style="background:#9aa3ab"></i>Cool Grey</span>
+          <span class="chip no"><i style="background:#39ff8f"></i>Neons</span>
+        </div>
+      </div>
+    </div>
+    <p class="palette-note reveal">The rule of thumb — if a color looks like it belongs to <b>autumn, honey, or terracotta</b>, it belongs on you.</p>
+  </section>
+
+  <!-- ============ ALREADY WORKING ============ -->
+  <section class="palette-section">
+    <div class="section-head reveal">
+      <h2>Already <em>working</em></h2>
+      <div class="rule"></div>
+      <span class="kicker">From your photos — keep, refine, repeat</span>
+    </div>
+    <div class="analysis" style="margin-top:0">
+      <div class="a-card reveal" data-num="✓">
+        <h3>The Mustard Kurta</h3>
+        <p>The golden-yellow chikankari kurta is <b>your single best look</b>.</p>
+        <ul>
+          <li>Buy more in this family: turmeric, marigold, amber, haldi yellow.</li>
+          <li>Repeat the details that worked: tonal embroidery, contrast floral placket, notch neckline.</li>
+          <li>Translate it westward: a mustard wrap top, amber satin shirt, or marigold summer dress.</li>
+        </ul>
+      </div>
+      <div class="a-card reveal" data-num="✓">
+        <h3>Ivory + Contrast Print</h3>
+        <p>The cream kurta with dark block print is a <b>proven formula</b>.</p>
+        <ul>
+          <li>Repeat in: ivory block-print co-ord sets, cream shirts with brown motifs, off-white sarees with dark borders.</li>
+          <li>Ivory near the face + a warm lip = effortless glow.</li>
+          <li>Balance loose ivory tops with slimmer bottoms so the look stays intentional.</li>
+        </ul>
+      </div>
+      <div class="a-card reveal" data-num="✓">
+        <h3>Tee + Wide-Leg</h3>
+        <p>Your fitted-top and wide-leg pairing works — it just needs finishing.</p>
+        <ul>
+          <li>Add a <b>half-tuck or slim tan belt</b> to mark the waist.</li>
+          <li>Swap black basics for olive, cream, chocolate, or rust versions.</li>
+          <li>Your olive wide-legs photograph beautifully — get them in rust and cream too.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 01 OFFICE ============ -->
+  <section class="occasion reveal" data-accent="gold">
+    <div class="o-side">
+      <div class="o-num">01</div>
+      <h2>Office<br>Wear</h2>
+      <p class="mood">Polished, professional, quietly commanding — warm neutrals with structured tailoring.</p>
+      <div class="o-strip">
+        <i style="background:#f0e2c8"></i><i style="background:#e8b88f"></i><i style="background:#6d2233"></i><i style="background:#26555a"></i><i style="background:#3d3a3a"></i>
+      </div>
+    </div>
+    <div class="o-body">
+      <div class="o-item"><h4>Tops — Options</h4>
+        <ul>
+          <li><b>Cream silk-blend blouse</b> with a notch or V-neck — your everyday anchor.</li>
+          <li><b>Light peach or warm blush shirt</b>, slightly relaxed fit, sleeves rolled once.</li>
+          <li><b>Burgundy or teal structured shirt</b> for meeting days — deep shades read authoritative.</li>
+          <li><b>Mustard fine-knit top</b> under a brown blazer — your hero color, office-ready.</li>
+          <li><b>Striped shirt</b> (cream base, thin brown/navy stripes) — vertical stripes only.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Bottoms — Options</h4>
+        <ul>
+          <li><b>Straight-leg trousers</b> in chocolate, camel, navy, or charcoal — high-waisted, full ankle length.</li>
+          <li><b>Wide-leg formal trousers</b> in cream or olive — pair with a tucked fitted top.</li>
+          <li><b>Pencil skirt</b> in brown or deep teal, sitting at the natural waist, knee-length.</li>
+          <li><b>A-line midi skirt</b> in camel for a softer silhouette on non-meeting days.</li>
+          <li><em>Fit note:</em> ankle-length hems + pointed shoes visually add height.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Layering</h4>
+        <ul>
+          <li><b>Structured blazer</b> in camel, chocolate, or navy — single-breasted, slightly nipped waist.</li>
+          <li><b>Deep gold or rust cardigan</b> for relaxed days.</li>
+          <li><b>Cream waistcoat</b> over a shirt — modern, adds structure without a blazer's weight.</li>
+          <li><b>Sleeveless long shrug</b> in beige for AC-heavy offices.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Footwear & Bags</h4>
+        <ul>
+          <li><b>Block heels</b> (2–3 in) in nude-for-you tan or deep brown — all-day comfort.</li>
+          <li><b>Pointed flats or kitten heels</b> in camel for long days.</li>
+          <li><b>Brown or tan loafers</b> with trousers — smart and current.</li>
+          <li><b>Bag:</b> structured tote or top-handle in tan/chocolate with gold hardware.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Accessories & Grooming</h4>
+        <ul>
+          <li><b>Jewelry:</b> small gold drop earrings, thin chain with a small pendant, slim gold watch. One statement max.</li>
+          <li><b>Hair:</b> low bun with face-framing strands, sleek ponytail, or blow-dried open hair.</li>
+          <li><b>Makeup:</b> warm-toned base, cream blush in peach, terracotta or warm-rose lip, brown kajal instead of black for softness.</li>
+          <li><b>Nails:</b> nude-caramel, brick, or clean short nails.</li>
+        </ul>
+      </div>
+      <div class="o-item formula wide"><h4>Three Ready Formulas</h4>
+        <ul>
+          <li><b>Power meeting:</b> burgundy shirt + camel straight trousers + brown block heels + gold studs + slim watch.</li>
+          <li><b>Everyday polish:</b> cream V-neck blouse (French-tucked) + chocolate wide-legs + tan loafers + thin pendant.</li>
+          <li><b>Smart-casual Friday:</b> mustard knit top + olive trousers + white leather sneakers + gold hoops.</li>
+        </ul>
+      </div>
+      <div class="o-item avoid wide"><h4>Avoid at the Office</h4>
+        <ul>
+          <li>Stark white shirts right against the face — swap for cream/ivory.</li>
+          <li>Oversized blazers over baggy trousers — volume on volume shortens the frame.</li>
+          <li>Loud logos, oversized costume jewelry, and cool-toned grey suits without a warm layer.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 02 DATE NIGHT ============ -->
+  <section class="occasion alt reveal" data-accent="maroon">
+    <div class="o-side">
+      <div class="o-num">02</div>
+      <h2>Dinner &<br>Date Night</h2>
+      <p class="mood">Effortless, feminine chic — drape, warmth, and one deliberate statement.</p>
+      <div class="o-strip">
+        <i style="background:#7e2f34"></i><i style="background:#2f6862"></i><i style="background:#5a6b3c"></i><i style="background:#e9c46a"></i><i style="background:#4a6a8f"></i>
+      </div>
+    </div>
+    <div class="o-body">
+      <div class="o-item wide"><h4>Dresses — Options</h4>
+        <ul>
+          <li><b>Wrap dress</b> in silk or modal — the single most flattering cut for you. Colors: brick red, warm teal, olive, deep coral. Midi length, V-neck, flutter or 3/4 sleeve.</li>
+          <li><b>Satin slip dress</b> in amber or chocolate with a cropped denim jacket or shrug — dressy but relaxed.</li>
+          <li><b>Fit-and-flare midi</b> in a small warm-toned print (rust florals on cream).</li>
+          <li><b>Knit bodycon midi</b> in maroon with a long open cardigan — sleek, comfortable, Bangalore-evening-proof.</li>
+          <li><b>A-line shirt dress</b> in olive with a tan belt — casual date, maximum ease.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Separates — Options</h4>
+        <ul>
+          <li><b>High-waisted trousers + fitted wrap top</b> in contrasting warm tones (teal top, cream trousers).</li>
+          <li><b>Satin cami + wide-leg pants</b>, both in one tone for a long column, gold hoops to finish.</li>
+          <li><b>Fitted ribbed top + midi skirt</b> with a side slit in brick red.</li>
+          <li><b>Good jeans + silky mustard blouse</b> + heeled sandals — low effort, high payoff.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Layering</h4>
+        <ul>
+          <li><b>Long duster cardigan</b> in camel — instantly elongates.</li>
+          <li><b>Printed kimono</b> in warm tones over a plain slip dress.</li>
+          <li><b>Cropped denim jacket</b> to casual-down a dressy outfit.</li>
+          <li><b>Pashmina or silky scarf</b> in amber for chilly rooftops.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Footwear</h4>
+        <ul>
+          <li><b>Strappy heeled sandals</b> in tan or gold — 2–3 in block or kitten heel.</li>
+          <li><b>Pearl or embellished-detail sandals</b> for dressier plans.</li>
+          <li><b>Ankle boots</b> in brown suede for an edgier, monsoon-friendly vibe.</li>
+          <li><b>Metallic gold flats</b> when the evening involves walking.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Accessories</h4>
+        <ul>
+          <li><b>Gold hoops</b> (medium, slightly oval) or slim danglers.</li>
+          <li><b>Layered necklaces</b> — one choker-length, one mid-length pendant.</li>
+          <li><b>Statement belt</b> in tan or gold-buckle to mark the waist.</li>
+          <li><b>Small sling or baguette bag</b> in tan, gold, or deep green.</li>
+          <li><b>Fragrance direction:</b> warm — vanilla, amber, sandalwood, or soft oud.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Hair & Makeup</h4>
+        <ul>
+          <li><b>Hair:</b> soft waves, or a low bun with face strands; a gold hair clip is a nice touch.</li>
+          <li><b>Eyes:</b> bronze/copper shadow, brown liner, mascara.</li>
+          <li><b>Lips:</b> brick red or terracotta for drama, warm rose for soft looks.</li>
+          <li><b>Skin:</b> dewy finish, golden highlighter on cheekbones.</li>
+        </ul>
+      </div>
+      <div class="o-item formula wide"><h4>Three Ready Formulas</h4>
+        <ul>
+          <li><b>Classic date:</b> brick-red wrap midi + tan strappy heels + gold hoops + layered necklaces + warm-red lip.</li>
+          <li><b>Rooftop dinner:</b> chocolate satin slip + camel duster cardigan + gold flats + slim danglers + dewy skin.</li>
+          <li><b>Casual evening:</b> mustard silky blouse + good jeans + brown ankle boots + statement belt + terracotta lip.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 03 BRUNCH ============ -->
+  <section class="occasion reveal" data-accent="coral">
+    <div class="o-side">
+      <div class="o-num">03</div>
+      <h2>Brunch</h2>
+      <p class="mood">Relaxed and playful — light fabrics, soft prints, sunlight-friendly colors.</p>
+      <div class="o-strip">
+        <i style="background:#f0946f"></i><i style="background:#f2d478"></i><i style="background:#a8b48a"></i><i style="background:#7ea0c2"></i><i style="background:#fff"></i>
+      </div>
+    </div>
+    <div class="o-body">
+      <div class="o-item"><h4>Tops — Options</h4>
+        <ul>
+          <li><b>Flowy blouse</b> with ruffled or flutter sleeves in light coral or soft marigold.</li>
+          <li><b>Square-neck cotton top</b> in cream — flattering and breezy.</li>
+          <li><b>Small-floral print blouse</b> (rust or sage florals on ivory).</li>
+          <li><b>Sage or peach linen shirt</b>, half-tucked, sleeves rolled.</li>
+          <li><b>Fitted striped tee</b> (your existing staple) — choose cream-base stripes over black-base.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Bottoms — Options</h4>
+        <ul>
+          <li><b>High-waisted A-line midi skirt</b> in mustard or terracotta.</li>
+          <li><b>Wide-leg linen pants</b> in cream, sage, or your proven olive.</li>
+          <li><b>Well-fitted medium-wash jeans</b>, straight or slightly flared.</li>
+          <li><b>Paperbag-waist shorts</b> in khaki — the cinched waist works for you.</li>
+          <li><b>A-line denim shorts</b> (mid-thigh, clean hem, not distressed) with a tucked blouse.</li>
+          <li><b>Flowy culotte shorts</b> in terracotta or cream — look like a skirt, move like shorts.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>One-and-Done</h4>
+        <ul>
+          <li><b>Cotton midi dress</b> in a warm ditsy floral with a smocked or tie waist.</li>
+          <li><b>Ivory co-ord set</b> with block print — your proven formula in brunch form.</li>
+          <li><b>Shirt dress</b> in soft yellow with a self-fabric belt.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Footwear & Bags</h4>
+        <ul>
+          <li><b>White leather sneakers</b> (clean and minimal) with jeans or linen pants.</li>
+          <li><b>Tan loafers or patterned mules</b> for a dressier brunch.</li>
+          <li><b>Flat woven sandals</b> in tan.</li>
+          <li><b>Bag:</b> straw/cane tote or a tan crossbody with gold hardware.</li>
+        </ul>
+      </div>
+      <div class="o-item wide"><h4>Accessories, Hair & Makeup</h4>
+        <ul>
+          <li><b>Earrings:</b> colorful enamel danglers in coral/mustard, or slim gold hoops.</li>
+          <li><b>Sunglasses:</b> tortoiseshell cat-eye or rectangular amber frames.</li>
+          <li><b>Extras:</b> silk scarf tied to the bag or as a headband, stack of thin gold bangles.</li>
+          <li><b>Hair:</b> loose waves, claw-clip half-up, or a relaxed braid.</li>
+          <li><b>Makeup:</b> skin tint + cream peach blush + brow gel + tinted terracotta balm. Ten minutes, done.</li>
+        </ul>
+      </div>
+      <div class="o-item formula wide"><h4>Three Ready Formulas</h4>
+        <ul>
+          <li><b>Garden café:</b> rust-floral blouse + cream wide-leg linen pants + tan sandals + straw tote + cat-eye sunnies.</li>
+          <li><b>Sunday easy:</b> cream striped tee (half-tucked) + olive wide-legs + white sneakers + slim hoops + claw clip.</li>
+          <li><b>Birthday brunch:</b> soft-yellow shirt dress + tan mules + enamel danglers + terracotta balm.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 04 OLD MONEY ============ -->
+  <section class="occasion alt reveal" data-accent="teal">
+    <div class="o-side">
+      <div class="o-num">04</div>
+      <h2>The Old<br>Money Edit</h2>
+      <p class="mood">Quiet luxury — logo-free, impeccably fitted, in cream, camel, and chocolate. Your warm palette IS this aesthetic.</p>
+      <div class="o-strip">
+        <i style="background:#f4ead6"></i><i style="background:#c9a86a"></i><i style="background:#6d4a2a"></i><i style="background:#26364e"></i><i style="background:linear-gradient(135deg,#e9c46a,#b8862b)"></i>
+      </div>
+    </div>
+    <div class="o-body">
+      <div class="o-item wide"><h4>The Philosophy</h4>
+        <ul>
+          <li><b>No visible logos, ever.</b> Quality reads through fabric and fit, not branding.</li>
+          <li><b>Neutral base + one rich accent:</b> cream, camel, chocolate, and navy as the foundation; mustard, brick, or forest green as the single accent.</li>
+          <li><b>Fit is everything:</b> get trousers and blazers tailored — ₹200–400 at a local tailor transforms mid-range pieces into expensive-looking ones.</li>
+          <li><b>Natural fabrics only where visible:</b> linen, cotton poplin, wool-blend, silk, fine knits. Skip shiny polyester.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Tops — Options</h4>
+        <ul>
+          <li><b>Crisp cream poplin shirt</b>, slightly oversized, collar popped just a touch.</li>
+          <li><b>Polo-collar knit top</b> in camel or navy — fitted, elbow sleeves.</li>
+          <li><b>Fine-knit sweater</b> in butter yellow or cream, draped over the shoulders of a shirt.</li>
+          <li><b>Silk camisole</b> in champagne under a blazer.</li>
+          <li><b>Boat-neck striped top</b> (Breton style) — cream base with navy or chocolate stripes.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Bottoms — Options</h4>
+        <ul>
+          <li><b>Tailored city shorts</b> in beige or cream — knee-ish length, pressed crease, high-waisted. The old-money shorts.</li>
+          <li><b>Pleated linen shorts</b> in camel with a woven belt.</li>
+          <li><b>High-waisted wide-leg trousers</b> in cream or chocolate.</li>
+          <li><b>Tailored bermudas</b> in navy pinstripe with a tucked knit top.</li>
+          <li><b>Midi pencil or A-line skirt</b> in camel wool-blend.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Layering & Dresses</h4>
+        <ul>
+          <li><b>Camel or cream blazer</b> — the cornerstone piece. Slightly oversized, tailored at the shoulder.</li>
+          <li><b>Trench coat</b> in classic beige for monsoon evenings.</li>
+          <li><b>Cable-knit vest</b> in cream over a shirt.</li>
+          <li><b>Linen midi dress</b> in oat or sage, square neck, self belt.</li>
+          <li><b>Polo dress</b> in navy with gold-buckle belt.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Footwear & Bags</h4>
+        <ul>
+          <li><b>Leather loafers</b> in tan or chocolate — the signature shoe. Penny or horsebit style.</li>
+          <li><b>Ballet flats</b> in nude-tan or leopard calf-hair.</li>
+          <li><b>Clean white leather sneakers</b> (minimal, no chunky soles) with shorts.</li>
+          <li><b>Slim kitten heels</b> in taupe for evenings.</li>
+          <li><b>Bags:</b> structured leather in tan/chocolate, gold hardware, zero logos — a saddle bag, top-handle, or east-west tote.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Accessories & Finish</h4>
+        <ul>
+          <li><b>Jewelry:</b> thin gold hoops, a signet-style ring, slim gold watch with leather or link strap, single pearl studs or a short pearl strand.</li>
+          <li><b>Silk scarf</b> in equestrian print — at the neck, on the bag, or as a headband.</li>
+          <li><b>Sunglasses:</b> tortoiseshell wayfarer or slim cat-eye.</li>
+          <li><b>Hair:</b> sleek low bun, glossy blowout, or a low ponytail with a silk ribbon.</li>
+          <li><b>Makeup:</b> polished-minimal — groomed brows, peach cream blush, warm-rose lip, subtle golden glow. Nails: nude, caramel, or classic short French.</li>
+        </ul>
+      </div>
+      <div class="o-item formula wide"><h4>Four Ready Formulas</h4>
+        <ul>
+          <li><b>Riviera day:</b> cream poplin shirt (front-tucked) + tailored beige city shorts + tan loafers + tortoise sunnies + thin hoops.</li>
+          <li><b>Club lunch:</b> camel polo knit + cream wide-leg trousers + ballet flats + pearl studs + silk scarf on the bag.</li>
+          <li><b>Evening quiet luxury:</b> champagne silk cami + chocolate trousers + camel blazer over shoulders + kitten heels + slim gold watch.</li>
+          <li><b>Weekend estate:</b> Breton striped top + pleated linen shorts + white minimal sneakers + sweater knotted over shoulders + claw-clip chignon.</li>
+        </ul>
+      </div>
+      <div class="o-item avoid wide"><h4>What Breaks the Aesthetic</h4>
+        <ul>
+          <li>Visible logos, graphic tees, distressed denim, chunky dad sneakers.</li>
+          <li>Shiny synthetic fabrics and fast-fashion hardware (plasticky gold).</li>
+          <li>More than one accent color at a time — old money is 80% neutral.</li>
+          <li>Overdone makeup or heavy contour; the look is glossy, not glam.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 05 EVERYDAY CASUAL ============ -->
+  <section class="occasion reveal" data-accent="sage">
+    <div class="o-side">
+      <div class="o-num">05</div>
+      <h2>Everyday<br>Casual</h2>
+      <p class="mood">Your natural habitat — comfort-first, upgraded with color and one finishing detail.</p>
+      <div class="o-strip">
+        <i style="background:#6b7250"></i><i style="background:#f4ead6"></i><i style="background:#8a4a1f"></i><i style="background:#c9a86a"></i><i style="background:#3d3a3a"></i>
+      </div>
+    </div>
+    <div class="o-body">
+      <div class="o-item"><h4>The Core Upgrade</h4>
+        <ul>
+          <li>Keep the <b>tee + wide-leg/cargo + sneaker</b> uniform — just shift the colors warm.</li>
+          <li>Replace half your black tees with <b>cream, rust, olive, and mustard</b> ones.</li>
+          <li>Add <b>one finishing detail</b> every time: half-tuck, slim hoops, or a tan belt.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Tops — Options</h4>
+        <ul>
+          <li>Fitted tees in cream, rust, mustard, olive (V-neck or slightly scooped).</li>
+          <li>Striped tees on cream/ivory bases.</li>
+          <li>Oversized shirt in camel or sage — worn open over a fitted tank.</li>
+          <li>Light hoodie or sweatshirt in caramel for lounging out.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Bottoms — Options</h4>
+        <ul>
+          <li>Your olive wide-legs (proven) — duplicate in rust, cream, and chocolate.</li>
+          <li>Straight-leg jeans in warm medium wash.</li>
+          <li>High-waisted cargos in khaki or brown — cinch the waist tabs.</li>
+          <li>Denim shorts in warm medium wash — high-waisted, rolled or clean hem.</li>
+          <li>Cotton bermuda shorts in olive or beige with a fitted tee.</li>
+          <li>Cotton wide-leg lounge pants in warm stripes for errands.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Shoes & Extras</h4>
+        <ul>
+          <li>White or cream sneakers; tan Converse-style hi-tops instead of black.</li>
+          <li>Slim gold hoops as your daily default earring.</li>
+          <li>Tan canvas tote or olive backpack.</li>
+          <li>Claw clip + tortoise sunglasses = instant put-together.</li>
+        </ul>
+      </div>
+      <div class="o-item formula wide"><h4>Three Ready Formulas</h4>
+        <ul>
+          <li><b>Errand run:</b> cream fitted tee (half-tucked) + olive wide-legs + white sneakers + slim hoops.</li>
+          <li><b>Hot day out:</b> rust V-neck tee + high-waisted denim shorts + white sneakers + claw clip + tortoise sunnies.</li>
+          <li><b>Café workday:</b> striped cream tee + medium-wash straight jeans + camel overshirt + tan hi-tops.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 06 TRADITIONAL (COMPACT) ============ -->
+  <section class="occasion alt reveal" data-accent="maroon">
+    <div class="o-side">
+      <div class="o-num">06</div>
+      <h2>Traditional,<br>Occasionally</h2>
+      <p class="mood">For the rare wedding or festival — a small, high-quality kit beats a big collection.</p>
+      <div class="o-strip">
+        <i style="background:#6d1f2c"></i><i style="background:#1e5c48"></i><i style="background:#e3a10f"></i><i style="background:linear-gradient(135deg,#e9c46a,#b8862b)"></i>
+      </div>
+    </div>
+    <div class="o-body">
+      <div class="o-item wide"><h4>The Minimal Kit — Four Pieces Cover Everything</h4>
+        <ul>
+          <li><b>One statement saree</b> — maroon or emerald silk with gold border, for weddings.</li>
+          <li><b>Your mustard chikankari set</b> (already owned) — festivals and pujas, done.</li>
+          <li><b>One cream kurta set</b> with dark block print — daytime functions, doubles as smart-casual.</li>
+          <li><b>One anarkali or Indo-western gown</b> in deep teal — sangeets and receptions, no draping stress.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Jewelry & Shoes</h4>
+        <ul>
+          <li>One pair of <b>gold oval jhumkas</b> — works with everything above.</li>
+          <li>One <b>layered gold necklace</b> or slim choker.</li>
+          <li><b>Kolhapuris</b> for the day, <b>block-heel embellished sandals</b> for the night. Done.</li>
+        </ul>
+      </div>
+      <div class="o-item"><h4>Finish</h4>
+        <ul>
+          <li>Low bun or soft waves, brick or terracotta lip, golden-bronze eyes.</li>
+          <li>An <b>Indo-western drape</b> tip: a pre-stitched saree or saree over a fitted crop top keeps it modern and effortless — very much your speed.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ CAPSULE ============ -->
+  <section class="capsule">
+    <div class="section-head reveal">
+      <h2>The <em>capsule</em> shopping list</h2>
+      <div class="rule"></div>
+      <span class="kicker">Buy once, wear everywhere</span>
+    </div>
+    <div class="capsule-grid">
+      <div class="cap-card reveal">
+        <span class="tag">Priority One</span>
+        <h4>Biggest Impact</h4>
+        <ul>
+          <li>Brick-red wrap midi dress</li>
+          <li>Camel structured blazer</li>
+          <li>Cream V-neck blouse (silk-blend)</li>
+          <li>Chocolate straight trousers</li>
+          <li>Tan block-heel sandals</li>
+          <li>Slim gold hoops + thin pendant</li>
+        </ul>
+      </div>
+      <div class="cap-card reveal">
+        <span class="tag">Priority Two</span>
+        <h4>Round It Out</h4>
+        <ul>
+          <li>Mustard silky blouse</li>
+          <li>Olive + cream wide-leg pants</li>
+          <li>Camel duster cardigan</li>
+          <li>Tan loafers + white sneakers</li>
+          <li>Tan structured tote (gold hardware)</li>
+          <li>Slim tan waist belt</li>
+        </ul>
+      </div>
+      <div class="cap-card reveal">
+        <span class="tag">Priority Three</span>
+        <h4>Old Money Staples</h4>
+        <ul>
+          <li>Cream poplin shirt + camel polo knit</li>
+          <li>Tailored beige city shorts + linen shorts</li>
+          <li>Tan penny loafers + ballet flats</li>
+          <li>Beige trench coat</li>
+          <li>Silk scarf + slim gold watch + pearl studs</li>
+          <li>One good silk saree + gold jhumkas (occasions)</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ GOLDEN RULES ============ -->
+  <section class="rules reveal">
+    <h2>The <em>golden rules</em>, in short</h2>
+    <ol>
+      <li><b>Mustard is your superpower.</b> Turmeric, marigold, amber — no color family flatters you more. Own at least five pieces in it.</li>
+      <li><b>Define the waist, your way.</b> Half-tucks, French tucks, slim belts, and waist tabs upgrade relaxed fits without changing your style.</li>
+      <li><b>Gold, not silver.</b> Slim danglers, oval jhumkas, and thin hoops over round studs — a little length flatters a soft oval face.</li>
+      <li><b>Cream is your white.</b> Ivory with bold contrast print is a proven formula — repeat it in kurtas, co-ords, shirts, and sarees.</li>
+      <li><b>Necklines that open up.</b> V-necks, scoops, sweethearts, and notch necks elongate; keep the face-framing layered hair.</li>
+      <li><b>Warm lips only.</b> Terracotta, brick red, warm rose, plum-brown — never cool fuchsia. It changes the whole face.</li>
+      <li><b>High-waisted everything.</b> Trousers, shorts, skirts — with ankle hems and a small heel, you gain visual inches for free.</li>
+      <li><b>Logo-free is luxury.</b> Old money is fabric and fit, not branding — 80% neutral base, one rich accent, and a tailor on speed dial.</li>
+      <li><b>Volume needs an anchor.</b> Loose top? Slim bottom. Wide-leg or shorts? Fitted top. Never both loose at once.</li>
+      <li><b>Fabric does the talking.</b> Linen, poplin, silk, fine knits, modal — texture and drape elevate even the simplest silhouette.</li>
+    </ol>
+  </section>
+
+</main>
+
+<footer>
+  <p class="mono">"Style is a way to say who you are without having to speak."</p>
+  <p class="sig">Curated for Yashika · Bangalore</p>
+</footer>
+
+<script>
+const io = new IntersectionObserver((entries)=>{
+  entries.forEach(e=>{ if(e.isIntersecting){ e.target.classList.add('in'); io.unobserve(e.target);} });
+},{threshold:0.08});
+document.querySelectorAll('.reveal').forEach(el=>io.observe(el));
+</script>
+
+</body>
+</html>
