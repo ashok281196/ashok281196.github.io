@@ -252,6 +252,31 @@ footer .sig{margin-top:14px;font-size:11px;letter-spacing:.3em;text-transform:up
   .o-body{grid-template-columns:1fr}
   .rules{padding:44px 28px}
   .rules ol{grid-template-columns:1fr}
+  .section-head{flex-direction:column;align-items:flex-start;gap:10px}
+  .section-head h2{white-space:normal}
+  .section-head .rule{width:100%;flex:none}
+  .section-head .kicker{white-space:normal}
+}
+
+@media(max-width:640px){
+  .container{padding:0 20px}
+  header{padding:56px 0 44px}
+  header::after{width:320px;height:320px;right:-100px;top:-100px}
+  h1{font-size:clamp(42px,13vw,72px)}
+  .hero-sub{font-size:15.5px}
+  .palette-section{margin-top:64px}
+  .occasion{margin-top:70px}
+  .capsule,.rules{margin-top:70px}
+  .o-num{font-size:52px}
+  .o-item{padding:18px 18px 16px}
+  .rules{padding:36px 20px}
+  .rules li{padding-left:44px}
+}
+
+@media(max-width:420px){
+  .swatches{grid-template-columns:repeat(2,1fr)}
+  .hero-tags span{font-size:11px;padding:6px 13px}
+  .analysis{gap:16px}
 }
 </style>
 </head>
