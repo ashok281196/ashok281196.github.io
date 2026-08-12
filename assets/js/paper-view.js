@@ -127,7 +127,10 @@ function buildThumbs(){
     b.setAttribute('aria-label', `Go to page ${p.num}`);
     b.innerHTML = `<span class="tframe"></span><span class="tno">${p.num}</span>`;
     b.querySelector('.tframe').style.aspectRatio = `${p.w0} / ${p.h0}`;
-    b.addEventListener('click', () => goto(p.num, false));
+    b.addEventListener('click', () => {
+      goto(p.num, false);
+      if(isNarrow()) reader.classList.add('no-thumbs');
+    });
     frag.appendChild(b);
   }
   thumbsEl.appendChild(frag);
@@ -157,9 +160,24 @@ function buildThumbs(){
 
 /* ---------------- controls ---------------- */
 
-function setZoom(z){
-  state.zoom = Math.min(Math.max(z, 0.4), 4);
-  layout(); renderVisible(); trackScroll();
+function isNarrow(){ return window.matchMedia('(max-width: 760px)').matches; }
+
+/* Zoom keeps the content under anchorY (viewport px) stationary.
+   Re-rendering is debounced so pinches and button mashing stay cheap —
+   the stretched old canvas stands in until the sharp one lands. */
+let renderTimer = null;
+function setZoom(z, anchorY){
+  z = Math.min(Math.max(z, 0.4), 4);
+  if(z === state.zoom) return;
+  const rect = pagesEl.getBoundingClientRect();
+  const ay = anchorY == null ? pagesEl.clientHeight / 2 : anchorY - rect.top;
+  const k = z / state.zoom;
+  state.zoom = z;
+  layout();
+  pagesEl.scrollTop = (pagesEl.scrollTop + ay) * k - ay;
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(renderVisible, 180);
+  trackScroll();
 }
 
 function toggleFit(){
@@ -199,8 +217,41 @@ function wireControls(){
   pagesEl.addEventListener('wheel', e => {
     if(!e.ctrlKey && !e.metaKey) return;
     e.preventDefault();
-    setZoom(e.deltaY < 0 ? state.zoom * 1.1 : state.zoom / 1.1);
+    setZoom(e.deltaY < 0 ? state.zoom * 1.1 : state.zoom / 1.1, e.clientY);
   }, { passive: false });
+
+  /* touch: pinch to zoom, double-tap to toggle 100%/200%,
+     tap on the page area closes the thumbnail overlay on phones */
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  const midY = t => (t[0].clientY + t[1].clientY) / 2;
+  let pinch = null;
+  let lastTap = { t: 0, x: 0, y: 0 };
+
+  pagesEl.addEventListener('touchstart', e => {
+    if(e.touches.length === 2) pinch = { d: dist(e.touches), zoom: state.zoom };
+    if(isNarrow() && !reader.classList.contains('no-thumbs')) reader.classList.add('no-thumbs');
+  }, { passive: true });
+
+  pagesEl.addEventListener('touchmove', e => {
+    if(pinch && e.touches.length === 2){
+      e.preventDefault();
+      setZoom(pinch.zoom * (dist(e.touches) / pinch.d), midY(e.touches));
+    }
+  }, { passive: false });
+
+  pagesEl.addEventListener('touchend', e => {
+    if(pinch){ pinch = null; lastTap.t = 0; return; }
+    if(e.touches.length) return;
+    const t = e.changedTouches[0];
+    const now = Date.now();
+    if(now - lastTap.t < 300 && Math.hypot(t.clientX - lastTap.x, t.clientY - lastTap.y) < 25){
+      e.preventDefault();
+      setZoom(state.zoom === 1 ? 2 : 1, t.clientY);
+      lastTap.t = 0;
+    }else{
+      lastTap = { t: now, x: t.clientX, y: t.clientY };
+    }
+  });
 
   pagesEl.addEventListener('scroll', () => requestAnimationFrame(trackScroll), { passive: true });
 
@@ -225,10 +276,12 @@ async function main(){
 
   document.title = `${paper.title} · Papers`;
   $('rt-title').textContent = paper.title;
-  $('rt-stamp').textContent = `${paper.stamp} · ${paper.authors}`;
+  const stampB = document.createElement('b');
+  stampB.textContent = paper.stamp;
+  $('rt-stamp').replaceChildren(stampB, document.createTextNode(`  ·  ${paper.authors}`));
   $('b-raw').href = url;
 
-  if(window.matchMedia('(max-width: 760px)').matches) reader.classList.add('no-thumbs');
+  if(isNarrow()) reader.classList.add('no-thumbs');
 
   let pdfjs;
   try{
@@ -242,17 +295,24 @@ async function main(){
 
   let doc;
   let loading = true;
+  const ldFill = $('ld-fill');
+  const ldLabel = $('ld-label');
   try{
     const task = pdfjs.getDocument(url);
     /* pdf.js keeps streaming chunks (and firing onProgress) after the
-       document resolves — a late event must not wipe the page divs */
+       document resolves — a late event must not touch the loader/pages */
     task.onProgress = d => {
-      if(loading && d.total){
-        status(`loading paper &hellip; ${Math.min(100, Math.round((d.loaded / d.total) * 100))}%`);
-      }
+      if(!loading || !d.total) return;
+      const pct = Math.min(100, Math.round((d.loaded / d.total) * 100));
+      ldFill.classList.remove('indet');
+      ldFill.style.width = `${pct}%`;
+      ldLabel.innerHTML = `loading paper &hellip; ${pct}%`;
     };
     doc = await task.promise;
     loading = false;
+    ldFill.classList.remove('indet');
+    ldFill.style.width = '100%';
+    ldLabel.innerHTML = 'preparing pages &hellip;';
   }catch(e){
     console.error(e);
     status(`couldn&rsquo;t load the PDF — <a href="${url}">open it directly</a>`, true);

@@ -42,7 +42,20 @@
   <div class="rmain">
     <aside class="thumbs" id="thumbs" aria-label="Page thumbnails"></aside>
     <div class="pages" id="pages" tabindex="0">
-      <div class="rstatus mono" id="rstatus">loading paper &hellip;</div>
+      <div class="loader" id="loader" role="status" aria-label="Loading paper">
+        <div class="ld-page">
+          <span class="ld-line t"></span>
+          <span class="ld-line a"></span>
+          <span class="ld-line"></span>
+          <span class="ld-line"></span>
+          <span class="ld-line"></span>
+          <span class="ld-line"></span>
+          <span class="ld-line"></span>
+          <span class="ld-line s"></span>
+        </div>
+        <div class="ld-track"><div class="ld-fill indet" id="ld-fill"></div></div>
+        <div class="ld-label mono" id="ld-label">fetching paper &hellip;</div>
+      </div>
     </div>
   </div>
 </div>
