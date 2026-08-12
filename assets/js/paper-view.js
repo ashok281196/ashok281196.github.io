@@ -241,12 +241,18 @@ async function main(){
   }
 
   let doc;
+  let loading = true;
   try{
     const task = pdfjs.getDocument(url);
+    /* pdf.js keeps streaming chunks (and firing onProgress) after the
+       document resolves — a late event must not wipe the page divs */
     task.onProgress = d => {
-      if(d.total) status(`loading paper &hellip; ${Math.round((d.loaded / d.total) * 100)}%`);
+      if(loading && d.total){
+        status(`loading paper &hellip; ${Math.min(100, Math.round((d.loaded / d.total) * 100))}%`);
+      }
     };
     doc = await task.promise;
+    loading = false;
   }catch(e){
     console.error(e);
     status(`couldn&rsquo;t load the PDF — <a href="${url}">open it directly</a>`, true);
