@@ -38,6 +38,25 @@ function entryHTML(p){
   </a>`;
 }
 
+/* Reading-room band — sits above the page index, not inside it.
+   Counts come straight from data/papers.js. */
+function papersPromoHTML(){
+  if(typeof PAPERS === 'undefined') return '';
+  const shelves = PAPERS.categories.length;
+  const n = papersCount();
+  return `
+  <a class="papers-promo" href="papers/">
+    <span class="pp-eyebrow">${esc(PAPERS.eyebrow)}</span>
+    <span class="pp-title">${esc(PAPERS.title)} <span class="arrow">&nearr;</span></span>
+    <span class="pp-desc">${esc(PAPERS.promo)}</span>
+    <span class="pp-meta">
+      <span class="hot">NEW</span>
+      <span>${shelves} ${shelves === 1 ? 'shelf' : 'shelves'}</span>
+      <span>${n} ${n === 1 ? 'paper' : 'papers'}</span>
+    </span>
+  </a>`;
+}
+
 function pagesHTML(){
   const n = SITE.pages.length;
   return `
@@ -53,7 +72,7 @@ function pagesHTML(){
 
 renderTopbar(null);
 document.getElementById('hero').innerHTML = heroHTML();
-document.getElementById('pages').innerHTML = pagesHTML();
+document.getElementById('pages').innerHTML = papersPromoHTML() + pagesHTML();
 renderFooter(
   `<span>&copy; ${SITE.copyrightYear} ${esc(SITE.owner)}</span>` +
   `<span>${esc(SITE.tagline)} · <a href="${esc(SITE.sourceUrl)}">source</a></span>`

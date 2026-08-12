@@ -1,0 +1,124 @@
+/* ============================================================
+   PAPER READER — full-viewport PDF reading UI.
+   Signature: the saffron progress hairline under the toolbar
+   tracks how deep into the paper you are; page HUD and all
+   controls are the site's ui-monospace utility voice.
+   Shared tokens: theme.css. Logic: assets/js/paper-view.js.
+   ============================================================ */
+html,body{height:100%}
+body{overflow:hidden}
+
+.reader{display:flex;flex-direction:column;height:100dvh}
+
+/* ================= TOP BAR ================= */
+.rbar{position:relative;flex:0 0 auto;background:var(--card);border-bottom:1px solid var(--line-strong)}
+.rbar-inner{
+  display:flex;align-items:center;flex-wrap:wrap;gap:8px 12px;
+  padding:9px 14px;
+}
+.rbar .back{
+  flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;
+  width:34px;height:34px;border-radius:9px;
+  border:1px solid var(--line-strong);
+  font-family:var(--mono);font-size:15px;font-weight:700;color:var(--ink);
+  transition:border-color .2s,color .2s;
+}
+.rbar .back:hover{border-color:var(--saffron);color:var(--saffron-deep)}
+
+.rtitle{flex:1 1 240px;min-width:0;display:flex;flex-direction:column;gap:1px}
+.rt-main{
+  font-weight:800;font-size:13.5px;letter-spacing:-.01em;line-height:1.3;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.rt-stamp{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--saffron-deep);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+
+.rtools{display:flex;align-items:center;flex-wrap:wrap;gap:6px;font-family:var(--mono)}
+.rtools button,.rtools .raw{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:32px;height:32px;padding:0 8px;border-radius:8px;
+  border:1px solid var(--line-strong);background:var(--card);
+  font-family:var(--mono);font-size:12px;font-weight:600;color:var(--ink-dim);
+  transition:border-color .2s,color .2s,background .2s;
+}
+.rtools button:hover,.rtools .raw:hover{border-color:var(--saffron);color:var(--saffron-deep)}
+.rtools button[aria-pressed="true"]{background:var(--saffron-soft);border-color:var(--saffron);color:var(--saffron-deep)}
+.rtools .zpct{min-width:52px}
+.rsep{width:1px;height:20px;background:var(--line);margin:0 2px}
+
+.pagebox{display:inline-flex;align-items:center;gap:5px;font-size:12px;color:var(--muted)}
+.pagebox input{
+  width:44px;height:32px;text-align:right;padding:0 6px;
+  border:1px solid var(--line-strong);border-radius:8px;background:var(--card);
+  font-family:var(--mono);font-size:12px;font-weight:700;color:var(--ink);
+  -moz-appearance:textfield;appearance:textfield;
+}
+.pagebox input::-webkit-outer-spin-button,.pagebox input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.pagebox input:focus{border-color:var(--saffron);outline:none}
+
+.rprogress{
+  position:absolute;left:0;bottom:-1px;z-index:2;
+  height:2px;width:0;background:var(--saffron);
+  transition:width .12s linear;
+}
+
+/* ================= MAIN ================= */
+.rmain{flex:1;display:flex;min-height:0}
+
+/* thumbnail rail */
+.thumbs{
+  flex:0 0 136px;overflow-y:auto;overscroll-behavior:contain;
+  border-right:1px solid var(--line);background:var(--bg);
+  padding:12px 10px 24px;
+  display:flex;flex-direction:column;gap:10px;
+}
+.reader.no-thumbs .thumbs{display:none}
+.thumb{
+  display:block;width:100%;padding:0;border-radius:6px;
+  border:2px solid transparent;background:none;text-align:center;
+  transition:border-color .15s;
+}
+.thumb .tframe{
+  display:block;width:100%;aspect-ratio:0.773;
+  background:#fff;box-shadow:0 2px 8px rgba(20,29,48,.12);border-radius:3px;overflow:hidden;
+}
+.thumb canvas{display:block;width:100%;height:100%}
+.thumb .tno{
+  display:block;margin-top:4px;
+  font-family:var(--mono);font-size:10px;color:var(--muted);
+}
+.thumb:hover{border-color:var(--line-strong)}
+.thumb.cur{border-color:var(--saffron)}
+.thumb.cur .tno{color:var(--saffron-deep);font-weight:700}
+
+/* page canvas column */
+.pages{
+  flex:1;position:relative;overflow:auto;overscroll-behavior:contain;
+  background:var(--bg-2);
+  padding:22px 14px 64px;
+}
+.pg{
+  position:relative;margin:0 auto 18px;
+  background:#fff;box-shadow:0 4px 20px rgba(20,29,48,.13);
+}
+.pg canvas{display:block;width:100%;height:100%}
+
+.rstatus{
+  margin:80px auto;max-width:520px;text-align:center;
+  font-size:12px;letter-spacing:.08em;color:var(--muted);
+}
+.rstatus.err{color:var(--ball-red)}
+.rstatus a{color:var(--saffron-deep);font-weight:700;text-decoration:underline}
+
+/* ================= NARROW SCREENS ================= */
+@media(max-width:760px){
+  .rbar-inner{padding:8px 10px}
+  .rtitle{flex-basis:100%;order:3}
+  .thumbs{
+    position:absolute;z-index:5;top:0;bottom:0;left:0;
+    box-shadow:12px 0 30px rgba(20,29,48,.18);
+  }
+  .rmain{position:relative}
+}

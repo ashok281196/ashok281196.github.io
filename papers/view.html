@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paper · Reading Room</title>
+<meta name="description" content="In-browser paper reader with page navigation, zoom and thumbnails.">
+<link rel="stylesheet" href="../assets/css/theme.css">
+<link rel="stylesheet" href="../assets/css/paper-view.css">
+</head>
+<body>
+
+<div class="reader" id="reader">
+  <header class="rbar">
+    <div class="rbar-inner">
+      <a class="back" href="./" aria-label="Back to all papers">&larr;</a>
+      <div class="rtitle">
+        <span class="rt-main" id="rt-title">Loading&hellip;</span>
+        <span class="rt-stamp" id="rt-stamp"></span>
+      </div>
+      <div class="rtools" role="toolbar" aria-label="Reader controls">
+        <button id="b-thumbs" title="Toggle thumbnails (t)" aria-label="Toggle thumbnails">&#9636;</button>
+        <span class="rsep"></span>
+        <button id="b-prev" title="Previous page (&larr;)" aria-label="Previous page">&lsaquo;</button>
+        <span class="pagebox mono">
+          <input id="pg-input" type="number" min="1" value="1" aria-label="Page number">
+          <span id="pg-total">/ &ndash;</span>
+        </span>
+        <button id="b-next" title="Next page (&rarr;)" aria-label="Next page">&rsaquo;</button>
+        <span class="rsep"></span>
+        <button id="b-zout" title="Zoom out (-)" aria-label="Zoom out">&minus;</button>
+        <button id="b-zpct" class="zpct" title="Reset zoom (0)" aria-label="Reset zoom">100%</button>
+        <button id="b-zin" title="Zoom in (+)" aria-label="Zoom in">+</button>
+        <button id="b-fit" title="Fit width / whole page (w)" aria-label="Toggle fit mode">fit&nbsp;W</button>
+        <span class="rsep"></span>
+        <a id="b-raw" class="raw" href="#" download title="Download the PDF" aria-label="Download PDF">&darr;&nbsp;pdf</a>
+      </div>
+    </div>
+    <div class="rprogress" id="rprogress" aria-hidden="true"></div>
+  </header>
+
+  <div class="rmain">
+    <aside class="thumbs" id="thumbs" aria-label="Page thumbnails"></aside>
+    <div class="pages" id="pages" tabindex="0">
+      <div class="rstatus mono" id="rstatus">loading paper &hellip;</div>
+    </div>
+  </div>
+</div>
+
+<noscript>
+  <p style="padding:24px;font-family:monospace">
+    The reader needs JavaScript. The PDFs live in <a href="tactile/">/papers/tactile/</a>.
+  </p>
+</noscript>
+
+<script src="../data/site.js"></script>
+<script src="../data/papers.js"></script>
+<script type="module" src="../assets/js/paper-view.js"></script>
+</body>
+</html>

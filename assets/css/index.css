@@ -74,6 +74,47 @@ h1 .caret{
 
 /* ================= INDEX ================= */
 .index{padding:56px 0 24px}
+
+/* reading-room band — above the index, not one of its rows */
+.papers-promo{
+  display:block;position:relative;margin-bottom:28px;
+  background:var(--ink);color:#fff;
+  border:1px solid var(--ink);border-radius:var(--r);
+  padding:22px 24px;
+  transition:border-color .2s,transform .15s ease,box-shadow .2s;
+}
+.papers-promo:hover{border-color:var(--saffron);transform:translateY(-2px);box-shadow:0 14px 30px rgba(20,29,48,.25)}
+.papers-promo .pp-eyebrow{
+  font-family:var(--mono);font-size:10px;letter-spacing:.24em;text-transform:uppercase;
+  color:var(--saffron);
+}
+.papers-promo .pp-title{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  margin-top:8px;
+  font-size:clamp(20px,5vw,28px);font-weight:900;letter-spacing:-.02em;text-transform:uppercase;
+}
+.papers-promo .pp-title .arrow{
+  flex-shrink:0;color:var(--saffron);font-size:.85em;
+  transition:transform .18s ease;
+}
+.papers-promo:hover .pp-title .arrow{transform:translate(3px,-3px)}
+.papers-promo .pp-desc{
+  display:block;margin-top:6px;
+  font-size:13.5px;color:rgba(255,255,255,.72);max-width:60ch;
+}
+.papers-promo .pp-meta{
+  margin-top:14px;display:flex;flex-wrap:wrap;gap:6px 8px;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+}
+.papers-promo .pp-meta span{
+  padding:4px 10px;border-radius:5px;
+  border:1px solid rgba(255,255,255,.22);color:rgba(255,255,255,.75);
+  white-space:nowrap;
+}
+.papers-promo .pp-meta .hot{
+  background:rgba(233,123,24,.18);border-color:transparent;
+  color:var(--saffron);font-weight:700;
+}
 .index-head{
   display:flex;align-items:baseline;gap:14px;
   padding-bottom:12px;border-bottom:2px solid var(--ink);
