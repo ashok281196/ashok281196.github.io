@@ -34,6 +34,16 @@ const PAPERS = {
         minutes: 35,
         desc: 'The paper behind modern image generators, in twelve short chapters: bury a picture under static, train a network to undo one tiny step, then un-bury pure noise into a brand-new image. Includes a live noise slider using the paper\'s exact schedule.',
         tags: ['explainer', 'diffusion', 'generative models']
+      },
+      {
+        href: 'explainers/diffusion-policy-2303.04137/',
+        title: "Diffusion Policy: Visuomotor Policy Learning via Action Diffusion — explained in depth",
+        authors: "Cheng Chi, Zhenjia Xu et al. · Columbia, Toyota Research Institute, MIT",
+        stamp: 'arXiv:2303.04137 [cs.RO]',
+        year: 2023,
+        minutes: 55,
+        desc: "How DDPM's denoising trick became the standard way robots learn skills from human demos: diffusing 16-step action chunks conditioned on camera input, receding-horizon control, CNN vs transformer backbones, why it beats IBC/BET/LSTM-GMM by 46.9%, and real-robot results from Push-T to shirt folding. Includes an interactive demo comparing averaged, step-by-step and chunked policies.",
+        tags: ['explainer', 'robotics', 'imitation learning', 'diffusion']
       }
     ]
   },

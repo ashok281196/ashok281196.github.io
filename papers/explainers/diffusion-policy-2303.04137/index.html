@@ -1,0 +1,657 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F7F1E5">
+<title>Diffusion Policy Explained</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<link rel="stylesheet" href="../folio.css">
+<style>
+/* page-only additions on top of folio.css */
+.math { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: var(--s3) 0; margin: var(--s4) 0; text-align: center; }
+.math .katex { font-size: 1.06em; }
+.paper-meta { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin-top: var(--s5); }
+details.q { border: 1px solid var(--rule); border-radius: var(--radius); margin: var(--s3) 0; background: var(--sheet); }
+details.q summary { cursor: pointer; padding: var(--s4); min-height: 44px; font-weight: 600; list-style: none; }
+details.q summary::-webkit-details-marker { display: none; }
+details.q summary::before { content: "＋"; color: var(--oxblood); margin-right: var(--s2); font-family: var(--sans); }
+details.q[open] summary::before { content: "−"; }
+details.q div { padding: 0 var(--s4) var(--s4); color: var(--ink-soft); font-size: var(--fs-sm); }
+dl.gloss dt { font-weight: 600; margin-top: var(--s4); color: var(--oxblood); }
+dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-soft); }
+
+/* mode-collapse demo */
+.demo { background: var(--sheet-alt); border: 1px solid var(--rule); border-radius: var(--radius-lg); padding: var(--s5); margin: var(--s6) 0; font-family: var(--sans); }
+.demo canvas { width: 100%; height: auto; aspect-ratio: 600 / 360; display: block; border-radius: var(--radius); background: var(--sheet); box-shadow: var(--shadow-card); touch-action: manipulation; }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; margin-bottom: var(--s3); }
+.seg button { min-height: 44px; border: 0; border-radius: 7px; background: transparent; font: 500 var(--fs-xs)/1.25 var(--sans); color: var(--ink-soft); cursor: pointer; padding: 4px 6px; }
+.seg button[aria-pressed="true"] { background: var(--oxblood); color: #FFF8F2; }
+.demo-status { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); align-items: center; justify-content: space-between; margin-top: var(--s3); font-size: var(--fs-sm); color: var(--ink-soft); }
+.demo-status b { color: var(--ink); }
+.tally { font: 500 var(--fs-xs) var(--mono); color: var(--ink-faint); }
+
+/* horizon timeline */
+.hz { margin: var(--s6) 0; padding: var(--s5) var(--s4); background: var(--sheet-alt); border: 1px solid var(--rule); border-radius: var(--radius-lg); font-family: var(--sans); overflow-x: auto; }
+.hz-grid { display: grid; grid-template-columns: 68px repeat(18, minmax(0, 1fr)); gap: 2px; align-items: center; }
+.hz-grid .lbl { font: 600 10.5px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); padding-right: 6px; }
+.hz-grid .tk { font: 10px var(--mono); color: var(--ink-faint); text-align: center; }
+.hz-grid .tk.now { color: var(--oxblood); font-weight: 600; }
+.hz-grid i { height: 22px; border-radius: 4px; background: transparent; }
+.hz-grid i.o { background: var(--slate); }
+.hz-grid i.p { background: var(--gold-tint); border: 1px solid var(--gold); }
+.hz-grid i.a { background: var(--oxblood); }
+.hz-grid i.n { background: var(--sage-tint); border: 1px dashed var(--sage); }
+.hz-legend { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); margin-top: var(--s4); font-size: var(--fs-xs); color: var(--ink-soft); }
+.hz-legend span { display: inline-flex; gap: 6px; align-items: center; }
+.hz-legend i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+
+/* comparison cards */
+.trio { display: grid; gap: var(--s4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); margin: var(--s5) 0; }
+.trio .card { border-top: 3px solid var(--c, var(--slate)); }
+.trio .card ul { font-size: var(--fs-sm); color: var(--ink-soft); padding-left: 1.1em; margin: var(--s2) 0 0; }
+.trio .card li { margin-bottom: var(--s1); }
+.verdict { display: inline-block; font: 600 var(--fs-xs) var(--sans); padding: 3px 8px; border-radius: 999px; margin-top: var(--s2); }
+.v-bad { background: var(--oxblood-tint); color: var(--oxblood); }
+.v-mid { background: var(--gold-tint); color: #7D5D1F; }
+.v-good { background: var(--sage-tint); color: var(--sage); }
+td.best { font-weight: 700; color: var(--oxblood); }
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: var(--s3); margin: var(--s5) 0; }
+.stat { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius-lg); padding: var(--s4); text-align: center; box-shadow: var(--shadow-card); }
+.stat b { display: block; font: 700 var(--fs-2xl)/1.1 var(--serif); color: var(--oxblood); }
+.stat span { font: var(--fs-xs)/1.4 var(--sans); color: var(--ink-soft); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open contents" aria-controls="sidebar" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+  </button>
+  <a class="icon-btn" href="../../" aria-label="Back to papers" title="Back to papers">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+  </a>
+  <div class="title"><b>Folio</b>Diffusion Policy, Explained</div>
+  <span class="chapter-label" id="chapterLabel">Cover</span>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Table of contents">
+    <p class="toc-head">Contents</p>
+    <ol class="toc">
+      <li><a href="#cover"><span class="num">·</span>Cover</a></li>
+      <li><a href="#ch1"><span class="num">1</span>Teaching by Showing</a></li>
+      <li><a href="#ch2"><span class="num">2</span>Why Copying Is Hard</a></li>
+      <li><a href="#ch3"><span class="num">3</span>Three Kinds of Policy</a></li>
+      <li><a href="#ch4"><span class="num">4</span>Diffusion in 2 Minutes</a></li>
+      <li><a href="#ch5"><span class="num">5</span>Diffuse Actions</a></li>
+      <li><a href="#ch6"><span class="num">6</span>Horizons</a></li>
+      <li><a href="#ch7"><span class="num">7</span>Inside the Network</a></li>
+      <li><a href="#ch8"><span class="num">8</span>Training &amp; Acting</a></li>
+      <li><a href="#ch9"><span class="num">9</span>Making It Real-Time</a></li>
+      <li><a href="#ch10"><span class="num">10</span>Why It Works</a></li>
+      <li><a href="#ch11"><span class="num">11</span>Control-Theory Check</a></li>
+      <li><a href="#ch12"><span class="num">12</span>Simulation Results</a></li>
+      <li><a href="#ch13"><span class="num">13</span>Real Robots</a></li>
+      <li><a href="#ch14"><span class="num">14</span>Limits &amp; Legacy</a></li>
+      <li><a href="#ch15"><span class="num">15</span>Recap &amp; Quiz</a></li>
+    </ol>
+  </nav>
+  <div class="scrim" id="scrim"></div>
+
+  <main class="page" id="main">
+
+    <!-- COVER -->
+    <section class="cover" id="cover" data-label="Cover">
+      <svg class="mark" viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M28 14c-5-4-13-5-20-4v32c7-1 15 0 20 4 5-4 13-5 20-4V10c-7-1-15 0-20 4Z"/><path d="M28 14v32"/>
+      </svg>
+      <span class="eyebrow">A Beginner’s Guide · arXiv 2303.04137</span>
+      <h1>Diffusion Policy</h1>
+      <p class="lead">Visuomotor policy learning via action diffusion — how the trick that paints pictures from noise became the way robots learn skills from human demonstrations.</p>
+      <div class="paper-meta">
+        <span class="chip accent">Cheng Chi* · Zhenjia Xu* · Siyuan Feng · Eric Cousineau · Yilun Du · Benjamin Burchfiel · Russ Tedrake · Shuran Song</span>
+        <span class="chip">Columbia · Toyota Research Institute · MIT</span>
+        <span class="chip">RSS 2023 · extended version 2024</span>
+      </div>
+      <p class="meta">FIFTEEN CHAPTERS · ~55 MIN READ · <a href="https://arxiv.org/pdf/2303.04137">ORIGINAL PDF</a> · PREREQUISITE (OPTIONAL): <a href="../ddpm-2006.11239/">DDPM EXPLAINER</a></p>
+    </section>
+
+    <div class="callout key"><div><strong>The whole paper in one sentence</strong><p>Instead of training a robot’s brain to output <em>one</em> answer for “what should I do next?”, train it like an image-diffusion model to start from random noise and gradually refine a whole <em>short plan of future movements</em> — which lets it learn from messy, inconsistent human demonstrations and still move smoothly, decisively and robustly.</p></div></div>
+
+    <div class="stat-row">
+      <div class="stat"><b>46.9%</b><span>average improvement over prior state of the art</span></div>
+      <div class="stat"><b>15</b><span>tasks across 4 benchmarks, simulated and real</span></div>
+      <div class="stat"><b>95%</b><span>real-robot Push-T success (best baseline: 20%)</span></div>
+      <div class="stat"><b>0.1 s</b><span>to plan an action sequence on one RTX 3080</span></div>
+    </div>
+
+    <!-- CH 1 -->
+    <section class="chapter" id="ch1" data-label="1 · Teaching by Showing">
+      <header class="chapter-head"><span class="num">Chapter 1</span><h2>Teaching a Robot by Showing It</h2></header>
+      <p class="epigraph">“Tell me and I forget, teach me and I may remember, involve me and I learn.”<span>— Proverb</span></p>
+      <p class="dropcap">Programming a robot to fold a shirt line by line is nearly impossible: cloth bends in endless ways, and every rule you write breaks on the next shirt. An easier route is to <strong>show</strong> the robot. A person drives the robot through the task many times — with a joystick, a VR controller, or a device that mirrors their hand — while cameras and sensors record everything. Then a neural network learns to imitate.</p>
+      <p>This approach is called <strong>imitation learning</strong>, and its simplest form is <strong>behavior cloning</strong>: treat the recordings as a giant table of “when the robot saw <em>this</em>, the human did <em>that</em>,” and train a network to reproduce it.</p>
+
+      <h3>The vocabulary you need</h3>
+      <div class="grid-2">
+        <article class="card"><span class="eyebrow">Observation · o</span><h4>What the robot senses</h4><p>Camera images (from fixed cameras and a camera on the wrist) plus <b>proprioception</b> — the robot’s own sense of where its arm and gripper are.</p></article>
+        <article class="card"><span class="eyebrow">Action · a</span><h4>What the robot does</h4><p>A command for the next moment, e.g. “move the gripper to this 3D position and rotation, open it this wide.” Actions are lists of numbers — 2 for a flat pusher, 10 for one arm, 20 for two arms.</p></article>
+        <article class="card"><span class="eyebrow">Policy · π</span><h4>The robot’s brain</h4><p>A function from observation to action: <i>π(o) → a</i>. Training a policy is the whole goal. A <b>visuomotor</b> policy goes straight from pixels (“visuo”) to motor commands.</p></article>
+        <article class="card"><span class="eyebrow">Demonstration</span><h4>One recorded attempt</h4><p>A sequence of (observation, action) pairs from a human-driven run. The paper’s tasks use from about 100 to several hundred demos each.</p></article>
+      </div>
+      <p>Behavior cloning is just supervised learning, which makes it attractive. But as the next chapter shows, “copy the human” hides several nasty traps — and every trap is a place where earlier methods broke and Diffusion Policy doesn’t.</p>
+      <div class="folio"><span>Teaching by Showing</span><span>1</span></div>
+    </section>
+
+    <!-- CH 2 -->
+    <section class="chapter" id="ch2" data-label="2 · Why Copying Is Hard">
+      <header class="chapter-head"><span class="num">Chapter 2</span><h2>Why Copying Humans Is Hard</h2></header>
+
+      <h3>Trap 1 — there is more than one right answer</h3>
+      <p class="dropcap">Imagine a block sits between the robot and its goal. Sometimes the demonstrator went around the <em>left</em> side; sometimes around the <em>right</em>. Both are perfect. In maths-speak the distribution of correct actions is <strong>multimodal</strong> — it has more than one peak (“mode”).</p>
+      <p>A standard network trained with squared error learns the <em>average</em> of what it saw. The average of “go left” and “go right” is “go straight” — straight into the block. Other methods avoid averaging but pick a new side every instant, so the robot dithers. Try it:</p>
+
+      <div class="demo" id="modeDemo">
+        <div class="seg" role="group" aria-label="Choose a policy type">
+          <button data-mode="avg" aria-pressed="true">Average<br>(regression)</button>
+          <button data-mode="step" aria-pressed="false">One step at a time</button>
+          <button data-mode="dp" aria-pressed="false">Diffusion Policy<br>(8-step chunks)</button>
+        </div>
+        <canvas id="modeCanvas" width="600" height="360" aria-label="A robot dot tries to reach the goal around an obstacle using the selected policy"></canvas>
+        <div class="demo-status">
+          <span id="modeMsg">Press run.</span>
+          <span class="row" style="margin:0"><button class="btn btn-primary" id="modeRun">▶ Run</button></span>
+        </div>
+        <p class="tally" id="modeTally"></p>
+        <p class="small muted" style="margin:var(--s2) 0 0">A toy, not the paper’s code: dashed lines are the two demonstrated routes. “One step at a time” samples a side independently at each step (like single-step mixture or clustering policies); “Diffusion Policy” samples a whole 16-step plan, executes 8 steps, then replans.</p>
+      </div>
+      <p>Run each a few times. The averaging policy crashes every time. The one-step sampler zig-zags and usually crashes. The chunked planner picks a side — sometimes left, sometimes right — and <em>commits</em>. That is exactly the behaviour the paper shows on its real Push-T task (paper Figure 3).</p>
+
+      <h3>Trap 2 — high-dimensional outputs</h3>
+      <p>Predicting one action at a time is jittery. Predicting a whole sequence (say 16 future actions × 10 numbers = 160 numbers) is smoother — but most methods that can represent multiple modes get much harder to train as the output grows.</p>
+
+      <h3>Trap 3 — unstable training</h3>
+      <p>One elegant family (energy-based “implicit” policies, Chapter 3) handles multiple modes but needs “negative samples” during training, which makes training jumpy: the score you care about rises and falls unpredictably, so you must test many saved checkpoints on the real robot to find a good one.</p>
+
+      <h3>Trap 4 — pauses, delays and surprises</h3>
+      <ul>
+        <li><strong>Idle actions:</strong> humans pause (e.g. waiting for sauce to fill a ladle). Single-step policies learn to “pause forever” and get stuck.</li>
+        <li><strong>Latency:</strong> cameras, network inference and robot communication add delay; the world moves on before the action arrives.</li>
+        <li><strong>Perturbations:</strong> someone bumps the object — the robot must re-plan, not blindly replay.</li>
+      </ul>
+      <div class="callout key"><div><strong>The paper’s promise</strong><p>One method — diffusion over action sequences, run in a closed loop — that handles all four traps, with hyperparameters that barely need tuning between tasks.</p></div></div>
+      <div class="folio"><span>Why Copying Is Hard</span><span>2</span></div>
+    </section>
+
+    <!-- CH 3 -->
+    <section class="chapter" id="ch3" data-label="3 · Three Kinds of Policy">
+      <header class="chapter-head"><span class="num">Chapter 3</span><h2>Three Ways to Write a Policy</h2></header>
+      <p class="dropcap">The paper’s first figure sorts robot policies into three families by <em>how</em> the network turns an observation into an action.</p>
+      <div class="trio">
+        <article class="card" style="--c:var(--slate)"><span class="eyebrow">(a) Explicit</span><h4>Output the action directly</h4><p class="small">One forward pass: image in, action out.</p>
+          <ul><li><b>Regression</b> — one number per dimension (averages modes).</li><li><b>Mixture of Gaussians</b> (LSTM-GMM / BC-RNN) — a few bell curves; must guess how many.</li><li><b>Categorical / clustering</b> (BET) — bins + offsets; bins explode in high dimensions.</li></ul>
+          <span class="verdict v-mid">fast, but fragile with many modes</span></article>
+        <article class="card" style="--c:var(--gold)"><span class="eyebrow">(b) Implicit</span><h4>Score every action, pick the best</h4><p class="small">Learn an “energy” E(o, a): low for good actions. Acting = search for the lowest-energy action (IBC).</p>
+          <ul><li>Naturally multimodal — many valleys allowed.</li><li>Training needs negative samples to estimate an intractable constant Z.</li><li>Unstable; checkpoint picking is painful.</li></ul>
+          <span class="verdict v-bad">expressive, but unstable</span></article>
+        <article class="card" style="--c:var(--oxblood)"><span class="eyebrow">(c) Diffusion</span><h4>Refine noise into an action</h4><p class="small">Start from random actions; repeatedly follow a learned “which way is better” arrow field.</p>
+          <ul><li>Multimodal like (b), without needing Z.</li><li>Scales to long action sequences, like image pixels.</li><li>Training is ordinary mean-squared error — stable.</li></ul>
+          <span class="verdict v-good">expressive and stable</span></article>
+      </div>
+      <p>Here’s the intuition. Picture all possible actions as a landscape. Explicit policies point at one spot. Implicit policies draw the whole landscape (energy) and then search it. Diffusion Policy learns only the <strong>slope</strong> of that landscape (its gradient) — and slopes, it turns out, are far easier and steadier to learn than the landscape itself. Chapter 10 makes this precise.</p>
+      <div class="folio"><span>Three Kinds of Policy</span><span>3</span></div>
+    </section>
+
+    <!-- CH 4 -->
+    <section class="chapter" id="ch4" data-label="4 · Diffusion in 2 Minutes">
+      <header class="chapter-head"><span class="num">Chapter 4</span><h2>Diffusion Models in Two Minutes</h2></header>
+      <p class="dropcap">Diffusion Policy is built directly on <strong>DDPM</strong> (Ho, Jain &amp; Abbeel, 2020). If you’ve read <a href="../ddpm-2006.11239/">our DDPM explainer</a> you can skim this chapter. The short version:</p>
+      <ol>
+        <li><strong>Destroy:</strong> take real data, add a little random noise, repeat K times until it is pure noise.</li>
+        <li><strong>Learn:</strong> train a network ε<sub>θ</sub> to look at noisy data and guess the noise that was added.</li>
+        <li><strong>Create:</strong> start from pure noise and repeatedly subtract the network’s noise guess. Real-looking data appears.</li>
+      </ol>
+      <p>The paper writes one cleaning step like this (k counts down from K to 0):</p>
+      <div class="math">\[ x^{k-1} = \alpha\Big(x^{k} - \gamma\,\epsilon_\theta(x^{k}, k) + \mathcal{N}(0, \sigma^2 \mathbf{I})\Big) \]</div>
+      <div class="callout note"><div><strong>Read it aloud</strong><p>“Take the current noisy sample, subtract γ times the predicted noise, add a little fresh randomness, and scale by α (slightly less than 1).” The three numbers α, γ, σ change with k — that’s the <b>noise schedule</b>.</p></div></div>
+      <p>The paper then points out something lovely: that step is the same shape as one step of <strong>gradient descent</strong>, the most common optimisation method in machine learning:</p>
+      <div class="math">\[ x' = x - \gamma\,\nabla E(x) \]</div>
+      <p>So the noise-prediction network is secretly predicting a <strong>gradient field</strong> ∇E(x): at every point it gives an arrow pointing “downhill” toward realistic data. Sampling is noisy gradient descent along those arrows — a procedure called <strong>Stochastic Langevin Dynamics</strong>. The noise schedule plays the role of a learning-rate schedule.</p>
+      <p>Training is the same simple recipe as DDPM: take clean data x⁰, pick a random k, add noise ε<sup>k</sup> of the matching size, and ask the network to recover it:</p>
+      <div class="math">\[ \mathcal{L} = \mathrm{MSE}\big(\epsilon^{k},\; \epsilon_\theta(x^{0} + \epsilon^{k},\, k)\big) \]</div>
+      <div class="folio"><span>Diffusion in 2 Minutes</span><span>4</span></div>
+    </section>
+
+    <!-- CH 5 -->
+    <section class="chapter" id="ch5" data-label="5 · Diffuse Actions">
+      <header class="chapter-head"><span class="num">Chapter 5</span><h2>The Big Idea: Diffuse Actions, Not Pixels</h2></header>
+      <p class="dropcap">DDPM generates images. Diffusion Policy changes exactly two things so it can generate robot behaviour instead.</p>
+      <h3>Change 1 — the output is a sequence of actions</h3>
+      <p>Instead of x being an image, it becomes <strong>A<sub>t</sub></strong>: a short movie of future actions, e.g. the next 16 gripper poses. To a diffusion model this is just a small “image” 16 steps long and a few numbers wide — easy compared with a 256 × 256 photo.</p>
+      <h3>Change 2 — the denoising is conditioned on what the robot sees</h3>
+      <p>The network also receives the recent observations <strong>O<sub>t</sub></strong> as context. Every cleaning step now reads:</p>
+      <div class="math">\[ A_t^{k-1} = \alpha\Big(A_t^{k} - \gamma\,\epsilon_\theta(O_t,\, A_t^{k},\, k) + \mathcal{N}(0, \sigma^2\mathbf{I})\Big) \]</div>
+      <p>and training becomes:</p>
+      <div class="math">\[ \mathcal{L} = \mathrm{MSE}\big(\epsilon^{k},\; \epsilon_\theta(O_t,\; A_t^{0} + \epsilon^{k},\; k)\big) \]</div>
+      <div class="callout tip"><div><strong>Why “conditioned on” matters</strong><p>An earlier robotics diffusion model (Diffuser, Janner et al. 2022) generated observations <em>and</em> actions together — the joint distribution p(A, O). That forces the network to imagine future camera images, which is slow and error-prone. Diffusion Policy only learns p(A<sub>t</sub> | O<sub>t</sub>): “given what I see, what should I do?” The image is processed <em>once</em> per decision, not once per denoising step — a big speed-up that also makes training the vision encoder end-to-end practical.</p></div></div>
+      <div class="folio"><span>Diffuse Actions</span><span>5</span></div>
+    </section>
+
+    <!-- CH 6 -->
+    <section class="chapter" id="ch6" data-label="6 · Horizons">
+      <header class="chapter-head"><span class="num">Chapter 6</span><h2>Horizons &amp; Receding-Horizon Control</h2></header>
+      <p class="dropcap">A good plan must be smooth (no jitter) <em>and</em> responsive (react if the world changes). Diffusion Policy balances these with three numbers:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Symbol</th><th>Name</th><th>Meaning</th><th>Typical</th></tr></thead>
+        <tbody>
+          <tr><td><b>T<sub>o</sub></b></td><td>Observation horizon</td><td>How many recent observations the policy looks at.</td><td>2</td></tr>
+          <tr><td><b>T<sub>p</sub></b></td><td>Prediction horizon</td><td>How many future actions it plans.</td><td>16</td></tr>
+          <tr><td><b>T<sub>a</sub></b></td><td>Action (execution) horizon</td><td>How many of those it actually executes before re-planning.</td><td>8</td></tr>
+        </tbody>
+      </table></div>
+      <figure class="hz">
+        <div class="hz-grid" id="hzGrid" aria-hidden="true"></div>
+        <div class="hz-legend">
+          <span><i style="background:var(--slate)"></i>observations used (T<sub>o</sub> = 2)</span>
+          <span><i style="background:var(--gold-tint);border:1px solid var(--gold)"></i>planned (T<sub>p</sub> = 16)</span>
+          <span><i style="background:var(--oxblood)"></i>executed (T<sub>a</sub> = 8)</span>
+          <span><i style="background:var(--sage-tint);border:1px dashed var(--sage)"></i>next plan (made at t+8)</span>
+        </div>
+        <figcaption><b>Figure 6.1</b> — One planning cycle. At step t the robot plans 16 actions, carries out 8, then plans again with fresh observations.</figcaption>
+      </figure>
+      <p>This is a classic idea from control engineering called <strong>receding-horizon control</strong> (or model-predictive control): always plan a little further ahead than you act, then re-plan. Diffusion Policy can also <strong>warm-start</strong> the next plan from the unexecuted tail of the previous one, for extra smoothness.</p>
+      <h3>The trade-off, measured</h3>
+      <ul>
+        <li><b>T<sub>a</sub> too small</b> (re-plan every step): actions can flip between modes → jitter (Chapter 2 demo), and the policy overfits to idle pauses.</li>
+        <li><b>T<sub>a</sub> too large</b>: the robot is slow to react to surprises.</li>
+        <li>The ablation (paper Figure 5) found <b>T<sub>a</sub> = 8</b> best on most tasks, and performance held at its peak with up to <b>4 steps of simulated latency</b>.</li>
+        <li>State-based policies didn’t care much about T<sub>o</sub>; vision policies (especially the CNN version) got worse with longer history, so <b>T<sub>o</sub> = 2</b> is the default.</li>
+      </ul>
+      <div class="folio"><span>Horizons</span><span>6</span></div>
+    </section>
+
+    <!-- CH 7 -->
+    <section class="chapter" id="ch7" data-label="7 · Inside the Network">
+      <header class="chapter-head"><span class="num">Chapter 7</span><h2>Inside the Network</h2></header>
+      <p class="dropcap">There are two parts: a <strong>vision encoder</strong> that turns camera images into a compact summary O<sub>t</sub>, and a <strong>noise-prediction network</strong> ε<sub>θ</sub> that does the denoising. The paper offers two designs for the second part.</p>
+
+      <h3>7.1 The vision encoder</h3>
+      <ul>
+        <li>A standard <strong>ResNet-18</strong>, trained <em>from scratch together with the policy</em> (“end-to-end”) — no ImageNet pretraining required.</li>
+        <li><strong>Spatial softmax</strong> pooling instead of global average pooling, so the summary keeps <em>where</em> things are in the image (crucial for manipulation).</li>
+        <li><strong>GroupNorm</strong> instead of BatchNorm, because BatchNorm misbehaves with the weight-averaging (EMA) used by diffusion models.</li>
+        <li>Each camera view gets its own encoder; each time step is encoded separately and the results are concatenated into O<sub>t</sub>.</li>
+      </ul>
+
+      <h3>7.2 Option A — CNN-based Diffusion Policy (the default)</h3>
+      <p>A 1D temporal U-Net, adapted from Diffuser: it convolves <em>along time</em> over the 16-step action sequence. The observation summary and the step number k are injected into every layer with <strong>FiLM</strong> (Feature-wise Linear Modulation) — the observation decides, channel by channel, how much to <em>scale</em> and <em>shift</em> the network’s internal features. Think of the camera view turning a mixing desk’s knobs.</p>
+      <p>Works out of the box on most tasks. Weak spot: convolutions prefer smooth, low-frequency signals, so it over-smooths actions that must change sharply (e.g. velocity commands).</p>
+
+      <h3>7.3 Option B — Time-series Diffusion Transformer</h3>
+      <p>A transformer (from minGPT) where each noisy action is a token, with the step k as an extra first token. Observations enter through <strong>cross-attention</strong> in every block, and a <strong>causal mask</strong> lets each action attend only to itself and earlier actions. Each output token predicts the noise for its action.</p>
+      <p>Best on the hardest, fastest-changing state-based tasks — but more sensitive to hyperparameters.</p>
+      <div class="callout tip"><div><strong>The authors’ recommendation</strong><p>Start with the CNN version on a new task. Switch to the transformer only if the task is complex or needs rapid action changes, and budget time for tuning.</p></div></div>
+
+      <h3>7.4 Pretrained vision — does it help?</h3>
+      <p>On the simulated Square task (CNN policy, 500 epochs), success rates were:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Encoder</th><th>From scratch</th><th>Frozen pretrained</th><th>Fine-tuned pretrained</th></tr></thead>
+        <tbody>
+          <tr><td>ResNet-18 (ImageNet-21k)</td><td>0.94</td><td>0.58</td><td>0.92</td></tr>
+          <tr><td>ResNet-34 (ImageNet-21k)</td><td>0.92</td><td>0.40</td><td>0.94</td></tr>
+          <tr><td>ViT-B/16 (CLIP)</td><td>0.22</td><td>0.70</td><td class="best">0.98</td></tr>
+        </tbody>
+      </table></div>
+      <p>Frozen features are poor — the policy wants different visual information than generic pretraining gives. Fine-tuning with a 10× lower learning rate is best (CLIP ViT hits 98% in only 50 epochs), but a small ResNet trained from scratch is nearly as good. On the real robot, end-to-end training clearly beat frozen ImageNet and R3M features (Chapter 13).</p>
+      <div class="folio"><span>Inside the Network</span><span>7</span></div>
+    </section>
+
+    <!-- CH 8 -->
+    <section class="chapter" id="ch8" data-label="8 · Training & Acting">
+      <header class="chapter-head"><span class="num">Chapter 8</span><h2>Training and Acting, Step by Step</h2></header>
+      <p class="dropcap">Training looks almost identical to DDPM — the only differences are what gets noised (action chunks) and the extra observation input.</p>
+
+      <figure class="flow2">
+        <div class="f2-head"><b>Training loop</b><span>behavior cloning with a diffusion loss</span></div>
+        <div class="f2-track" role="list">
+          <div class="f2-step is-start" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg></span><div class="f2-card"><span class="k">Begin</span><b>Human demonstrations recorded</b><p>Teleoperated runs: synced camera frames, robot state and commanded actions.</p></div></div>
+          <div class="f2-loop">
+          <div class="f2-phase" aria-hidden="true">① Cut a training example</div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/></svg><i>1</i></span><div class="f2-card"><span class="k">Data</span><b>Pick a moment from a demo</b><p>Take the last 2 observations and the next 16 actions the human actually took.</p><code>(O_t, A_t⁰)  with  T_o = 2, T_p = 16</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2" fill="currentColor"/><circle cx="15" cy="15" r="1.2" fill="currentColor"/><circle cx="15" cy="9" r="1.2" fill="currentColor"/><circle cx="9" cy="15" r="1.2" fill="currentColor"/></svg><i>2</i></span><div class="f2-card"><span class="k">Noise level</span><b>Pick a random denoising step k</b><p>Out of K = 100 training steps; noise size set by a squared-cosine schedule.</p><code>k ~ Uniform{1, …, 100}</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h.01M9 4h.01M14 7h.01M19 5h.01M6 11h.01M11 10h.01M17 12h.01M4 16h.01M9 15h.01M14 17h.01M19 18h.01M8 20h.01" stroke-width="3"/></svg><i>3</i></span><div class="f2-card"><span class="k">Corrupt</span><b>Add noise to the action chunk</b><p>The 16 actions become a wobbly, noisy version of the human’s plan.</p><code>A_tᵏ = A_t⁰ + εᵏ</code></div></div>
+          <div class="f2-phase" aria-hidden="true">② Ask the network</div>
+          <div class="f2-step is-net" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="7" r="2"/><circle cx="5" cy="17" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="19" cy="17" r="2"/><path d="M7 7.5l3 3.5M7 16.5l3-3.5M14 11l3-3M14 13l3 3"/></svg><i>4</i></span><div class="f2-card"><span class="k">Vision + denoiser</span><b>Encode images, predict the noise</b><p>ResNet turns frames into O_t; the CNN/transformer sees O_t, the noisy chunk and k.</p><code>ε̂ = ε_θ(O_t, A_tᵏ, k)</code></div></div>
+          <div class="f2-phase" aria-hidden="true">③ Learn</div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg><i>5</i></span><div class="f2-card"><span class="k">Loss</span><b>Mean-squared error on the noise</b><p>Gradients flow into both the denoiser and the vision encoder (end-to-end).</p><code>L = MSE(εᵏ, ε̂)</code></div></div>
+          <div class="f2-step is-dec" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/></svg></span><div class="f2-card"><span class="k">Check</span><b>Enough epochs?</b><p>Sim: 3,000 (image) to 4,500 (state) epochs. Weight EMA kept for evaluation.</p><div class="f2-out"><span class="no">✗ No → next batch</span><span class="yes">✓ Yes → deploy</span></div></div></div>
+            <span class="f2-loop-label">↻ every batch</span>
+          </div>
+          <div class="f2-step is-end" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg></span><div class="f2-card"><span class="k">Finish</span><b>A trained visuomotor policy</b><p>Hyperparameters were mostly the same across tasks — no per-task babysitting.</p></div></div>
+        </div>
+        <div class="f2-stats"><span>T_o <b>2</b> · T_p <b>16</b> · T_a <b>8</b></span><span>K <b>100</b> train steps</span><span>ResNet-18 <b>from scratch</b></span><span>lr <b>1e-4</b> (CNN)</span></div>
+        <figcaption><b>Figure 8.1</b> — Training (paper Section 2, Eq. 5; settings from Section 3 and Appendix).</figcaption>
+      </figure>
+
+      <figure class="flow2">
+        <div class="f2-head"><b>Acting on the robot</b><span>closed loop, ~10 decisions per second</span></div>
+        <div class="f2-track" role="list">
+          <div class="f2-step is-start" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"/><circle cx="12" cy="13.5" r="3.5"/><path d="M8 7l2-3h4l2 3"/></svg></span><div class="f2-card"><span class="k">Sense</span><b>Grab the latest 2 observations</b><p>Scene + wrist cameras and the arm’s own state.</p><code>O_t = encoder(images, state)</code></div></div>
+          <div class="f2-loop">
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h.01M9 4h.01M14 7h.01M19 5h.01M6 11h.01M11 10h.01M17 12h.01M4 16h.01M9 15h.01M14 17h.01M19 18h.01M8 20h.01" stroke-width="3"/></svg><i>1</i></span><div class="f2-card"><span class="k">Seed</span><b>Start the plan as pure noise</b><p>16 random actions — or warm-start from the previous plan’s leftovers.</p><code>A_tᴷ ~ N(0, I)</code></div></div>
+          <div class="f2-step is-net" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="7" r="2"/><circle cx="5" cy="17" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="19" cy="17" r="2"/><path d="M7 7.5l3 3.5M7 16.5l3-3.5M14 11l3-3M14 13l3 3"/></svg><i>2</i></span><div class="f2-card"><span class="k">Denoise</span><b>Refine the plan, ~10 DDIM steps</b><p>Same observation summary reused every step — the image isn’t re-processed.</p><code>A_tᵏ⁻¹ = α(A_tᵏ − γ·ε_θ(O_t, A_tᵏ, k) + noise)</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 17l6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg><i>3</i></span><div class="f2-card"><span class="k">Act</span><b>Execute the first 8 of 16 actions</b><p>Position targets sent at 10 Hz, smoothly interpolated to 125 Hz for the arm.</p><code>a_t, …, a_{t+7}</code></div></div>
+          <div class="f2-step is-dec" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/></svg></span><div class="f2-card"><span class="k">Check</span><b>Task finished?</b><p>The policy itself decides, e.g. by lifting the spoon when done.</p><div class="f2-out"><span class="no">✗ No → sense again, re-plan</span><span class="yes">✓ Yes → stop</span></div></div></div>
+            <span class="f2-loop-label">↻ every 8 steps</span>
+          </div>
+          <div class="f2-step is-end" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg></span><div class="f2-card"><span class="k">Done</span><b>Task complete</b><p>Every re-plan used fresh observations, so bumps and surprises get corrected.</p></div></div>
+        </div>
+        <div class="f2-stats"><span><b>0.1 s</b> per plan · RTX 3080</span><span>DDIM <b>100 → ~10</b> steps</span><span><b>10 Hz</b> → 125 Hz</span></div>
+        <figcaption><b>Figure 8.2</b> — Inference with receding-horizon control (paper Figure 2 and Section 3.4).</figcaption>
+      </figure>
+      <div class="folio"><span>Training &amp; Acting</span><span>8</span></div>
+    </section>
+
+    <!-- CH 9 -->
+    <section class="chapter" id="ch9" data-label="9 · Real-Time">
+      <header class="chapter-head"><span class="num">Chapter 9</span><h2>Making It Fast Enough for a Robot</h2></header>
+      <p class="dropcap">An image generator can take seconds. A robot can’t: it needs a fresh plan many times a second. Four design choices make that possible.</p>
+      <ol>
+        <li><strong>Observation as condition, not output.</strong> The vision encoder runs once per decision; only the small action chunk is denoised repeatedly.</li>
+        <li><strong>DDIM sampling.</strong> DDIM (Song et al., 2021) lets a model trained with 100 noise steps sample with far fewer. The real-world setup used <b>100 training / ~10 inference iterations → 0.1 s latency on an Nvidia RTX 3080</b>.</li>
+        <li><strong>Action chunks hide the delay.</strong> While the robot executes 8 actions, the next plan can be computed; position-control plans stay valid even if they arrive a few steps late.</li>
+        <li><strong>Squared-cosine noise schedule</strong> (from Improved DDPM, Nichol &amp; Dhariwal 2021) worked best empirically for control signals.</li>
+      </ol>
+      <div class="callout note"><div><strong>Position vs. velocity control</strong><p>An action can mean “go <em>to</em> this position” or “move <em>at</em> this velocity.” Most earlier behavior-cloning work used velocity. Diffusion Policy works <em>better</em> with position control (paper Figure 4), while the baselines got worse when switched to position. Two reasons: position commands make the multiple-modes problem sharper (which diffusion handles and others don’t), and position plans don’t accumulate error the way integrated velocities do — ideal for executing chunks.</p></div></div>
+      <div class="folio"><span>Real-Time</span><span>9</span></div>
+    </section>
+
+    <!-- CH 10 -->
+    <section class="chapter" id="ch10" data-label="10 · Why It Works">
+      <header class="chapter-head"><span class="num">Chapter 10</span><h2>Why It Works So Well</h2></header>
+      <h3>10.1 Multiple modes, for free</h3>
+      <p class="dropcap">Where does the “choose left <em>or</em> right” behaviour come from? Two sources of randomness: each plan starts from a different random noise sample, which lands in a different “valley” (mode) of the action landscape; and the small random kicks during denoising let samples settle cleanly into one valley. Because the whole 16-step chunk is denoised <em>together</em>, every action in the chunk agrees on the same valley — that’s the commitment you saw in the Chapter 2 demo.</p>
+
+      <h3>10.2 Sequences fix jitter and pauses</h3>
+      <ul>
+        <li><b>Temporal consistency:</b> methods that sample each step independently (BC-RNN, BET) can alternate between valid routes and jitter.</li>
+        <li><b>Idle-action robustness:</b> a chunk that includes a pause <em>and</em> what comes after it doesn’t get stuck in the pause. Single-step BC-RNN and IBC often froze on the real robot when pauses weren’t filtered out.</li>
+      </ul>
+
+      <h3>10.3 Stable training — the key equation</h3>
+      <p>An implicit policy (IBC) defines action probabilities through an energy E<sub>θ</sub>:</p>
+      <div class="math">\[ p_\theta(\mathbf{a}\mid\mathbf{o}) = \frac{e^{-E_\theta(\mathbf{o},\mathbf{a})}}{Z(\mathbf{o},\theta)} \]</div>
+      <p>The denominator Z adds up e<sup>−E</sup> over <em>every possible action</em> — impossible to compute exactly, so IBC estimates it with a handful of random “negative” actions. That estimate is noisy, which makes training noisy: in the paper’s Figure 6, IBC’s training loss falls smoothly while its actual success rate jumps up and down.</p>
+      <p>Diffusion Policy learns the <strong>score</strong> — the gradient of log-probability with respect to the action:</p>
+      <div class="math">\[ \nabla_{\mathbf{a}} \log p(\mathbf{a}\mid\mathbf{o}) = -\nabla_{\mathbf{a}} E_\theta(\mathbf{a},\mathbf{o}) - \underbrace{\nabla_{\mathbf{a}} \log Z(\mathbf{o},\theta)}_{=\,0} \;\approx\; -\epsilon_\theta(\mathbf{a},\mathbf{o}) \]</div>
+      <div class="callout key"><div><strong>Read it aloud</strong><p>“Z depends only on the observation, not on the action — so its slope with respect to the action is zero, and it simply disappears.” The noise-prediction network approximates the score directly, so neither training nor sampling ever needs Z. Same expressive power as an energy model, none of its instability.</p></div></div>
+      <div class="folio"><span>Why It Works</span><span>10</span></div>
+    </section>
+
+    <!-- CH 11 -->
+    <section class="chapter" id="ch11" data-label="11 · Control Theory">
+      <header class="chapter-head"><span class="num">Chapter 11</span><h2>A Control-Theory Sanity Check</h2></header>
+      <p class="dropcap">The extended paper adds a neat check: what does Diffusion Policy learn in the simplest possible case? Take a <strong>linear system</strong> — the next state is a linear function of the current state and action, plus random disturbance:</p>
+      <div class="math">\[ \mathbf{s}_{t+1} = \mathbf{A}\mathbf{s}_t + \mathbf{B}\mathbf{a}_t + \mathbf{w}_t, \qquad \mathbf{w}_t \sim \mathcal{N}(0, \Sigma_w) \]</div>
+      <p>and suppose the demonstrator is a classic linear feedback controller <i>a<sub>t</sub> = −K s<sub>t</sub></i> (for example the textbook LQR controller). Then:</p>
+      <ul>
+        <li>With a 1-step plan, the optimal denoiser recovers exactly a = −Ks, and DDIM sampling converges to it. Sanity: passed.</li>
+        <li>With a longer plan, predicting action t+t′ requires a<sub>t+t′</sub> = −K(A − BK)<sup>t′</sup>s<sub>t</sub>. In other words, to clone a state-dependent behaviour over a horizon, <strong>the policy must implicitly learn a model of the system’s dynamics</strong> (A and B).</li>
+        <li>If the system or the controller is nonlinear, future actions can become genuinely multimodal again — which is exactly where diffusion earns its keep.</li>
+      </ul>
+      <div class="folio"><span>Control-Theory Check</span><span>11</span></div>
+    </section>
+
+    <!-- CH 12 -->
+    <section class="chapter" id="ch12" data-label="12 · Simulation Results">
+      <header class="chapter-head"><span class="num">Chapter 12</span><h2>Simulation Results</h2></header>
+      <p class="dropcap">The authors tested on <strong>15 tasks from 4 benchmarks</strong> covering 2D to 6D actions, one and two robot arms, rigid objects and liquids, and demonstrations from single and multiple people.</p>
+      <div class="grid-2">
+        <article class="card"><span class="eyebrow">Robomimic</span><h4>Lift · Can · Square · Transport · ToolHang</h4><p>Real human teleop demos. “ph” = proficient human; “mh” = mixed skill levels (harder, messier data). Transport uses two arms; ToolHang needs high precision.</p></article>
+        <article class="card"><span class="eyebrow">Push-T</span><h4>Push a T-shaped block onto a target</h4><p>A round pusher must use point contacts and tricky physics. Scored by how much of the target the T covers.</p></article>
+        <article class="card"><span class="eyebrow">Block Pushing</span><h4>Two blocks, two squares, any order</h4><p>Scripted demos; tests <em>long-horizon</em> multimodality (which block first?).</p></article>
+        <article class="card"><span class="eyebrow">Franka Kitchen</span><h4>7 objects, 4 sub-tasks per demo</h4><p>566 human demos completing sub-tasks in arbitrary order.</p></article>
+      </div>
+      <p>Baselines: <b>LSTM-GMM</b> (BC-RNN, a recurrent mixture-of-Gaussians policy), <b>IBC</b> (implicit/energy-based), and <b>BET</b> (Behavior Transformer, clustering + offsets). Each method got its best action space (velocity for baselines, position for Diffusion Policy). Diffusion Policy comes in CNN (DP-C) and transformer (DP-T) flavours.</p>
+
+      <h3>State-based results (paper Table 1)</h3>
+      <p class="small muted">Success rate as <b>best checkpoint / average of last 10 checkpoints</b>, averaged over 3 training seeds × 50 starting conditions. Push-T reports target coverage. Highest best-checkpoint score in each row is highlighted.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Task</th><th>LSTM-GMM</th><th>IBC</th><th>BET</th><th>DP-C</th><th>DP-T</th></tr></thead>
+        <tbody>
+          <tr><td>Lift ph</td><td>1.00/0.96</td><td>0.79/0.41</td><td>1.00/0.96</td><td>1.00/0.98</td><td class="best">1.00/1.00</td></tr>
+          <tr><td>Lift mh</td><td>1.00/0.93</td><td>0.15/0.02</td><td>1.00/0.99</td><td>1.00/0.97</td><td class="best">1.00/1.00</td></tr>
+          <tr><td>Can ph</td><td>1.00/0.91</td><td>0.00/0.00</td><td>1.00/0.89</td><td>1.00/0.96</td><td class="best">1.00/1.00</td></tr>
+          <tr><td>Can mh</td><td>1.00/0.81</td><td>0.01/0.01</td><td>1.00/0.90</td><td class="best">1.00/0.96</td><td>1.00/0.94</td></tr>
+          <tr><td>Square ph</td><td>0.95/0.73</td><td>0.00/0.00</td><td>0.76/0.52</td><td class="best">1.00/0.93</td><td>1.00/0.89</td></tr>
+          <tr><td>Square mh</td><td>0.86/0.59</td><td>0.00/0.00</td><td>0.68/0.43</td><td class="best">0.97/0.82</td><td>0.95/0.81</td></tr>
+          <tr><td>Transport ph</td><td>0.76/0.47</td><td>0.00/0.00</td><td>0.38/0.14</td><td>0.94/0.82</td><td class="best">1.00/0.84</td></tr>
+          <tr><td>Transport mh</td><td>0.62/0.20</td><td>0.00/0.00</td><td>0.21/0.06</td><td class="best">0.68/0.46</td><td>0.62/0.35</td></tr>
+          <tr><td>ToolHang ph</td><td>0.67/0.31</td><td>0.00/0.00</td><td>0.58/0.20</td><td>0.50/0.30</td><td class="best">1.00/0.87</td></tr>
+          <tr><td>Push-T</td><td>0.67/0.61</td><td>0.90/0.84</td><td>0.79/0.70</td><td class="best">0.95/0.91</td><td>0.95/0.79</td></tr>
+        </tbody>
+      </table></div>
+      <p>The image-based version of the benchmark (paper Table 2) tells the same story, with the biggest gains on the hard tasks — Transport and ToolHang. Averaged across everything, Diffusion Policy improves success by <strong>46.9%</strong> over the best prior method.</p>
+
+      <h3>Long-horizon multimodality</h3>
+      <p>On tasks where the <em>order</em> of sub-goals varies, the gains are largest: <b>+32%</b> on Block Pushing’s p2 metric (both blocks pushed in) and <b>+213%</b> on Kitchen’s p4 metric (4 objects interacted with).</p>
+
+      <h3>Ablations worth remembering</h3>
+      <ul>
+        <li><b>Action horizon:</b> 8 steps is the sweet spot (Chapter 6).</li>
+        <li><b>Latency:</b> no loss in performance with up to 4 steps of delay; velocity control suffers more.</li>
+        <li><b>Training stability:</b> the best hyperparameters were mostly the same across tasks; IBC needed checkpoint hunting.</li>
+      </ul>
+      <div class="folio"><span>Simulation Results</span><span>12</span></div>
+    </section>
+
+    <!-- CH 13 -->
+    <section class="chapter" id="ch13" data-label="13 · Real Robots">
+      <header class="chapter-head"><span class="num">Chapter 13</span><h2>On Real Robots</h2></header>
+      <h3>13.1 Real Push-T (UR5 arm)</h3>
+      <p class="dropcap">Harder than the simulated version: the robot must push the T precisely onto the target, make fine corrections, <em>then</em> move to an end zone so it isn’t blocking the scoring camera. Success = final overlap (IoU) at least as good as the worst human demo.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Policy</th><th>IoU ↑</th><th>Success ↑</th><th>Duration (s)</th></tr></thead>
+        <tbody>
+          <tr><td>Human demonstrations</td><td>0.84</td><td>100%</td><td>20.3</td></tr>
+          <tr><td>IBC (position / velocity)</td><td>0.14 / 0.19</td><td>0% / 0%</td><td>56.3 / 41.6</td></tr>
+          <tr><td>LSTM-GMM (position / velocity)</td><td>0.24 / 0.25</td><td>20% / 10%</td><td>47.3 / 51.7</td></tr>
+          <tr><td>DP — transformer, end-to-end</td><td>0.53</td><td>65%</td><td>57.5</td></tr>
+          <tr><td>DP — CNN, frozen ImageNet encoder</td><td>0.24</td><td>15%</td><td>55.8</td></tr>
+          <tr><td>DP — CNN, R3M encoder</td><td>0.66</td><td>80%</td><td>31.7</td></tr>
+          <tr><td><b>DP — CNN, end-to-end</b></td><td class="best">0.80</td><td class="best">95%</td><td>22.9</td></tr>
+        </tbody>
+      </table></div>
+      <p>Near-human quality and speed. Typical baseline failures happened at the transition between stages: LSTM-GMM got stuck near the T in 8 of 20 runs; IBC left the T too early in 6 of 20.</p>
+      <div class="callout tip"><div><strong>Robustness tests (paper Figure 8)</strong><p>(1) A hand waved in front of the camera for 3 seconds — slight jitter, task still completed. (2) The T was shoved during fine adjustment — the policy immediately re-planned and pushed from the other side. (3) The T was moved after the robot had finished and was heading to the end zone — it turned back, fixed the T, then continued. That last behaviour was <em>never demonstrated</em>.</p></div></div>
+
+      <h3>13.2 Mug flipping (6-DoF)</h3>
+      <p>Pick up a randomly placed mug, put it lip-down, handle pointing left — near the arm’s joint limits, with many valid strategies (grasp vs push, forehand vs backhand). <b>Diffusion Policy: 90%</b> over 20 trials, including undemonstrated re-grasps. LSTM-GMM: failed to grasp in every trial.</p>
+
+      <h3>13.3 Sauce pouring &amp; spreading (Franka arm)</h3>
+      <p>Liquids, a long idle pause while the ladle fills, a spiral spreading motion, and the need to stop on its own. Trained with the <em>same hyperparameters as Push-T</em> and worked first try. Coverage: <b>0.74 vs human 0.79</b> (pouring) and <b>0.77 vs 0.79</b> (spreading). LSTM-GMM failed to lift the ladle in 15 of 20 pours and never stopped on its own.</p>
+
+      <h3>13.4 Two-armed tasks</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Task</th><th>Demos</th><th>Success (20 trials)</th><th>Note</th></tr></thead>
+        <tbody>
+          <tr><td>Egg beater</td><td>210</td><td>55%</td><td>Needed haptic teleoperation: without force feedback the expert failed 10/10 demos.</td></tr>
+          <tr><td>Mat unrolling</td><td>162</td><td>75%</td><td>Unrolls either left or right depending on the start.</td></tr>
+          <tr><td>Shirt folding</td><td>284</td><td>75%</td><td>Up to 9 steps; arms work very close together.</td></tr>
+        </tbody>
+      </table></div>
+      <p>No hyperparameter tuning was needed for these — the effort went into building two-arm teleoperation (VR controllers and haptic devices).</p>
+      <div class="folio"><span>Real Robots</span><span>13</span></div>
+    </section>
+
+    <!-- CH 14 -->
+    <section class="chapter" id="ch14" data-label="14 · Limits & Legacy">
+      <header class="chapter-head"><span class="num">Chapter 14</span><h2>Limits &amp; Legacy</h2></header>
+      <h3>Limitations the authors list</h3>
+      <ul>
+        <li><b>It is still behavior cloning:</b> it can only be as good as the demonstrations, and needs enough of them. It doesn’t learn from failures or rewards (though diffusion policies can be combined with reinforcement learning).</li>
+        <li><b>Compute and latency:</b> heavier than an LSTM-GMM. Action chunks hide much of it, but very high-rate control may still need faster samplers — e.g. consistency models or better ODE solvers.</li>
+      </ul>
+      <h3>Why it mattered</h3>
+      <p class="dropcap">Diffusion Policy turned “diffusion for robots” from an idea into a default. Its recipe — <strong>predict action chunks, condition on observations, run receding-horizon, use position control</strong> — became a standard starting point for imitation learning. Later systems built on it or its ideas, for example:</p>
+      <ul>
+        <li><b>UMI</b> (Universal Manipulation Interface, Chi et al. 2024) — hand-held grippers for collecting demos in the wild, trained with Diffusion Policy.</li>
+        <li><b>Octo</b> (2024) — an open generalist robot policy using a diffusion action head.</li>
+        <li><b>π0</b> (Physical Intelligence, 2024) — a vision-language-action model that generates action chunks with flow matching, a close cousin of diffusion.</li>
+      </ul>
+      <p class="small muted">(This list is background beyond the paper itself.)</p>
+      <div class="folio"><span>Limits &amp; Legacy</span><span>14</span></div>
+    </section>
+
+    <!-- CH 15 -->
+    <section class="chapter" id="ch15" data-label="15 · Recap & Quiz">
+      <header class="chapter-head"><span class="num">Chapter 15</span><h2>Recap &amp; Quiz</h2></header>
+      <h3>Eight-line recap</h3>
+      <ol>
+        <li>Behavior cloning copies human demos — but humans solve tasks in more than one way.</li>
+        <li>Averaging those ways crashes; picking a way each instant jitters.</li>
+        <li>Diffusion Policy generates actions the way DDPM generates images: start from noise, denoise step by step.</li>
+        <li>It denoises a whole chunk of 16 future actions, conditioned on the latest 2 observations.</li>
+        <li>It executes 8, then re-plans — receding-horizon control: smooth <em>and</em> responsive.</li>
+        <li>Learning the score (gradient) avoids the normalising constant Z, so training is stable.</li>
+        <li>Visual encoder trained end-to-end; DDIM gives ~0.1 s plans; position control works best.</li>
+        <li>Result: +46.9% on average across 15 tasks, and strong real-robot skills from pushing to shirt folding.</li>
+      </ol>
+
+      <h3>Check yourself</h3>
+      <details class="q"><summary>What exactly is being “diffused” in Diffusion Policy?</summary><div>A sequence of future robot actions A<sub>t</sub> (e.g. 16 steps of end-effector poses and gripper widths) — not images. Observations are used as conditioning, not generated.</div></details>
+      <details class="q"><summary>Why does an averaging (regression) policy fail on multimodal demos?</summary><div>Squared-error training learns the mean of the demonstrated actions. If half go left and half go right, the mean goes straight — often into the obstacle, an action no human ever took.</div></details>
+      <details class="q"><summary>What do T<sub>o</sub>, T<sub>p</sub> and T<sub>a</sub> stand for, and their typical values?</summary><div>Observation horizon (2), prediction horizon (16) and action execution horizon (8). The robot plans 16, executes 8, then re-plans.</div></details>
+      <details class="q"><summary>Why is training more stable than IBC?</summary><div>IBC must estimate the intractable normaliser Z with negative samples. Diffusion Policy learns the score ∇<sub>a</sub> log p(a|o), in which ∇<sub>a</sub> log Z vanishes because Z doesn’t depend on the action — so Z never needs estimating.</div></details>
+      <details class="q"><summary>Why condition on observations instead of generating them jointly?</summary><div>The encoder runs once per decision instead of once per denoising step, making inference fast enough for real-time control and making end-to-end vision training practical.</div></details>
+      <details class="q"><summary>Which action space worked best, and why is that surprising?</summary><div>Position control. Most prior BC work used velocity control, and baselines got worse with position control; Diffusion Policy handles position control’s sharper multimodality and benefits from its lower compounding error.</div></details>
+      <details class="q"><summary>CNN or transformer backbone — which should you try first?</summary><div>The CNN (with FiLM conditioning): it works out of the box. Use the transformer for complex tasks with rapid action changes, expecting more tuning.</div></details>
+
+      <h3>Glossary</h3>
+      <dl class="gloss">
+        <dt>Behavior cloning (BC)</dt><dd>Supervised learning of a policy from demonstration (observation, action) pairs.</dd>
+        <dt>Visuomotor policy</dt><dd>A policy mapping camera images (plus robot state) directly to motor commands.</dd>
+        <dt>Multimodal distribution</dt><dd>A distribution with several separate peaks — several distinct correct answers.</dd>
+        <dt>Explicit / implicit policy</dt><dd>Outputs actions directly / scores actions with an energy function and searches for the best.</dd>
+        <dt>Energy-based model (EBM), Z</dt><dd>Assigns low energy to likely inputs; Z is the normaliser summing over all inputs, usually intractable.</dd>
+        <dt>Score function</dt><dd>∇ log p: an arrow field pointing toward more probable actions.</dd>
+        <dt>Langevin dynamics</dt><dd>Sampling by following the score with small random kicks.</dd>
+        <dt>Receding-horizon control</dt><dd>Plan ahead, execute only the first part, re-plan with new information.</dd>
+        <dt>FiLM</dt><dd>Conditioning by letting an input scale and shift each feature channel of a network.</dd>
+        <dt>DDIM</dt><dd>A faster sampler that uses fewer denoising steps than the model was trained with.</dd>
+        <dt>Proprioception</dt><dd>The robot’s sense of its own joint/gripper positions.</dd>
+        <dt>Teleoperation</dt><dd>A human remotely driving the robot to record demonstrations.</dd>
+      </dl>
+      <nav class="pager" aria-label="Chapter navigation">
+        <a href="../ddpm-2006.11239/"><small>Prerequisite</small>DDPM explainer</a>
+        <a class="next" href="https://arxiv.org/pdf/2303.04137"><small>Next</small>Read the original paper</a>
+      </nav>
+      <div class="folio"><span>Recap &amp; Quiz</span><span>15</span></div>
+    </section>
+  </main>
+</div>
+
+<script src="../folio.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true}]})"></script>
+<script>
+(() => {
+  /* ---- horizon timeline (T_o = 2, T_p = 16, T_a = 8) ---- */
+  const g = document.getElementById('hzGrid');
+  const cols = 18; // t-1 … t+16
+  const cell = (cls, txt = '') => { const e = document.createElement(cls ? 'i' : 'span'); if (cls) e.className = cls; else e.textContent = txt; return e; };
+  const label = t => Object.assign(document.createElement('span'), { className: 'lbl', textContent: t });
+  g.append(label('step'));
+  for (let c = 0; c < cols; c++) { const off = c - 1; const s = document.createElement('span'); s.className = 'tk' + (off === 0 ? ' now' : ''); s.textContent = off === 0 ? 't' : ([-1, 4, 8, 12, 16].includes(off) ? (off > 0 ? '+' + off : off) : ''); g.append(s); }
+  const row = (name, fn) => { g.append(label(name)); for (let c = 0; c < cols; c++) g.append(cell(fn(c - 1) || 'x')); };
+  row('observe', o => (o === -1 || o === 0) && 'o');
+  row('plan', o => (o >= 0 && o < 16) && 'p');
+  row('execute', o => (o >= 0 && o < 8) && 'a');
+  row('next plan', o => o >= 8 && 'n');
+  g.querySelectorAll('i.x').forEach(e => e.className = '');
+
+  /* ---- mode-collapse toy: average vs per-step sampling vs chunked diffusion-style plans ---- */
+  const cv = document.getElementById('modeCanvas'), ctx = cv.getContext('2d');
+  const W = 600, H = 360, dpr = Math.min(window.devicePixelRatio || 1, 2);
+  cv.width = W * dpr; cv.height = H * dpr; ctx.scale(dpr, dpr);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const START = { x: 300, y: 330 }, GOAL = { x: 300, y: 36 }, OB = { x: 240, y: 150, w: 120, h: 70 };
+  const STEP_Y = 5, LAT = 8, BAND = 40, TP = 16, TA = 8;
+  const route = (side, y) => 300 + side * 130 * Math.sin(Math.PI * Math.min(1, Math.max(0, (330 - y) / 294)));
+  const hit = p => p.x > OB.x - 6 && p.x < OB.x + OB.w + 6 && p.y > OB.y - 6 && p.y < OB.y + OB.h + 6;
+  const pickSide = x => Math.abs(x - 300) > BAND ? Math.sign(x - 300) : (Math.random() < .5 ? -1 : 1);
+  const move = (p, tx) => ({ x: p.x + Math.max(-LAT, Math.min(LAT, tx - p.x)), y: p.y - STEP_Y });
+  const tally = { left: 0, right: 0, crash: 0 };
+  let mode = 'avg', timer = null;
+
+  function scene(trail = [], plan = [], crashed = false) {
+    ctx.clearRect(0, 0, W, H);
+    ctx.fillStyle = css('--sheet'); ctx.fillRect(0, 0, W, H);
+    ctx.setLineDash([6, 6]); ctx.lineWidth = 2; ctx.strokeStyle = css('--rule');
+    for (const s of [-1, 1]) { ctx.beginPath(); for (let y = 330; y >= 36; y -= 4) ctx.lineTo(route(s, y), y); ctx.stroke(); }
+    ctx.setLineDash([]);
+    ctx.fillStyle = css('--gold'); ctx.beginPath(); ctx.roundRect(OB.x, OB.y, OB.w, OB.h, 8); ctx.fill();
+    ctx.fillStyle = '#FFFCF6'; ctx.font = '600 18px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('block', 300, OB.y + OB.h / 2 + 5);
+    ctx.fillStyle = css('--sage'); ctx.beginPath(); ctx.arc(GOAL.x, GOAL.y, 14, 0, 7); ctx.fill();
+    ctx.fillStyle = css('--ink-faint'); ctx.font = '500 17px Inter, sans-serif'; ctx.fillText('goal', GOAL.x + 44, GOAL.y + 4); ctx.fillText('start', START.x + 46, START.y + 4);
+    ctx.fillText('demo: left', 105, 200); ctx.fillText('demo: right', 495, 200);
+    if (plan.length) { ctx.strokeStyle = css('--oxblood'); ctx.globalAlpha = .3; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath(); plan.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke(); ctx.globalAlpha = 1; }
+    ctx.strokeStyle = css('--slate'); ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.beginPath(); trail.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke();
+    const p = trail[trail.length - 1] || START;
+    ctx.fillStyle = crashed ? css('--brick') : css('--slate'); ctx.beginPath(); ctx.arc(p.x, p.y, 9, 0, 7); ctx.fill();
+    if (crashed) { ctx.strokeStyle = '#FFFCF6'; ctx.lineWidth = 2.5; ctx.beginPath(); ctx.moveTo(p.x - 4, p.y - 4); ctx.lineTo(p.x + 4, p.y + 4); ctx.moveTo(p.x + 4, p.y - 4); ctx.lineTo(p.x - 4, p.y + 4); ctx.stroke(); }
+  }
+
+  const msg = document.getElementById('modeMsg'), tallyEl = document.getElementById('modeTally');
+  const showTally = () => tallyEl.textContent = `Diffusion Policy runs so far — went left: ${tally.left} · went right: ${tally.right}. Crashes (all policies): ${tally.crash}.`;
+
+  function run() {
+    clearInterval(timer);
+    let p = { ...START }; const trail = [p]; let plan = [], k = 0, flips = 0, lastSide = 0;
+    msg.innerHTML = '<b>Running…</b>';
+    timer = setInterval(() => {
+      if (mode === 'avg') p = move(p, 300);
+      else if (mode === 'step') { const s = pickSide(p.x); if (lastSide && s !== lastSide) flips++; lastSide = s; p = move(p, route(s, p.y - STEP_Y)); }
+      else {
+        if (k % TA === 0) { // re-plan: sample one side for the whole 16-step chunk
+          const s = pickSide(p.x); lastSide = s; plan = [p]; let q = p;
+          for (let i = 0; i < TP; i++) { q = move(q, route(s, q.y - STEP_Y)); plan.push(q); }
+        }
+        p = plan[(k % TA) + 1]; k++;
+      }
+      trail.push(p);
+      const crashed = hit(p), done = p.y <= GOAL.y + 6;
+      scene(trail, mode === 'dp' ? plan : [], crashed);
+      if (crashed || done) {
+        clearInterval(timer);
+        if (crashed) { tally.crash++; msg.innerHTML = mode === 'avg' ? '<b>Crashed.</b> The average of “left” and “right” is “straight into the block.”' : `<b>Crashed.</b> Switched sides ${flips}× — never committed.`; }
+        else { msg.innerHTML = mode === 'dp' ? `<b>Reached the goal</b> going ${trail[Math.floor(trail.length / 2)].x < 300 ? 'left' : 'right'} — committed for the whole chunk.` : '<b>Reached the goal</b> this time — run again; it usually doesn’t.'; }
+        if (mode === 'dp' && !crashed) tally[trail[Math.floor(trail.length / 2)].x < 300 ? 'left' : 'right']++;
+        showTally();
+      }
+    }, 40);
+  }
+
+  document.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+    mode = b.dataset.mode;
+    document.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', x === b));
+    clearInterval(timer); scene(); msg.textContent = 'Press run.';
+  }));
+  document.getElementById('modeRun').addEventListener('click', run);
+  scene(); showTally();
+
+  // self-check: the averaging policy must hit the block; the chunked planner must clear it
+  (() => { let q = { ...START }; while (!hit(q) && q.y > GOAL.y) q = move(q, 300); console.assert(hit(q), 'avg policy should crash');
+           let r = { ...START }, ok = true; while (r.y > GOAL.y + 6) { r = move(r, route(1, r.y - STEP_Y)); if (hit(r)) { ok = false; break; } } console.assert(ok, 'committed route should clear the block'); })();
+})();
+</script>
+</body>
+</html>

@@ -277,3 +277,88 @@ th .nt { text-transform: none; letter-spacing: 0; }
   .chapter { break-before: page; }
   a { color: inherit; }
 }
+
+/* ============ 9. FLOW v2 — modern timeline flowchart ============ */
+/* Markup: .flow2 > .f2-track > (.f2-step | .f2-phase | .f2-loop > ...).
+   Step colour via .is-start/.is-proc/.is-net/.is-dec/.is-end. */
+.flow2 {
+  --f2-badge: 40px; --f2-gap: 14px; --f2-rail: 40px;
+  position: relative; margin: var(--s6) 0; padding: var(--s5) var(--s4);
+  background:
+    radial-gradient(circle at 1px 1px, rgba(110,100,87,.16) 1px, transparent 0) 0 0 / 18px 18px,
+    linear-gradient(180deg, var(--sheet) 0%, var(--sheet-alt) 100%);
+  border: 1px solid var(--rule); border-radius: var(--radius-lg); font-family: var(--sans);
+}
+.f2-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: var(--s2); margin-bottom: var(--s5); }
+.f2-head b { font: 600 var(--fs-sm) var(--sans); color: var(--ink); }
+.f2-head span { font: var(--fs-xs) var(--mono); color: var(--ink-faint); }
+.f2-track { position: relative; display: grid; gap: var(--f2-gap); padding-right: var(--f2-rail); }
+/* spine + travelling pulse */
+.f2-track::before {
+  content: ""; position: absolute; left: calc(var(--f2-badge) / 2 - 1px); top: 20px; bottom: 20px; width: 2px;
+  background: linear-gradient(var(--sage), var(--slate) 30%, var(--oxblood) 55%, var(--gold) 80%, var(--brick));
+  opacity: .55; border-radius: 2px;
+}
+.f2-track::after {
+  content: ""; position: absolute; left: calc(var(--f2-badge) / 2 - 5px); top: 20px; width: 10px; height: 10px; border-radius: 50%;
+  background: var(--oxblood); box-shadow: 0 0 0 4px var(--oxblood-tint), 0 0 14px rgba(142,47,42,.45);
+  animation: f2-run 7s cubic-bezier(.45,.05,.55,.95) infinite;
+}
+@keyframes f2-run { 0% { top: 20px; opacity: 0; } 6% { opacity: 1; } 94% { opacity: 1; } 100% { top: calc(100% - 30px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .f2-track::after { display: none; } }
+
+.f2-step { --c: var(--slate); --t: var(--slate-tint); position: relative; display: grid; grid-template-columns: var(--f2-badge) 1fr; gap: var(--s3); align-items: start; }
+.f2-step.is-start { --c: var(--sage); --t: var(--sage-tint); }
+.f2-step.is-net   { --c: var(--oxblood); --t: var(--oxblood-tint); }
+.f2-step.is-dec   { --c: var(--gold); --t: var(--gold-tint); }
+.f2-step.is-end   { --c: var(--brick); --t: var(--oxblood-tint); }
+.f2-badge {
+  position: relative; z-index: 1; width: var(--f2-badge); height: var(--f2-badge); border-radius: 12px;
+  display: grid; place-items: center; background: var(--sheet); color: var(--c);
+  border: 1.5px solid var(--c); box-shadow: 0 0 0 4px var(--sheet), var(--shadow-card);
+}
+.is-start .f2-badge, .is-end .f2-badge { border-radius: 50%; background: var(--c); color: #FFFCF6; }
+.is-dec .f2-badge { transform: rotate(45deg); border-radius: 9px; width: 34px; height: 34px; margin: 3px; }
+.is-dec .f2-badge svg { transform: rotate(-45deg); }
+.f2-badge svg { width: 20px; height: 20px; }
+.f2-badge i { position: absolute; right: -7px; top: -7px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 9px; background: var(--c); color: #FFFCF6; font: 600 10px/18px var(--sans); font-style: normal; text-align: center; }
+.is-dec .f2-badge i { transform: rotate(-45deg); }
+.f2-card {
+  min-width: 0; background: var(--sheet); border: 1px solid var(--rule); border-radius: 12px;
+  padding: var(--s3) var(--s4); box-shadow: var(--shadow-card); position: relative; overflow: hidden;
+  transition: transform .2s, box-shadow .2s, border-color .2s;
+}
+.f2-card::before { content: ""; position: absolute; inset: 0 auto 0 0; width: 3px; background: var(--c); }
+@media (hover: hover) { .f2-card:hover { transform: translateX(3px); border-color: var(--c); box-shadow: 0 8px 24px -10px rgba(60,45,25,.3); } }
+.f2-card .k { display: block; font: 600 10.5px/1.4 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--c); margin-bottom: 2px; }
+.f2-card b { display: block; font: 600 var(--fs-sm)/1.35 var(--sans); color: var(--ink); }
+.f2-card p { margin: 3px 0 0; font-size: 13px; line-height: 1.5; color: var(--ink-soft); }
+.f2-card code { display: inline-block; margin-top: var(--s2); max-width: 100%; overflow-wrap: anywhere; background: var(--t); color: var(--ink); border-radius: 6px; padding: 3px 9px; font: italic 13.5px/1.5 var(--serif); }
+.is-net .f2-card { background: linear-gradient(135deg, var(--sheet) 60%, var(--oxblood-tint)); }
+.f2-out { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); }
+.f2-out span { font: 500 12px/1 var(--sans); padding: 6px 10px; border-radius: 999px; }
+.f2-out .no { background: var(--gold-tint); color: #7D5D1F; }
+.f2-out .yes { background: var(--sage-tint); color: var(--sage); }
+
+.f2-phase { display: flex; align-items: center; gap: var(--s2); margin: var(--s2) 0 calc(var(--s1) * -1) calc(var(--f2-badge) + var(--s3)); font: 600 10.5px var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-faint); }
+.f2-phase::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--rule), transparent); }
+
+/* loop rail on the right: from the decision back up to the first looped step */
+.f2-loop { position: relative; display: grid; gap: var(--f2-gap); }
+.f2-loop::before {
+  content: ""; position: absolute; top: 20px; bottom: 20px; right: calc(var(--f2-rail) * -1 + 10px); width: calc(var(--f2-rail) - 16px);
+  border: 2px dashed var(--gold); border-left: 0; border-radius: 0 16px 16px 0;
+}
+.f2-loop::after { /* arrowhead pointing back into the first step */
+  content: ""; position: absolute; top: 15px; right: -14px;
+  border: 6px solid transparent; border-right: 8px solid var(--gold);
+}
+.f2-loop-label {
+  position: absolute; top: 50%; right: calc(var(--f2-rail) * -1 + 14px); transform: translateY(-50%);
+  writing-mode: vertical-rl; background: var(--gold); color: #FFFCF6; font: 600 10.5px var(--sans); letter-spacing: .08em;
+  padding: 8px 3px; border-radius: 999px; white-space: nowrap;
+}
+.f2-stats { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s5); padding-top: var(--s4); border-top: 1px dashed var(--rule); }
+.f2-stats span { font: 500 11.5px var(--mono); color: var(--ink-soft); background: var(--sheet); border: 1px solid var(--rule); border-radius: 999px; padding: 4px 10px; }
+.f2-stats b { color: var(--oxblood); font-weight: 600; }
+@media (max-width: 420px) { .flow2 { --f2-badge: 34px; --f2-rail: 32px; padding: var(--s4) var(--s3); } .f2-badge svg { width: 17px; height: 17px; } }

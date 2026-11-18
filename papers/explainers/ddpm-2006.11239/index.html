@@ -229,34 +229,28 @@ dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-s
     <section class="chapter" id="ch6" data-label="6 · Training">
       <header class="chapter-head"><span class="num">Chapter 6</span><h2>Training: A Guessing Game</h2></header>
       <p class="dropcap">Training is astonishingly simple — this simplicity is a big part of why the paper mattered. It is a game played millions of times: hide some known noise in a real image, ask the network to find it, score its answer.</p>
-      <figure class="flow">
-        <svg viewBox="0 0 360 880" role="img" aria-labelledby="ft1">
-          <title id="ft1">Training loop: pick an image, step and noise; mix; network guesses noise; measure error; update weights; repeat until good enough.</title>
-          <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6E6457"/></marker></defs>
-          <rect x="120" y="20" width="120" height="44" rx="22" class="fc-start"/><text x="180" y="42" class="fc-label">Start</text>
-          <path d="M180,64 V100" class="fc-edge" marker-end="url(#arr)"/>
-          <rect x="60" y="100" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="124" class="fc-label">Pick a real image x₀</text>
-          <path d="M180,148 V184" class="fc-edge" marker-end="url(#arr)"/>
-          <rect x="60" y="184" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="208" class="fc-label">Pick a random step t (1…1000)</text>
-          <path d="M180,232 V268" class="fc-edge" marker-end="url(#arr)"/>
-          <rect x="60" y="268" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="292" class="fc-label">Draw random noise ε</text>
-          <path d="M180,316 V352" class="fc-edge" marker-end="url(#arr)"/>
-          <rect x="60" y="352" width="240" height="60" rx="4" class="fc-process"/><text x="180" y="372" class="fc-label">Mix them into a noisy image</text><text x="180" y="394" class="fc-label">xₜ = √ᾱₜ·x₀ + √(1−ᾱₜ)·ε</text>
-          <path d="M180,412 V448" class="fc-edge" marker-end="url(#arr)"/>
-          <rect x="60" y="448" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="472" class="fc-label">Network guesses the noise ε̂</text>
-          <path d="M180,496 V532" class="fc-edge" marker-end="url(#arr)"/>
-          <rect x="60" y="532" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="556" class="fc-label">Error = ‖ε − ε̂‖²</text>
-          <path d="M180,580 V616" class="fc-edge" marker-end="url(#arr)"/>
-          <rect x="60" y="616" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="640" class="fc-label">Nudge weights to shrink error</text>
-          <path d="M180,664 V700" class="fc-edge" marker-end="url(#arr)"/>
-          <path d="M180,700 L270,750 L180,800 L90,750 Z" class="fc-decision"/><text x="180" y="750" class="fc-label">Good enough?</text>
-          <path d="M90,750 H30 V124 H60" class="fc-edge" marker-end="url(#arr)"/>
-          <text x="38" y="742" class="fc-edge-label">No</text>
-          <path d="M180,800 V830" class="fc-edge" marker-end="url(#arr)"/>
-          <text x="190" y="822" class="fc-edge-label">Yes</text>
-          <rect x="120" y="830" width="120" height="44" rx="22" class="fc-end"/><text x="180" y="852" class="fc-label">Done</text>
-        </svg>
-        <figcaption><b>Figure 6.1</b> — Algorithm 1 from the paper, as a flowchart.</figcaption>
+      <figure class="flow2">
+        <div class="f2-head"><b>Algorithm 1 · Training</b><span>one iteration ≈ 1/21 s on TPU</span></div>
+        <div class="f2-track" role="list">
+          <div class="f2-step is-start" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg></span><div class="f2-card"><span class="k">Begin</span><b>Start with an untrained U-Net</b><p>Weights are random — it knows nothing about images yet.</p></div></div>
+          <div class="f2-loop">
+          <div class="f2-phase" aria-hidden="true">① Build a practice puzzle</div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/></svg><i>1</i></span><div class="f2-card"><span class="k">Data</span><b>Pick a real image</b><p>Any training photo; pixels scaled from 0…255 to −1…1.</p><code>x₀ ~ q(x₀)</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="9" cy="9" r="1.2" fill="currentColor"/><circle cx="15" cy="15" r="1.2" fill="currentColor"/><circle cx="15" cy="9" r="1.2" fill="currentColor"/><circle cx="9" cy="15" r="1.2" fill="currentColor"/></svg><i>2</i></span><div class="f2-card"><span class="k">Noise level</span><b>Pick a random step</b><p>Uniform over all 1,000 steps, so every noise level gets practice.</p><code>t ~ Uniform{1, …, 1000}</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h.01M9 4h.01M14 7h.01M19 5h.01M6 11h.01M11 10h.01M17 12h.01M4 16h.01M9 15h.01M14 17h.01M19 18h.01M8 20h.01" stroke-width="3"/></svg><i>3</i></span><div class="f2-card"><span class="k">Noise</span><b>Draw fresh static</b><p>A noise image the same size as the photo.</p><code>ε ~ N(0, I)</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg><i>4</i></span><div class="f2-card"><span class="k">Shortcut</span><b>Blend in one jump</b><p>No 1,000-step loop — the Chapter 4 formula lands straight on step t.</p><code>xₜ = √ᾱₜ·x₀ + √(1−ᾱₜ)·ε</code></div></div>
+          <div class="f2-phase" aria-hidden="true">② Ask the network</div>
+          <div class="f2-step is-net" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="7" r="2"/><circle cx="5" cy="17" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="19" cy="17" r="2"/><path d="M7 7.5l3 3.5M7 16.5l3-3.5M14 11l3-3M14 13l3 3"/></svg><i>5</i></span><div class="f2-card"><span class="k">The only learned part</span><b>Network guesses the hidden noise</b><p>The U-Net sees the noisy image and the step number t.</p><code>ε̂ = ε_θ(xₜ, t)</code></div></div>
+          <div class="f2-phase" aria-hidden="true">③ Learn from the mistake</div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor"/></svg><i>6</i></span><div class="f2-card"><span class="k">Score</span><b>Measure how wrong it was</b><p>Squared difference between real and guessed noise, every pixel.</p><code>L_simple = ‖ε − ε̂‖²</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg><i>7</i></span><div class="f2-card"><span class="k">Update</span><b>Nudge the weights</b><p>One gradient step with Adam (learning rate 2×10⁻⁴); a slow-moving average of weights (EMA 0.9999) is kept for sampling.</p><code>θ ← θ − lr·∇θ L</code></div></div>
+          <div class="f2-step is-dec" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/></svg></span><div class="f2-card"><span class="k">Check</span><b>Good enough yet?</b><p>Watch sample quality as training goes on.</p><div class="f2-out"><span class="no">✗ Not yet → back to ①</span><span class="yes">✓ Yes → finish</span></div></div></div>
+            <span class="f2-loop-label">↻ repeat ~800,000×</span>
+          </div>
+          <div class="f2-step is-end" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg></span><div class="f2-card"><span class="k">Finish</span><b>A trained noise-predictor ε_θ</b><p>Ready to turn pure static into new images (next chapter).</p></div></div>
+        </div>
+        <div class="f2-stats"><span><b>800k</b> steps</span><span>batch <b>128</b></span><span><b>10.6 h</b> on TPU v3-8</span><span><b>35.7M</b> weights</span></div>
+        <figcaption><b>Figure 6.1</b> — Algorithm 1 from the paper (CIFAR-10 numbers from Appendix B).</figcaption>
       </figure>
       <p>The score being minimised is called <strong>L<sub>simple</sub></strong>:</p>
       <div class="math">\[ L_{\text{simple}} = \mathbb{E}_{t,\,x_0,\,\epsilon}\Big[\, \big\| \epsilon - \epsilon_\theta\big(\sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon,\ t\big) \big\|^2 \Big] \]</div>
@@ -276,28 +270,22 @@ dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-s
     <section class="chapter" id="ch7" data-label="7 · Sampling">
       <header class="chapter-head"><span class="num">Chapter 7</span><h2>Making New Images (Sampling)</h2></header>
       <p class="dropcap">Once trained, generating an image — called <strong>sampling</strong> — means starting with pure random static and asking the network to clean it, one step at a time, a thousand times.</p>
-      <figure class="flow">
-        <svg viewBox="0 0 360 640" role="img" aria-labelledby="ft2">
-          <title id="ft2">Sampling loop: start from noise, set t to 1000, predict noise, remove it and add a small kick, decrease t, repeat until t is zero.</title>
-          <defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6E6457"/></marker></defs>
-          <rect x="70" y="20" width="220" height="44" rx="22" class="fc-start"/><text x="180" y="42" class="fc-label">Start: pure static x_T</text>
-          <path d="M180,64 V100" class="fc-edge" marker-end="url(#arr2)"/>
-          <rect x="60" y="100" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="124" class="fc-label">Set t = 1000</text>
-          <path d="M180,148 V184" class="fc-edge" marker-end="url(#arr2)"/>
-          <rect x="60" y="184" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="208" class="fc-label">Network predicts noise ε̂(xₜ, t)</text>
-          <path d="M180,232 V268" class="fc-edge" marker-end="url(#arr2)"/>
-          <rect x="60" y="268" width="240" height="60" rx="4" class="fc-process"/><text x="180" y="288" class="fc-label">Subtract a slice of that noise,</text><text x="180" y="310" class="fc-label">add a small random kick</text>
-          <path d="M180,328 V364" class="fc-edge" marker-end="url(#arr2)"/>
-          <rect x="60" y="364" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="388" class="fc-label">t = t − 1</text>
-          <path d="M180,412 V448" class="fc-edge" marker-end="url(#arr2)"/>
-          <path d="M180,448 L270,498 L180,548 L90,498 Z" class="fc-decision"/><text x="180" y="498" class="fc-label">t = 0?</text>
-          <path d="M90,498 H30 V208 H60" class="fc-edge" marker-end="url(#arr2)"/>
-          <text x="38" y="490" class="fc-edge-label">No</text>
-          <path d="M180,548 V580" class="fc-edge" marker-end="url(#arr2)"/>
-          <text x="190" y="572" class="fc-edge-label">Yes</text>
-          <rect x="70" y="580" width="220" height="44" rx="22" class="fc-end"/><text x="180" y="602" class="fc-label">Done: a new image x₀</text>
-        </svg>
-        <figcaption><b>Figure 7.1</b> — Algorithm 2 from the paper, as a flowchart.</figcaption>
+      <figure class="flow2">
+        <div class="f2-head"><b>Algorithm 2 · Sampling</b><span>1,000 network calls per image</span></div>
+        <div class="f2-track" role="list">
+          <div class="f2-step is-start" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h.01M9 4h.01M14 7h.01M19 5h.01M6 11h.01M11 10h.01M17 12h.01M4 16h.01M9 15h.01M14 17h.01M19 18h.01M8 20h.01" stroke-width="3"/></svg></span><div class="f2-card"><span class="k">Begin</span><b>Start from pure static</b><p>No picture at all — just random numbers.</p><code>x_T ~ N(0, I),  T = 1000</code></div></div>
+          <div class="f2-loop">
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/></svg><i>1</i></span><div class="f2-card"><span class="k">Where am I?</span><b>Read the current step</b><p>The network is told how noisy the image is right now.</p><code>t = 1000, 999, …, 1</code></div></div>
+          <div class="f2-step is-net" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="7" r="2"/><circle cx="5" cy="17" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="19" cy="17" r="2"/><path d="M7 7.5l3 3.5M7 16.5l3-3.5M14 11l3-3M14 13l3 3"/></svg><i>2</i></span><div class="f2-card"><span class="k">The learned part</span><b>Predict the noise in it</b><p>Same network that was trained in Chapter 6.</p><code>ε̂ = ε_θ(xₜ, t)</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 12h16M8 8l-4 4 4 4"/></svg><i>3</i></span><div class="f2-card"><span class="k">Clean</span><b>Remove a slice of that noise</b><p>Subtract the scaled guess, then re-brighten slightly.</p><code>(xₜ − βₜ/√(1−ᾱₜ)·ε̂) / √αₜ</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5L18 18M6 18l2.5-2.5M15.5 8.5L18 6"/></svg><i>4</i></span><div class="f2-card"><span class="k">Explore</span><b>Add a small random kick</b><p>Keeps results varied; skipped on the very last step.</p><code>+ σₜ·z,  z ~ N(0, I)</code></div></div>
+          <div class="f2-step is-dec" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.7.3-1 .9-1 1.7M12 17h.01"/></svg></span><div class="f2-card"><span class="k">Check</span><b>Reached t = 0?</b><p>Each pass lowers t by one.</p><div class="f2-out"><span class="no">✗ No → t − 1, back to 1</span><span class="yes">✓ Yes → finish</span></div></div></div>
+            <span class="f2-loop-label">↻ repeat 1,000×</span>
+          </div>
+          <div class="f2-step is-end" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/></svg></span><div class="f2-card"><span class="k">Result</span><b>A brand-new image x₀</b><p>Big shapes appear first, fine detail last.</p></div></div>
+        </div>
+        <div class="f2-stats"><span><b>17 s</b> · 256 images 32×32</span><span><b>300 s</b> · 128 images 256×256</span><span>σₜ² = βₜ (fixed)</span></div>
+        <figcaption><b>Figure 7.1</b> — Algorithm 2 from the paper, timings from Appendix B.</figcaption>
       </figure>
       <div class="math">\[ x_{t-1} = \frac{1}{\sqrt{\alpha_t}}\Big( x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\epsilon_\theta(x_t, t) \Big) + \sigma_t z \]</div>
       <div class="callout note"><div><strong>Read it aloud</strong><p>“Take the current image, subtract the right-sized slice of the predicted noise, re-brighten it slightly (divide by √α<sub>t</sub>), then add a small fresh random kick σ<sub>t</sub>z.” The kick keeps results varied and stops the process from getting stuck; it’s skipped on the very last step. The paper sets σ<sub>t</sub>² = β<sub>t</sub> — a fixed value, not learned.</p></div></div>
@@ -375,21 +363,16 @@ dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-s
       <p>Because big shapes appear before small details, you could “send” an image by transmitting the denoising steps in order: the receiver sees a rough version early and sharper versions as more arrives — like a slow-loading web image. The paper shows this is a generalised form of autoregressive (one-piece-at-a-time) generation, but where the “pieces” are levels of detail instead of individual pixels.</p>
       <h3>Interpolation</h3>
       <p>Take two face photos, add noise to both (step 500), blend the noisy versions, then denoise. The output smoothly varies pose, skin tone, hairstyle, expression and background between the two people. Add more noise and the blends become coarser and more inventive.</p>
-      <figure class="flow">
-        <svg viewBox="0 0 360 230" role="img" aria-labelledby="ft3">
-          <title id="ft3">Interpolation: two images are noised, blended, then denoised into an in-between image.</title>
-          <defs><marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6E6457"/></marker></defs>
-          <rect x="20" y="20" width="130" height="40" rx="20" class="fc-start"/><text x="85" y="40" class="fc-label">Face A</text>
-          <rect x="210" y="20" width="130" height="40" rx="20" class="fc-start"/><text x="275" y="40" class="fc-label">Face B</text>
-          <path d="M85,60 V90" class="fc-edge" marker-end="url(#arr3)"/><path d="M275,60 V90" class="fc-edge" marker-end="url(#arr3)"/>
-          <rect x="20" y="90" width="130" height="40" rx="4" class="fc-process"/><text x="85" y="110" class="fc-label">Noise to t=500</text>
-          <rect x="210" y="90" width="130" height="40" rx="4" class="fc-process"/><text x="275" y="110" class="fc-label">Noise to t=500</text>
-          <path d="M150,110 H210" class="fc-edge"/>
-          <path d="M180,110 V150" class="fc-edge" marker-end="url(#arr3)"/>
-          <rect x="95" y="150" width="170" height="30" rx="4" class="fc-process"/><text x="180" y="165" class="fc-label">Blend · then denoise</text>
-          <path d="M180,180 V190" class="fc-edge" marker-end="url(#arr3)"/>
-          <rect x="105" y="190" width="150" height="34" rx="17" class="fc-end"/><text x="180" y="207" class="fc-label">In-between face</text>
-        </svg>
+      <figure class="flow2">
+        <div class="f2-head"><b>Interpolation · Section 4.4</b><span>reverse process as an image editor</span></div>
+        <div class="f2-track" role="list">
+          <div class="f2-step is-start" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="8" cy="10" r="3.5"/><circle cx="16" cy="10" r="3.5"/><path d="M3 20c1-3 3-4 5-4s4 1 5 4M11 20c1-3 3-4 5-4s4 1 5 4"/></svg><i>1</i></span><div class="f2-card"><span class="k">Input</span><b>Two real faces, A and B</b><p>Any two CelebA-HQ photos.</p><code>x₀ , x′₀</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 6h.01M9 4h.01M14 7h.01M19 5h.01M6 11h.01M11 10h.01M17 12h.01M4 16h.01M9 15h.01M14 17h.01M19 18h.01M8 20h.01" stroke-width="3"/></svg><i>2</i></span><div class="f2-card"><span class="k">Encode</span><b>Noise both to step 500</b><p>The fixed forward process acts as an “encoder”.</p><code>xₜ ~ q(xₜ|x₀),  x′ₜ ~ q(x′ₜ|x′₀)</code></div></div>
+          <div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="9" cy="12" r="6"/><circle cx="15" cy="12" r="6"/></svg><i>3</i></span><div class="f2-card"><span class="k">Mix</span><b>Blend the noisy pair</b><p>λ slides from 0 (all A) to 1 (all B).</p><code>x̄ₜ = (1−λ)·xₜ + λ·x′ₜ</code></div></div>
+          <div class="f2-step is-net" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="7" r="2"/><circle cx="5" cy="17" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="7" r="2"/><circle cx="19" cy="17" r="2"/><path d="M7 7.5l3 3.5M7 16.5l3-3.5M14 11l3-3M14 13l3 3"/></svg><i>4</i></span><div class="f2-card"><span class="k">Decode</span><b>Denoise for 500 steps</b><p>The network removes the blending artifacts.</p><code>x̄₀ ~ p_θ(x₀ | x̄ₜ)</code></div></div>
+          <div class="f2-step is-end" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="M21 17l-5-5-9 8"/></svg></span><div class="f2-card"><span class="k">Output</span><b>A believable in-between face</b><p>Pose, skin tone, hair and expression change smoothly — eyewear does not.</p></div></div>
+        </div>
+        <div class="f2-stats"><span><b>t = 500</b> → smooth blends</span><span><b>t = 1000</b> → brand-new faces</span></div>
         <figcaption><b>Figure 10.1</b> — Interpolation in “noise space” (paper Figure 8).</figcaption>
       </figure>
       <div class="folio"><span>Bonus Discoveries</span><span>10</span></div>
@@ -462,26 +445,9 @@ dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-s
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
 <script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
   onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true}]})"></script>
+<script src="../folio.js"></script>
 <script>
 (() => {
-  /* --- book chrome (same as design system) --- */
-  const sb = document.getElementById('sidebar'), scrim = document.getElementById('scrim'), btn = document.getElementById('menuBtn');
-  const setOpen = open => { sb.classList.toggle('open', open); scrim.classList.toggle('show', open); btn.setAttribute('aria-expanded', open); };
-  btn.addEventListener('click', () => setOpen(!sb.classList.contains('open')));
-  scrim.addEventListener('click', () => setOpen(false));
-  sb.addEventListener('click', e => { if (e.target.closest('a')) setOpen(false); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') setOpen(false); });
-  const bar = document.getElementById('progress');
-  const onScroll = () => { const h = document.documentElement.scrollHeight - innerHeight; bar.style.transform = `scaleX(${h > 0 ? scrollY / h : 0})`; };
-  addEventListener('scroll', onScroll, { passive: true }); onScroll();
-  const label = document.getElementById('chapterLabel'), links = [...document.querySelectorAll('.toc a')];
-  const io = new IntersectionObserver(es => es.forEach(en => {
-    if (!en.isIntersecting) return;
-    links.forEach(a => a.classList.toggle('active', a.hash === '#' + en.target.id));
-    label.textContent = en.target.dataset.label;
-  }), { rootMargin: '-40% 0px -55% 0px' });
-  document.querySelectorAll('[data-label]').forEach(s => io.observe(s));
-
   /* --- forward-diffusion demo: paper's linear schedule β 1e-4 → 0.02, T = 1000 --- */
   const N = 64, T = 1000, abar = [1];
   for (let t = 1; t <= T; t++) abar[t] = abar[t - 1] * (1 - (1e-4 + (0.02 - 1e-4) * (t - 1) / (T - 1)));
