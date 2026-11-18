@@ -5,6 +5,9 @@
    Each category is a shelf; each paper points at a PDF under
    /papers/<category slug>/. Add a shelf by appending to
    PAPERS.categories; add a paper by appending to its papers[].
+   PAPERS.explainers lists long-form, beginner-friendly explainer
+   pages under /papers/explainers/<slug>/ (opened directly, not in
+   the PDF reader).
    Rendered by assets/js/papers.js (listing) and
    assets/js/paper-view.js (reader).
    ============================================================ */
@@ -16,6 +19,24 @@ const PAPERS = {
   intro: 'An annotated shelf of research papers I keep coming back to — each one readable right here, grouped by topic. Tactile sensing is the first shelf; more get added as the reading list grows.',
   promo: 'Research papers, readable right here in the browser — annotated, categorised, with page-by-page navigation. Tactile sensing & dexterous manipulation is the first shelf; more to come.',
   slot: 'more shelves soon — tactile is just the first category',
+
+  explainers: {
+    slug: 'explainers',
+    title: 'Paper Explainers',
+    blurb: 'Landmark papers explained from zero — book-style walkthroughs with analogies, interactive demos, flowcharts and a quiz at the end. No prior background assumed.',
+    items: [
+      {
+        href: 'explainers/ddpm-2006.11239/',
+        title: 'Denoising Diffusion Probabilistic Models — explained for absolute beginners',
+        authors: 'Jonathan Ho, Ajay Jain, Pieter Abbeel · UC Berkeley',
+        stamp: 'arXiv:2006.11239 [cs.LG]',
+        year: 2020,
+        minutes: 35,
+        desc: 'The paper behind modern image generators, in twelve short chapters: bury a picture under static, train a network to undo one tiny step, then un-bury pure noise into a brand-new image. Includes a live noise slider using the paper\'s exact schedule.',
+        tags: ['explainer', 'diffusion', 'generative models']
+      }
+    ]
+  },
 
   categories: [
     {

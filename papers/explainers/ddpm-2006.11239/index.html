@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F7F1E5">
+<title>Diffusion Models Explained</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
+<link rel="stylesheet" href="../folio.css">
+<style>
+/* page-only additions on top of folio.css */
+.math { overflow-x: auto; -webkit-overflow-scrolling: touch; padding: var(--s3) 0; margin: var(--s4) 0; text-align: center; }
+.math .katex { font-size: 1.08em; }
+.demo { background: var(--sheet-alt); border: 1px solid var(--rule); border-radius: var(--radius-lg); padding: var(--s5); margin: var(--s6) 0; font-family: var(--sans); }
+.demo-body { display: grid; gap: var(--s5); align-items: center; grid-template-columns: 1fr; }
+@media (min-width: 640px) { .demo-body { grid-template-columns: minmax(0, 280px) 1fr; } }
+.demo canvas { width: 100%; max-width: 280px; aspect-ratio: 1; image-rendering: pixelated; border-radius: var(--radius); margin: 0 auto; display: block; box-shadow: var(--shadow-card); }
+.demo label { font: 600 var(--fs-xs) var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-soft); }
+.demo input[type=range] { width: 100%; min-height: 44px; accent-color: var(--oxblood); }
+.readout { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin: var(--s3) 0; }
+.readout div { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius); padding: var(--s2) var(--s3); }
+.readout b { display: block; font: 600 var(--fs-lg) var(--mono); color: var(--ink); }
+.readout span { font-size: var(--fs-xs); color: var(--ink-faint); }
+.strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: var(--s2); margin-top: var(--s3); }
+.strip figure { margin: 0; text-align: center; }
+.strip canvas { width: 100%; aspect-ratio: 1; image-rendering: pixelated; border-radius: 4px; display: block; }
+.strip figcaption { margin-top: var(--s1); font-size: var(--fs-xs); }
+.dir { display: flex; justify-content: space-between; font: italic var(--fs-sm) var(--serif); color: var(--ink-soft); margin: var(--s2) 0; gap: var(--s3); }
+.dir.fwd { color: var(--brick); }
+.dir.rev { color: var(--sage); }
+details.q { border: 1px solid var(--rule); border-radius: var(--radius); margin: var(--s3) 0; background: var(--sheet); }
+details.q summary { cursor: pointer; padding: var(--s4); min-height: 44px; font-weight: 600; list-style: none; }
+details.q summary::-webkit-details-marker { display: none; }
+details.q summary::before { content: "＋"; color: var(--oxblood); margin-right: var(--s2); font-family: var(--sans); }
+details.q[open] summary::before { content: "−"; }
+details.q div { padding: 0 var(--s4) var(--s4); color: var(--ink-soft); font-size: var(--fs-sm); }
+dl.gloss dt { font-weight: 600; margin-top: var(--s4); color: var(--oxblood); }
+dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-soft); }
+.paper-meta { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin-top: var(--s5); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open contents" aria-controls="sidebar" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+  </button>
+  <a class="icon-btn" href="../../" aria-label="Back to papers" title="Back to papers">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+  </a>
+  <div class="title"><b>Folio</b>Diffusion Models, Explained</div>
+  <span class="chapter-label" id="chapterLabel">Cover</span>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Table of contents">
+    <p class="toc-head">Contents</p>
+    <ol class="toc">
+      <li><a href="#cover"><span class="num">·</span>Cover</a></li>
+      <li><a href="#ch1"><span class="num">1</span>The Big Question</a></li>
+      <li><a href="#ch2"><span class="num">2</span>The Core Idea</a></li>
+      <li><a href="#ch3"><span class="num">3</span>Toolkit for Beginners</a></li>
+      <li><a href="#ch4"><span class="num">4</span>Adding Noise</a></li>
+      <li><a href="#ch5"><span class="num">5</span>Removing Noise</a></li>
+      <li><a href="#ch6"><span class="num">6</span>Training</a></li>
+      <li><a href="#ch7"><span class="num">7</span>Making New Images</a></li>
+      <li><a href="#ch8"><span class="num">8</span>Why It Works</a></li>
+      <li><a href="#ch9"><span class="num">9</span>Results</a></li>
+      <li><a href="#ch10"><span class="num">10</span>Bonus Discoveries</a></li>
+      <li><a href="#ch11"><span class="num">11</span>Limits &amp; Legacy</a></li>
+      <li><a href="#ch12"><span class="num">12</span>Recap &amp; Quiz</a></li>
+    </ol>
+  </nav>
+  <div class="scrim" id="scrim"></div>
+
+  <main class="page" id="main">
+
+    <!-- COVER -->
+    <section class="cover" id="cover" data-label="Cover">
+      <svg class="mark" viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M28 14c-5-4-13-5-20-4v32c7-1 15 0 20 4 5-4 13-5 20-4V10c-7-1-15 0-20 4Z"/><path d="M28 14v32"/>
+      </svg>
+      <span class="eyebrow">A Beginner’s Guide · arXiv 2006.11239</span>
+      <h1>Denoising Diffusion Probabilistic Models</h1>
+      <p class="lead">How three researchers taught a computer to paint pictures by first teaching it to clean up static — explained from zero.</p>
+      <div class="paper-meta">
+        <span class="chip accent">Jonathan Ho · Ajay Jain · Pieter Abbeel</span>
+        <span class="chip">UC Berkeley</span>
+        <span class="chip">NeurIPS 2020</span>
+      </div>
+      <p class="meta">TWELVE SHORT CHAPTERS · ~35 MIN READ · <a href="https://arxiv.org/pdf/2006.11239">ORIGINAL PDF</a></p>
+    </section>
+
+    <div class="callout key"><div><strong>The whole paper in one sentence</strong><p>If you slowly bury a picture under random static, and train a neural network to undo <em>one tiny step</em> of that burying, you can start from pure static and “un-bury” your way to a brand-new, realistic picture.</p></div></div>
+
+    <!-- CH 1 -->
+    <section class="chapter" id="ch1" data-label="1 · The Big Question">
+      <header class="chapter-head"><span class="num">Chapter 1</span><h2>The Big Question</h2></header>
+      <p class="epigraph">“What I cannot create, I do not understand.”<span>— Richard Feynman</span></p>
+      <p class="dropcap">Imagine you have looked at ten thousand photos of cats. Could you now draw a <em>new</em> cat — one that is not a copy of any photo, but still clearly a cat? Humans can. This paper is about teaching a computer to do the same thing. Programs that do this are called <strong>generative models</strong>: they <em>generate</em> new examples that look like they came from the same collection as their training data.</p>
+      <p>A digital image is just a grid of numbers. A small 32 × 32 colour picture has 32 × 32 × 3 = 3,072 numbers (red, green and blue for every pixel). Picking 3,072 numbers at random gives you TV static. Almost every possible grid of numbers is static — real-looking images are an unbelievably tiny island in an ocean of noise. A generative model has to learn where that island is.</p>
+
+      <h3>What existed before (2020)</h3>
+      <p>Researchers already had several families of generative models. You don’t need to know how they work — only that each had a catch:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Family</th><th>The idea in a phrase</th><th>The catch</th></tr></thead>
+        <tbody>
+          <tr><td><b>GANs</b></td><td>A forger and a detective train against each other.</td><td>Sharp images, but training is famously unstable.</td></tr>
+          <tr><td><b>VAEs</b></td><td>Squeeze an image into a short code, then expand it back.</td><td>Stable, but images tend to look blurry.</td></tr>
+          <tr><td><b>Autoregressive</b></td><td>Write the image one pixel at a time, like text.</td><td>Very slow to generate; fixed pixel order.</td></tr>
+          <tr><td><b>Flows</b></td><td>A reversible mathematical funnel from noise to images.</td><td>Strict design rules limit the network.</td></tr>
+        </tbody>
+      </table></div>
+      <p><strong>Diffusion models</strong> had been proposed in 2015 by Sohl-Dickstein and colleagues, inspired by physics. They were stable and elegant — but nobody had made them produce <em>good-looking</em> images. This paper’s headline claim: <em>they can, and they can beat the best GANs on some benchmarks.</em></p>
+      <div class="folio"><span>The Big Question</span><span>1</span></div>
+    </section>
+
+    <!-- CH 2 -->
+    <section class="chapter" id="ch2" data-label="2 · The Core Idea">
+      <header class="chapter-head"><span class="num">Chapter 2</span><h2>The Core Idea</h2></header>
+      <p class="dropcap">Drop ink into a glass of water. Over a minute it spreads out until the water is evenly tinted. That spreading is called <strong>diffusion</strong>, and it only runs one way: you never see tinted water spontaneously gather back into a neat drop. Running it backwards seems impossible.</p>
+      <p>But here is the trick. If you film the ink and look at <em>two neighbouring frames</em>, the change between them is tiny. Undoing one tiny change is easy to learn. Undo a thousand tiny changes in a row and you’ve reversed the whole thing.</p>
+      <p>The paper does exactly this with pictures and random static:</p>
+      <ol>
+        <li><strong>Forward process (destroy):</strong> take a real image and add a little random noise. Repeat 1,000 times. The image fades into pure static. This step needs <em>no learning</em> — it is a fixed recipe.</li>
+        <li><strong>Reverse process (create):</strong> train a neural network to remove <em>one step’s worth</em> of noise. Then start from fresh random static and apply it 1,000 times. A new image emerges.</li>
+      </ol>
+
+      <div class="demo" id="demo">
+        <div class="demo-body">
+          <canvas id="demoCanvas" width="64" height="64" aria-label="A small picture with noise added according to the slider"></canvas>
+          <div>
+            <label for="tSlider">Step t = <span id="tVal">0</span> of 1000</label>
+            <input type="range" id="tSlider" min="0" max="1000" value="0" step="1">
+            <div class="readout">
+              <div><b id="sigVal">1.000</b><span>how much picture (√ᾱₜ)</span></div>
+              <div><b id="noiVal">0.000</b><span>how much noise (√(1−ᾱₜ))</span></div>
+            </div>
+            <div class="row" style="margin:0"><button class="btn btn-secondary" id="playFwd">▶ Add noise</button><button class="btn btn-secondary" id="playRev">◀ Replay backwards</button></div>
+            <p class="small muted" style="margin:var(--s3) 0 0">Uses the paper’s exact noise schedule. “Replay backwards” cheats — it already knows the original picture. The trained network in this paper has to <em>guess</em> it.</p>
+          </div>
+        </div>
+      </div>
+      <p>Drag the slider. Notice the picture survives surprisingly long, then disappears fast around step 400–600. By step 1000, less than 1% of the picture is left — it is essentially pure static.</p>
+
+      <figure>
+        <div class="dir fwd"><span>real image</span><span>add noise (fixed recipe) →</span><span>pure static</span></div>
+        <div class="strip" id="strip"></div>
+        <div class="dir rev"><span>new image</span><span>← remove noise (learned network)</span><span>start here</span></div>
+        <figcaption><b>Figure 2.1</b> — The two directions. Generation runs right-to-left.</figcaption>
+      </figure>
+      <div class="folio"><span>The Core Idea</span><span>2</span></div>
+    </section>
+
+    <!-- CH 3 -->
+    <section class="chapter" id="ch3" data-label="3 · Toolkit">
+      <header class="chapter-head"><span class="num">Chapter 3</span><h2>Toolkit for Beginners</h2></header>
+      <p class="dropcap">Five ideas are enough to read the rest of this guide. Skip any you already know.</p>
+      <div class="grid-2">
+        <article class="card"><span class="eyebrow">Idea 1</span><h4>Gaussian noise</h4><p>Random numbers that follow the “bell curve”: most are near zero, a few are larger. Written <span class="nowrap">𝒩(0, I)</span> — mean 0, spread 1, every pixel independent. It’s the static on an old TV.</p></article>
+        <article class="card"><span class="eyebrow">Idea 2</span><h4>Neural network</h4><p>A big adjustable function. You feed it numbers (a noisy image) and it outputs numbers (its guess). Its millions of internal knobs are called <b>weights</b>, written θ (theta).</p></article>
+        <article class="card"><span class="eyebrow">Idea 3</span><h4>Loss &amp; training</h4><p>A <b>loss</b> is a score of how wrong the guess was. <b>Training</b> = repeatedly nudge the knobs in the direction that makes the loss smaller (gradient descent).</p></article>
+        <article class="card"><span class="eyebrow">Idea 4</span><h4>Markov chain</h4><p>A sequence of steps where each step only depends on the one just before. x₀ → x₁ → x₂ … like footprints: where you step next depends only on where you stand now.</p></article>
+        <article class="card"><span class="eyebrow">Idea 5</span><h4>Probability distribution</h4><p>A description of which outcomes are likely. “The distribution of cat photos” means: which grids of numbers look like cats. Written q(x) for real data, p<sub>θ</sub>(x) for the model’s version.</p></article>
+        <article class="card"><span class="eyebrow">Notation</span><h4>x₀ … x<sub>T</sub></h4><p>x₀ is the clean image. x<sub>t</sub> is it after t noise steps. x<sub>T</sub> (T = 1000) is pure noise. Same size at every step.</p></article>
+      </div>
+      <div class="folio"><span>Toolkit</span><span>3</span></div>
+    </section>
+
+    <!-- CH 4 -->
+    <section class="chapter" id="ch4" data-label="4 · Adding Noise">
+      <header class="chapter-head"><span class="num">Chapter 4</span><h2>The Forward Process: Adding Noise</h2></header>
+      <p class="dropcap">Each forward step does two things: it <em>shrinks</em> the current image a tiny bit and <em>adds</em> a tiny bit of fresh noise. How much noise at step t is set by a number β<sub>t</sub> (“beta”), called the <strong>noise schedule</strong>.</p>
+      <div class="math">\[ q(x_t \mid x_{t-1}) = \mathcal{N}\!\left(x_t;\ \sqrt{1-\beta_t}\,x_{t-1},\ \beta_t \mathbf{I}\right) \]</div>
+      <div class="callout note"><div><strong>Read it aloud</strong><p>“The next image x<sub>t</sub> is the previous image scaled by √(1−β<sub>t</sub>) — slightly faded — plus random noise of strength β<sub>t</sub>.” The shrinking keeps the numbers from growing forever, so the end result is noise of a standard size.</p></div></div>
+      <p>The paper chooses <strong>T = 1000</strong> steps and lets β grow in a straight line from <strong>0.0001</strong> at step 1 to <strong>0.02</strong> at step 1000: gentle at first, harsher later. These numbers are fixed — nothing here is learned.</p>
+
+      <h3>The shortcut that makes training fast</h3>
+      <p>To get x<sub>500</sub>, must you add noise 500 times? No. Adding several bell-curve noises together gives another bell-curve noise, so all the steps collapse into one formula. Define α<sub>t</sub> = 1 − β<sub>t</sub> and ᾱ<sub>t</sub> (“alpha-bar”) = the product of all α’s up to t. Then:</p>
+      <div class="math">\[ x_t = \sqrt{\bar\alpha_t}\;x_0 \;+\; \sqrt{1-\bar\alpha_t}\;\epsilon, \qquad \epsilon \sim \mathcal{N}(0,\mathbf{I}) \]</div>
+      <div class="callout tip"><div><strong>Read it aloud</strong><p>“A noisy image at any step is just a <em>blend</em>: some amount of the original picture plus some amount of one random noise image ε (epsilon).” The two dials are exactly what the slider in Chapter 2 shows.</p></div></div>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Step <span class="nt">t</span></th><th>Picture weight <span class="nt">√ᾱ<sub>t</sub></span></th><th>Noise weight <span class="nt">√(1−ᾱ<sub>t</sub>)</span></th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>0.9999</td><td>0.010</td></tr>
+          <tr><td>100</td><td>0.947</td><td>0.321</td></tr>
+          <tr><td>250</td><td>0.724</td><td>0.690</td></tr>
+          <tr><td>500</td><td>0.280</td><td>0.960</td></tr>
+          <tr><td>750</td><td>0.058</td><td>0.998</td></tr>
+          <tr><td>1000</td><td>0.006</td><td>≈ 1.000</td></tr>
+        </tbody>
+      </table></div>
+      <p>This shortcut is why training is cheap: pick any step, jump straight there in one line of maths, and practise on it.</p>
+      <div class="folio"><span>Adding Noise</span><span>4</span></div>
+    </section>
+
+    <!-- CH 5 -->
+    <section class="chapter" id="ch5" data-label="5 · Removing Noise">
+      <header class="chapter-head"><span class="num">Chapter 5</span><h2>The Reverse Process: Removing Noise</h2></header>
+      <p class="dropcap">Now the hard direction. Given a noisy image x<sub>t</sub>, what did the slightly-less-noisy x<sub>t−1</sub> look like? Because each forward step was tiny, the answer is also “a bell curve around some best guess.” The network’s job is to supply that best guess.</p>
+
+      <h3>The paper’s key design choice: predict the noise</h3>
+      <p>There were three obvious options for what the network could output:</p>
+      <ol>
+        <li>The clean image x₀ directly — the authors found this gave <em>worse</em> images.</li>
+        <li>The average of the slightly-cleaner image (called μ̃, “mu-tilde”) — the standard choice.</li>
+        <li><strong>The noise ε that was mixed in</strong> — the paper’s choice.</li>
+      </ol>
+      <p>Why does option 3 help? Remember the blend formula: if you know the noisy image <em>and</em> you know which noise was added, you can subtract it out. So “guess the noise” is the same information as “guess the image” — but it turns out to be a much friendlier target for the network to learn. We write the network as <strong>ε<sub>θ</sub>(x<sub>t</sub>, t)</strong>: “given this noisy image and the step number, what noise do you think is in it?”</p>
+      <div class="callout key"><div><strong>Analogy</strong><p>A restorer cleaning an old painting doesn’t repaint it from memory. They identify the grime and lift it off. The network learns to recognise grime.</p></div></div>
+
+      <h3>The network itself</h3>
+      <ul>
+        <li><strong>U-Net:</strong> a network shaped like a “U” — it shrinks the image to understand the big picture, then expands it back, with shortcut connections passing fine detail across. Its output is the same size as its input, perfect for “here is the noise in every pixel.”</li>
+        <li><strong>One network for all 1,000 steps:</strong> it is told which step it’s on using a <em>sinusoidal time embedding</em> (the same trick Transformers use to encode word position), because removing heavy noise and light noise are different jobs.</li>
+        <li><strong>Self-attention</strong> at the 16 × 16 resolution lets distant parts of the image coordinate (e.g. both eyes on a face match).</li>
+        <li>Size: <strong>35.7 million</strong> weights for small images (CIFAR-10), <strong>114 million</strong> for 256 × 256 images.</li>
+      </ul>
+      <div class="folio"><span>Removing Noise</span><span>5</span></div>
+    </section>
+
+    <!-- CH 6 -->
+    <section class="chapter" id="ch6" data-label="6 · Training">
+      <header class="chapter-head"><span class="num">Chapter 6</span><h2>Training: A Guessing Game</h2></header>
+      <p class="dropcap">Training is astonishingly simple — this simplicity is a big part of why the paper mattered. It is a game played millions of times: hide some known noise in a real image, ask the network to find it, score its answer.</p>
+      <figure class="flow">
+        <svg viewBox="0 0 360 880" role="img" aria-labelledby="ft1">
+          <title id="ft1">Training loop: pick an image, step and noise; mix; network guesses noise; measure error; update weights; repeat until good enough.</title>
+          <defs><marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6E6457"/></marker></defs>
+          <rect x="120" y="20" width="120" height="44" rx="22" class="fc-start"/><text x="180" y="42" class="fc-label">Start</text>
+          <path d="M180,64 V100" class="fc-edge" marker-end="url(#arr)"/>
+          <rect x="60" y="100" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="124" class="fc-label">Pick a real image x₀</text>
+          <path d="M180,148 V184" class="fc-edge" marker-end="url(#arr)"/>
+          <rect x="60" y="184" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="208" class="fc-label">Pick a random step t (1…1000)</text>
+          <path d="M180,232 V268" class="fc-edge" marker-end="url(#arr)"/>
+          <rect x="60" y="268" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="292" class="fc-label">Draw random noise ε</text>
+          <path d="M180,316 V352" class="fc-edge" marker-end="url(#arr)"/>
+          <rect x="60" y="352" width="240" height="60" rx="4" class="fc-process"/><text x="180" y="372" class="fc-label">Mix them into a noisy image</text><text x="180" y="394" class="fc-label">xₜ = √ᾱₜ·x₀ + √(1−ᾱₜ)·ε</text>
+          <path d="M180,412 V448" class="fc-edge" marker-end="url(#arr)"/>
+          <rect x="60" y="448" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="472" class="fc-label">Network guesses the noise ε̂</text>
+          <path d="M180,496 V532" class="fc-edge" marker-end="url(#arr)"/>
+          <rect x="60" y="532" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="556" class="fc-label">Error = ‖ε − ε̂‖²</text>
+          <path d="M180,580 V616" class="fc-edge" marker-end="url(#arr)"/>
+          <rect x="60" y="616" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="640" class="fc-label">Nudge weights to shrink error</text>
+          <path d="M180,664 V700" class="fc-edge" marker-end="url(#arr)"/>
+          <path d="M180,700 L270,750 L180,800 L90,750 Z" class="fc-decision"/><text x="180" y="750" class="fc-label">Good enough?</text>
+          <path d="M90,750 H30 V124 H60" class="fc-edge" marker-end="url(#arr)"/>
+          <text x="38" y="742" class="fc-edge-label">No</text>
+          <path d="M180,800 V830" class="fc-edge" marker-end="url(#arr)"/>
+          <text x="190" y="822" class="fc-edge-label">Yes</text>
+          <rect x="120" y="830" width="120" height="44" rx="22" class="fc-end"/><text x="180" y="852" class="fc-label">Done</text>
+        </svg>
+        <figcaption><b>Figure 6.1</b> — Algorithm 1 from the paper, as a flowchart.</figcaption>
+      </figure>
+      <p>The score being minimised is called <strong>L<sub>simple</sub></strong>:</p>
+      <div class="math">\[ L_{\text{simple}} = \mathbb{E}_{t,\,x_0,\,\epsilon}\Big[\, \big\| \epsilon - \epsilon_\theta\big(\sqrt{\bar\alpha_t}\,x_0 + \sqrt{1-\bar\alpha_t}\,\epsilon,\ t\big) \big\|^2 \Big] \]</div>
+      <div class="callout note"><div><strong>Read it aloud</strong><p>“On average over random images, random steps and random noise: square the difference between the real noise and the network’s guess.” 𝔼 means “average over”. ‖·‖² means “add up the squared differences in every pixel”. It’s the plain mean-squared-error you’d use for any prediction task.</p></div></div>
+      <p>In code, the whole training step is a handful of lines:</p>
+<pre><code>for x0 in data:                         # a batch of real images, scaled to [-1, 1]
+    t   = randint(1, 1000)              # random step
+    eps = randn_like(x0)                # random noise
+    xt  = sqrt(abar[t]) * x0 + sqrt(1 - abar[t]) * eps
+    loss = ((eps - model(xt, t)) ** 2).mean()
+    loss.backward(); optimizer.step()   # nudge the weights</code></pre>
+      <div class="callout tip"><div><strong>Real numbers from the paper</strong><p>The CIFAR-10 model trained for 800,000 steps with batches of 128 images, taking 10.6 hours on a Google TPU v3-8 (roughly 8 high-end GPUs).</p></div></div>
+      <div class="folio"><span>Training</span><span>6</span></div>
+    </section>
+
+    <!-- CH 7 -->
+    <section class="chapter" id="ch7" data-label="7 · Sampling">
+      <header class="chapter-head"><span class="num">Chapter 7</span><h2>Making New Images (Sampling)</h2></header>
+      <p class="dropcap">Once trained, generating an image — called <strong>sampling</strong> — means starting with pure random static and asking the network to clean it, one step at a time, a thousand times.</p>
+      <figure class="flow">
+        <svg viewBox="0 0 360 640" role="img" aria-labelledby="ft2">
+          <title id="ft2">Sampling loop: start from noise, set t to 1000, predict noise, remove it and add a small kick, decrease t, repeat until t is zero.</title>
+          <defs><marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6E6457"/></marker></defs>
+          <rect x="70" y="20" width="220" height="44" rx="22" class="fc-start"/><text x="180" y="42" class="fc-label">Start: pure static x_T</text>
+          <path d="M180,64 V100" class="fc-edge" marker-end="url(#arr2)"/>
+          <rect x="60" y="100" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="124" class="fc-label">Set t = 1000</text>
+          <path d="M180,148 V184" class="fc-edge" marker-end="url(#arr2)"/>
+          <rect x="60" y="184" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="208" class="fc-label">Network predicts noise ε̂(xₜ, t)</text>
+          <path d="M180,232 V268" class="fc-edge" marker-end="url(#arr2)"/>
+          <rect x="60" y="268" width="240" height="60" rx="4" class="fc-process"/><text x="180" y="288" class="fc-label">Subtract a slice of that noise,</text><text x="180" y="310" class="fc-label">add a small random kick</text>
+          <path d="M180,328 V364" class="fc-edge" marker-end="url(#arr2)"/>
+          <rect x="60" y="364" width="240" height="48" rx="4" class="fc-process"/><text x="180" y="388" class="fc-label">t = t − 1</text>
+          <path d="M180,412 V448" class="fc-edge" marker-end="url(#arr2)"/>
+          <path d="M180,448 L270,498 L180,548 L90,498 Z" class="fc-decision"/><text x="180" y="498" class="fc-label">t = 0?</text>
+          <path d="M90,498 H30 V208 H60" class="fc-edge" marker-end="url(#arr2)"/>
+          <text x="38" y="490" class="fc-edge-label">No</text>
+          <path d="M180,548 V580" class="fc-edge" marker-end="url(#arr2)"/>
+          <text x="190" y="572" class="fc-edge-label">Yes</text>
+          <rect x="70" y="580" width="220" height="44" rx="22" class="fc-end"/><text x="180" y="602" class="fc-label">Done: a new image x₀</text>
+        </svg>
+        <figcaption><b>Figure 7.1</b> — Algorithm 2 from the paper, as a flowchart.</figcaption>
+      </figure>
+      <div class="math">\[ x_{t-1} = \frac{1}{\sqrt{\alpha_t}}\Big( x_t - \frac{\beta_t}{\sqrt{1-\bar\alpha_t}}\,\epsilon_\theta(x_t, t) \Big) + \sigma_t z \]</div>
+      <div class="callout note"><div><strong>Read it aloud</strong><p>“Take the current image, subtract the right-sized slice of the predicted noise, re-brighten it slightly (divide by √α<sub>t</sub>), then add a small fresh random kick σ<sub>t</sub>z.” The kick keeps results varied and stops the process from getting stuck; it’s skipped on the very last step. The paper sets σ<sub>t</sub>² = β<sub>t</sub> — a fixed value, not learned.</p></div></div>
+      <h3>What you’d see while it runs</h3>
+      <p>The paper (Figure 6) shows the network’s running guess of the final image during sampling. <strong>Big shapes appear first</strong> — blobs of colour, layout, the outline of a face — and <strong>fine details come last</strong>, like a painter blocking in shapes before adding eyelashes.</p>
+      <div class="callout warn"><div><strong>The cost</strong><p>1,000 network calls per image makes sampling slow: 17 seconds for a batch of 256 small images, but 300 seconds for 128 images at 256 × 256. A GAN needs just one call.</p></div></div>
+      <div class="folio"><span>Sampling</span><span>7</span></div>
+    </section>
+
+    <!-- CH 8 -->
+    <section class="chapter" id="ch8" data-label="8 · Why It Works">
+      <header class="chapter-head"><span class="num">Chapter 8</span><h2>Why It Works (The Theory, Gently)</h2></header>
+      <p class="dropcap">You can use diffusion models without this chapter. But this is where the paper’s scientific contribution lives, so here is the story without the heavy algebra.</p>
+
+      <h3>8.1 The “honest” score: the variational bound</h3>
+      <p>The principled goal of a generative model is to give high probability to real images. That probability is impossible to compute directly here, so — like VAEs — the paper uses a <strong>variational bound</strong> (also called the ELBO): a quantity that is always worse than or equal to the true score, so improving it pushes the true score up too.</p>
+      <p>For diffusion models, this bound neatly breaks into one piece per step: “how well does the network’s guess of x<sub>t−1</sub> match the true answer?” Because both are bell curves, each piece has an exact formula — no extra randomness needed.</p>
+
+      <h3>8.2 The simplification that made images good</h3>
+      <p>When the authors worked out that bound with the “predict the noise” design, each step’s piece became <em>mean-squared-error on the noise, multiplied by a step-dependent weight</em>. Their bold move: <strong>throw the weights away</strong>. That gives L<sub>simple</sub> from Chapter 6.</p>
+      <p>Dropping the weights means the network spends <em>less</em> effort on the easy, nearly-clean steps and <em>more</em> on the hard, very-noisy ones. The result is worse on the formal probability score but <strong>much better-looking images</strong>. (Chapter 9 shows the numbers.)</p>
+
+      <h3>8.3 A surprising connection</h3>
+      <p>A separate line of research (Song &amp; Ermon, 2019) generated images using <strong>score matching</strong> — learning which direction makes an image “more realistic” at many noise levels — and <strong>Langevin dynamics</strong>, a physics-inspired method that walks downhill toward realism with small random jiggles.</p>
+      <div class="callout key"><div><strong>The paper’s main theoretical result</strong><p>With the “predict the noise” design, training a diffusion model is <em>mathematically equivalent</em> to that score-matching approach, and the sampling loop looks just like Langevin dynamics. Two research communities were secretly working on the same thing. Predicting the noise is (up to scaling) predicting the direction toward realistic images.</p></div></div>
+      <div class="folio"><span>Why It Works</span><span>8</span></div>
+    </section>
+
+    <!-- CH 9 -->
+    <section class="chapter" id="ch9" data-label="9 · Results">
+      <header class="chapter-head"><span class="num">Chapter 9</span><h2>Results</h2></header>
+      <p class="dropcap">How do you grade “realistic”? The paper uses two standard scores, both computed by a pretrained image-recognition network:</p>
+      <ul>
+        <li><strong>FID</strong> (Fréchet Inception Distance) — how far the statistics of generated images are from real ones. <strong>Lower is better.</strong></li>
+        <li><strong>IS</strong> (Inception Score) — are images clear and varied? <strong>Higher is better.</strong></li>
+        <li><strong>NLL</strong> (bits per dimension) — the formal probability score. <strong>Lower is better.</strong></li>
+      </ul>
+      <h3>CIFAR-10 (tiny 32 × 32 images, 10 object types, no labels used)</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Model</th><th>IS ↑</th><th>FID ↓</th><th>NLL ↓</th></tr></thead>
+        <tbody>
+          <tr><td>Gated PixelCNN (autoregressive)</td><td>4.60</td><td>65.93</td><td>3.03</td></tr>
+          <tr><td>SNGAN (GAN)</td><td>8.22</td><td>21.7</td><td>—</td></tr>
+          <tr><td>NCSN (score matching)</td><td>8.87</td><td>25.32</td><td>—</td></tr>
+          <tr><td>StyleGAN2 + ADA (best GAN)</td><td>9.74</td><td>3.26</td><td>—</td></tr>
+          <tr><td>This paper, true bound</td><td>7.67</td><td>13.51</td><td>≤ 3.70</td></tr>
+          <tr><td><b>This paper, L<sub>simple</sub></b></td><td><b>9.46</b></td><td><b>3.17</b></td><td>≤ 3.75</td></tr>
+        </tbody>
+      </table></div>
+      <p>An FID of <strong>3.17</strong> was state-of-the-art for unconditional CIFAR-10 at the time — slightly better than the best GAN — from a model that is far simpler and more stable to train.</p>
+      <h3>Bigger pictures (256 × 256)</h3>
+      <p>On LSUN Church the FID was <strong>7.89</strong>, on LSUN Bedroom <strong>4.90</strong> — quality the authors describe as similar to ProgressiveGAN. They also show convincing CelebA-HQ celebrity faces.</p>
+      <h3>Which design choices mattered? (the ablation)</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Network predicts…</th><th>Trained with…</th><th>IS ↑</th><th>FID ↓</th></tr></thead>
+        <tbody>
+          <tr><td>clean-ish mean μ̃</td><td>true bound, learned variance</td><td>7.28</td><td>23.69</td></tr>
+          <tr><td>clean-ish mean μ̃</td><td>true bound, fixed variance</td><td>8.06</td><td>13.22</td></tr>
+          <tr><td>clean-ish mean μ̃</td><td>simple squared error</td><td colspan="2">unstable</td></tr>
+          <tr><td>noise ε</td><td>true bound, learned variance</td><td colspan="2">unstable</td></tr>
+          <tr><td>noise ε</td><td>true bound, fixed variance</td><td>7.67</td><td>13.51</td></tr>
+          <tr><td><b>noise ε</b></td><td><b>L<sub>simple</sub></b></td><td><b>9.46</b></td><td><b>3.17</b></td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout tip"><div><strong>Takeaway</strong><p>Neither “predict the noise” nor “simple loss” alone is the magic — it’s the <em>combination</em> that drops FID from ~13 to 3.17. Learning the variance made training unstable, so they fixed it.</p></div></div>
+      <div class="folio"><span>Results</span><span>9</span></div>
+    </section>
+
+    <!-- CH 10 -->
+    <section class="chapter" id="ch10" data-label="10 · Bonus">
+      <header class="chapter-head"><span class="num">Chapter 10</span><h2>Bonus Discoveries</h2></header>
+      <h3>Great images, mediocre probability scores</h3>
+      <p class="dropcap">The NLL of ~3.7 bits per dimension is worse than top autoregressive models (Sparse Transformer: 2.80). The authors dug into why: <strong>more than half</strong> of those bits go into describing details too small for a human to see. The model spends its “attention” on what matters visually — which makes it an excellent <strong>lossy compressor</strong> (like JPEG), even if not the best lossless one.</p>
+      <h3>Progressive decoding</h3>
+      <p>Because big shapes appear before small details, you could “send” an image by transmitting the denoising steps in order: the receiver sees a rough version early and sharper versions as more arrives — like a slow-loading web image. The paper shows this is a generalised form of autoregressive (one-piece-at-a-time) generation, but where the “pieces” are levels of detail instead of individual pixels.</p>
+      <h3>Interpolation</h3>
+      <p>Take two face photos, add noise to both (step 500), blend the noisy versions, then denoise. The output smoothly varies pose, skin tone, hairstyle, expression and background between the two people. Add more noise and the blends become coarser and more inventive.</p>
+      <figure class="flow">
+        <svg viewBox="0 0 360 230" role="img" aria-labelledby="ft3">
+          <title id="ft3">Interpolation: two images are noised, blended, then denoised into an in-between image.</title>
+          <defs><marker id="arr3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#6E6457"/></marker></defs>
+          <rect x="20" y="20" width="130" height="40" rx="20" class="fc-start"/><text x="85" y="40" class="fc-label">Face A</text>
+          <rect x="210" y="20" width="130" height="40" rx="20" class="fc-start"/><text x="275" y="40" class="fc-label">Face B</text>
+          <path d="M85,60 V90" class="fc-edge" marker-end="url(#arr3)"/><path d="M275,60 V90" class="fc-edge" marker-end="url(#arr3)"/>
+          <rect x="20" y="90" width="130" height="40" rx="4" class="fc-process"/><text x="85" y="110" class="fc-label">Noise to t=500</text>
+          <rect x="210" y="90" width="130" height="40" rx="4" class="fc-process"/><text x="275" y="110" class="fc-label">Noise to t=500</text>
+          <path d="M150,110 H210" class="fc-edge"/>
+          <path d="M180,110 V150" class="fc-edge" marker-end="url(#arr3)"/>
+          <rect x="95" y="150" width="170" height="30" rx="4" class="fc-process"/><text x="180" y="165" class="fc-label">Blend · then denoise</text>
+          <path d="M180,180 V190" class="fc-edge" marker-end="url(#arr3)"/>
+          <rect x="105" y="190" width="150" height="34" rx="17" class="fc-end"/><text x="180" y="207" class="fc-label">In-between face</text>
+        </svg>
+        <figcaption><b>Figure 10.1</b> — Interpolation in “noise space” (paper Figure 8).</figcaption>
+      </figure>
+      <div class="folio"><span>Bonus Discoveries</span><span>10</span></div>
+    </section>
+
+    <!-- CH 11 -->
+    <section class="chapter" id="ch11" data-label="11 · Limits & Legacy">
+      <header class="chapter-head"><span class="num">Chapter 11</span><h2>Limits &amp; Legacy</h2></header>
+      <h3>What the paper doesn’t solve</h3>
+      <ul>
+        <li><strong>Slow sampling</strong> — 1,000 network calls per image.</li>
+        <li><strong>Probability scores</strong> lag behind the best likelihood models.</li>
+        <li><strong>No control</strong> — it makes a random image from the training distribution; you can’t yet say “draw a red bicycle.”</li>
+      </ul>
+      <h3>Why it became one of the most important AI papers</h3>
+      <p class="dropcap">This paper showed that a simple, stable recipe — <em>add noise, learn to predict it</em> — could match the best GANs. The research world quickly built on it:</p>
+      <ul>
+        <li><strong>DDIM</strong> (Song, Meng &amp; Ermon, 2020) — same trained network, sampling in tens of steps instead of 1,000.</li>
+        <li><strong>Improved DDPM</strong> (Nichol &amp; Dhariwal, 2021) — learned variances done stably, better schedules.</li>
+        <li><strong>“Diffusion Models Beat GANs”</strong> (Dhariwal &amp; Nichol, 2021) — guidance to steer generation toward a chosen class.</li>
+        <li><strong>Latent Diffusion</strong> (Rombach et al., 2022) — run diffusion on a compressed version of the image; the basis of <strong>Stable Diffusion</strong>.</li>
+        <li>Text-to-image systems such as DALL·E 2 and Imagen, and later video and audio generators, all use diffusion at their core.</li>
+      </ul>
+      <p>The ε-prediction and L<sub>simple</sub> loss introduced here remain the default starting point taught today.</p>
+      <blockquote>“Since diffusion models seem to have excellent inductive biases for image data, we look forward to investigating their utility in other data modalities.”<cite>— Ho, Jain &amp; Abbeel, Conclusion</cite></blockquote>
+      <div class="folio"><span>Limits &amp; Legacy</span><span>11</span></div>
+    </section>
+
+    <!-- CH 12 -->
+    <section class="chapter" id="ch12" data-label="12 · Recap & Quiz">
+      <header class="chapter-head"><span class="num">Chapter 12</span><h2>Recap &amp; Quiz</h2></header>
+      <h3>Six-line recap</h3>
+      <ol>
+        <li>Destroying an image with noise is easy; creating one is hard. Do the hard part in 1,000 tiny steps.</li>
+        <li>Forward: a fixed recipe blends image and noise; any step can be reached in one jump.</li>
+        <li>Reverse: one U-Net, told the step number, predicts the noise hidden in an image.</li>
+        <li>Training: plain mean-squared-error between real and predicted noise (L<sub>simple</sub>).</li>
+        <li>Sampling: start from static, subtract predicted noise 1,000 times.</li>
+        <li>Result: FID 3.17 on CIFAR-10, state-of-the-art in 2020 — and the foundation of modern image generators.</li>
+      </ol>
+
+      <h3>Check yourself</h3>
+      <details class="q"><summary>Does the forward (noising) process need to be learned?</summary><div>No. It is a fixed recipe with a pre-chosen schedule β₁ = 0.0001 to β₁₀₀₀ = 0.02. Only the reverse process has learnable weights.</div></details>
+      <details class="q"><summary>What exactly does the neural network output?</summary><div>Its guess of the noise ε that was mixed into the input image x<sub>t</sub>, given the step number t.</div></details>
+      <details class="q"><summary>Why can training jump straight to step 700 without running 700 steps?</summary><div>Because stacked Gaussian noises combine into one Gaussian, so x<sub>t</sub> = √ᾱ<sub>t</sub>·x₀ + √(1−ᾱ<sub>t</sub>)·ε gives any step directly.</div></details>
+      <details class="q"><summary>Why does L<sub>simple</sub> give better images than the “correct” bound?</summary><div>It drops the per-step weights, which down-weights the easy low-noise steps so the network focuses on the harder high-noise denoising that shapes the overall image.</div></details>
+      <details class="q"><summary>What is the main practical downside?</summary><div>Slow generation — 1,000 network evaluations per image. Later work like DDIM reduced this dramatically.</div></details>
+
+      <h3>Glossary</h3>
+      <dl class="gloss">
+        <dt>β<sub>t</sub> (beta)</dt><dd>Amount of noise added at step t.</dd>
+        <dt>α<sub>t</sub>, ᾱ<sub>t</sub> (alpha, alpha-bar)</dt><dd>α = 1 − β; ᾱ = product of all α up to t. √ᾱ<sub>t</sub> is how much original picture remains.</dd>
+        <dt>ε (epsilon)</dt><dd>A random Gaussian noise image.</dd>
+        <dt>ε<sub>θ</sub></dt><dd>The neural network that predicts ε; θ are its weights.</dd>
+        <dt>Forward / reverse process</dt><dd>Noising (fixed) / denoising (learned).</dd>
+        <dt>U-Net</dt><dd>Image-in, image-out network with a shrink-then-expand shape.</dd>
+        <dt>FID</dt><dd>Image-quality score; lower is better.</dd>
+        <dt>Variational bound / ELBO</dt><dd>A computable stand-in for the true probability score.</dd>
+        <dt>Langevin dynamics</dt><dd>Sampling by small steps toward higher probability plus random jiggles.</dd>
+      </dl>
+      <nav class="pager" aria-label="Chapter navigation">
+        <a href="#ch11"><small>Previous</small>Limits &amp; Legacy</a>
+        <a class="next" href="https://arxiv.org/pdf/2006.11239"><small>Next</small>Read the original paper</a>
+      </nav>
+      <div class="folio"><span>Recap &amp; Quiz</span><span>12</span></div>
+    </section>
+  </main>
+</div>
+
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/contrib/auto-render.min.js"
+  onload="renderMathInElement(document.body,{delimiters:[{left:'\\[',right:'\\]',display:true}]})"></script>
+<script>
+(() => {
+  /* --- book chrome (same as design system) --- */
+  const sb = document.getElementById('sidebar'), scrim = document.getElementById('scrim'), btn = document.getElementById('menuBtn');
+  const setOpen = open => { sb.classList.toggle('open', open); scrim.classList.toggle('show', open); btn.setAttribute('aria-expanded', open); };
+  btn.addEventListener('click', () => setOpen(!sb.classList.contains('open')));
+  scrim.addEventListener('click', () => setOpen(false));
+  sb.addEventListener('click', e => { if (e.target.closest('a')) setOpen(false); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') setOpen(false); });
+  const bar = document.getElementById('progress');
+  const onScroll = () => { const h = document.documentElement.scrollHeight - innerHeight; bar.style.transform = `scaleX(${h > 0 ? scrollY / h : 0})`; };
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+  const label = document.getElementById('chapterLabel'), links = [...document.querySelectorAll('.toc a')];
+  const io = new IntersectionObserver(es => es.forEach(en => {
+    if (!en.isIntersecting) return;
+    links.forEach(a => a.classList.toggle('active', a.hash === '#' + en.target.id));
+    label.textContent = en.target.dataset.label;
+  }), { rootMargin: '-40% 0px -55% 0px' });
+  document.querySelectorAll('[data-label]').forEach(s => io.observe(s));
+
+  /* --- forward-diffusion demo: paper's linear schedule β 1e-4 → 0.02, T = 1000 --- */
+  const N = 64, T = 1000, abar = [1];
+  for (let t = 1; t <= T; t++) abar[t] = abar[t - 1] * (1 - (1e-4 + (0.02 - 1e-4) * (t - 1) / (T - 1)));
+
+  // x0: a little drawn scene, pixel values in [-1, 1]
+  const src = document.createElement('canvas'); src.width = src.height = N;
+  const g = src.getContext('2d');
+  const sky = g.createLinearGradient(0, 0, 0, N); sky.addColorStop(0, '#9CC3E6'); sky.addColorStop(1, '#F4E1B8');
+  g.fillStyle = sky; g.fillRect(0, 0, N, N);
+  g.fillStyle = '#E8A33D'; g.beginPath(); g.arc(48, 16, 8, 0, 7); g.fill();
+  g.fillStyle = '#55744F'; g.fillRect(0, 48, N, 16);
+  g.fillStyle = '#8E2F2A'; g.beginPath(); g.moveTo(12, 34); g.lineTo(26, 22); g.lineTo(40, 34); g.fill();
+  g.fillStyle = '#FFFCF6'; g.fillRect(15, 34, 22, 16);
+  g.fillStyle = '#3E5B7E'; g.fillRect(23, 40, 6, 10);
+  const x0 = Float32Array.from(g.getImageData(0, 0, N, N).data, v => v / 127.5 - 1);
+
+  // fixed noise ε (seeded Box–Muller) so the slider is smooth
+  let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const eps = new Float32Array(x0.length);
+  for (let i = 0; i < eps.length; i++) eps[i] = Math.sqrt(-2 * Math.log(rnd())) * Math.cos(2 * Math.PI * rnd());
+
+  const paint = (cv, t) => {
+    const c = cv.getContext('2d'), img = c.createImageData(N, N), a = Math.sqrt(abar[t]), b = Math.sqrt(1 - abar[t]);
+    for (let i = 0; i < x0.length; i++) img.data[i] = (i & 3) === 3 ? 255 : (a * x0[i] + b * eps[i] + 1) * 127.5;
+    c.putImageData(img, 0, 0);
+  };
+
+  const cv = document.getElementById('demoCanvas'), sl = document.getElementById('tSlider');
+  const show = t => {
+    sl.value = t; paint(cv, t);
+    document.getElementById('tVal').textContent = t;
+    document.getElementById('sigVal').textContent = Math.sqrt(abar[t]).toFixed(3);
+    document.getElementById('noiVal').textContent = Math.sqrt(1 - abar[t]).toFixed(3);
+  };
+  sl.addEventListener('input', () => show(+sl.value));
+  let anim;
+  const play = dir => {
+    cancelAnimationFrame(anim);
+    let t = dir > 0 ? 0 : T;
+    const step = () => { show(t); t += dir * 8; if (t >= 0 && t <= T) anim = requestAnimationFrame(step); else show(dir > 0 ? T : 0); };
+    step();
+  };
+  document.getElementById('playFwd').onclick = () => play(1);
+  document.getElementById('playRev').onclick = () => play(-1);
+  show(0);
+
+  const strip = document.getElementById('strip');
+  [0, 100, 250, 500, 1000].forEach(t => {
+    const f = document.createElement('figure'), c = document.createElement('canvas');
+    c.width = c.height = N; paint(c, t);
+    f.append(c, Object.assign(document.createElement('figcaption'), { textContent: 't = ' + t }));
+    strip.append(f);
+  });
+  // self-check: schedule matches paper (almost all signal gone at T)
+  console.assert(abar[T] < 1e-4 && abar[T] > 1e-5, 'alpha-bar schedule off', abar[T]);
+})();
+</script>
+</body>
+</html>

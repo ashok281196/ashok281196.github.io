@@ -21,8 +21,7 @@ function papersHeroHTML(){
   <p class="tally">${shelves} ${shelves === 1 ? 'shelf' : 'shelves'} &middot; ${n} ${n === 1 ? 'paper' : 'papers'}</p>`;
 }
 
-function paperCardHTML(cat, p){
-  const href = `view.html?c=${encodeURIComponent(cat.slug)}&p=${encodeURIComponent(p.file)}`;
+function paperCardHTML(href, p, extent){
   const tags = (p.tags || []).map(t => `<span>${esc(t)}</span>`).join('');
   return `
   <a class="paper" href="${esc(href)}">
@@ -33,7 +32,7 @@ function paperCardHTML(cat, p){
       <span class="p-desc">${esc(p.desc)}</span>
       <span class="p-meta">
         <span class="hot">${esc(String(p.year))}</span>
-        <span>${esc(String(p.pages))} pp</span>
+        <span>${esc(extent)}</span>
         ${tags}
       </span>
     </span>
@@ -50,7 +49,24 @@ function shelfHTML(cat){
     </div>
     <p class="shelf-blurb">${esc(cat.blurb)}</p>
     <div class="paper-list">
-      ${cat.papers.map(p => paperCardHTML(cat, p)).join('')}
+      ${cat.papers.map(p => paperCardHTML(
+        `view.html?c=${encodeURIComponent(cat.slug)}&p=${encodeURIComponent(p.file)}`, p, `${p.pages} pp`)).join('')}
+    </div>
+  </section>`;
+}
+
+function explainersHTML(ex){
+  if(!ex || !ex.items.length) return '';
+  const n = ex.items.length;
+  return `
+  <section class="shelf" id="${esc(ex.slug)}">
+    <div class="shelf-head">
+      <h2>${esc(ex.title)}</h2>
+      <span class="path">ls ~/${esc(PAPERS.root)}/${esc(ex.slug)} &middot; ${n} ${n === 1 ? 'explainer' : 'explainers'}</span>
+    </div>
+    <p class="shelf-blurb">${esc(ex.blurb)}</p>
+    <div class="paper-list">
+      ${ex.items.map(p => paperCardHTML(p.href, p, `${p.minutes} min read`)).join('')}
     </div>
   </section>`;
 }
@@ -58,6 +74,7 @@ function shelfHTML(cat){
 document.getElementById('topbar').innerHTML = papersTopbarHTML();
 document.getElementById('hero').innerHTML = papersHeroHTML();
 document.getElementById('shelves').innerHTML =
+  explainersHTML(PAPERS.explainers) +
   PAPERS.categories.map(shelfHTML).join('') +
   `<div class="slot">${esc(PAPERS.slot)}</div>`;
 renderFooter(
