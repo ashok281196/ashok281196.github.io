@@ -180,3 +180,19 @@ body{overflow:hidden}
   }
   .rmain{position:relative}
 }
+
+/* ================= LINKED-PAPER FRAME (read.html) ================= */
+/* arXiv loaded in an iframe; the hint sits under the frame so it is
+   only visible while the frame is empty or refused to load. */
+.fmain{flex:1;position:relative;min-height:0;background:var(--bg-2)}
+.pframe{position:absolute;inset:0;z-index:1;width:100%;height:100%;border:0;background:transparent}
+.fhint{
+  position:absolute;left:0;right:0;top:38%;z-index:0;
+  padding:0 24px;text-align:center;font-size:12px;line-height:1.7;color:var(--muted);
+}
+.fhint.err{z-index:2;color:var(--ball-red)}
+.fhint a{color:var(--saffron-deep);font-weight:700;border-bottom:1px solid currentColor}
+.rtools .raw[aria-disabled="true"]{opacity:.35;pointer-events:none}
+@media(max-width:760px){
+  .rtools{width:100%}
+}

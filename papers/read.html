@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Paper · Reading Room</title>
+<meta name="description" content="Linked arXiv paper, loaded in an in-page frame.">
+<link rel="stylesheet" href="../assets/css/theme.css">
+<link rel="stylesheet" href="../assets/css/paper-view.css">
+</head>
+<body>
+
+<div class="reader" id="reader">
+  <header class="rbar">
+    <div class="rbar-inner">
+      <a class="back" href="./" aria-label="Back to all papers">&larr;</a>
+      <div class="rtitle">
+        <span class="rt-main" id="rt-title">Loading&hellip;</span>
+        <span class="rt-stamp" id="rt-stamp"></span>
+      </div>
+      <div class="rtools" role="toolbar" aria-label="Reader controls">
+        <a id="b-prev" class="raw" href="#" title="Previous paper on the shelf" aria-label="Previous paper">&lsaquo;</a>
+        <span class="pagebox mono" id="pos">&ndash; / &ndash;</span>
+        <a id="b-next" class="raw" href="#" title="Next paper on the shelf" aria-label="Next paper">&rsaquo;</a>
+        <span class="rsep"></span>
+        <button id="v-html" data-view="html" title="arXiv HTML version (best on phones)">html</button>
+        <button id="v-pdf" data-view="pdf" title="arXiv PDF">pdf</button>
+        <button id="v-abs" data-view="abs" title="arXiv abstract page">abs</button>
+        <span class="rsep"></span>
+        <a id="b-open" class="raw" href="#" target="_blank" rel="noopener" title="Open on arXiv in a new tab">open&nbsp;&nearr;</a>
+      </div>
+    </div>
+  </header>
+
+  <div class="fmain">
+    <iframe id="frame" class="pframe" title="Paper" referrerpolicy="no-referrer" allow="fullscreen"></iframe>
+    <p class="fhint mono" id="fhint">blank frame? <a id="hint-open" href="#" target="_blank" rel="noopener">open it on arXiv &nearr;</a> or try another view above</p>
+  </div>
+</div>
+
+<noscript>
+  <p style="padding:24px;font-family:monospace">The reader needs JavaScript. <a href="./">Back to the reading room</a>.</p>
+</noscript>
+
+<script src="../data/site.js"></script>
+<script src="../data/papers.js"></script>
+<script src="../assets/js/paper-frame.js"></script>
+</body>
+</html>
