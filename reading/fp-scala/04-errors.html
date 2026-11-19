@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ch. 4 · Errors as Values · FP in Scala: A Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+<header class="chapter-head">
+  <div class="chapter-num">04</div>
+  <div class="chapter-kicker">Part I · Foundations</div>
+  <h1>Errors as Values</h1>
+  <p class="chapter-sub">Exceptions break referential transparency and hide failure from the type system. We replace them with Option and Either, and learn the handful of combinators (map, flatMap, getOrElse, map2, traverse) that make failure-aware code read like the happy path.</p>
+</header>
+
+<h2><span class="sec-no">4.1</span>What's Wrong With Exceptions</h2>
+<pre><code class="language-scala">def failingFn(i: Int): Int =
+  val y: Int = throw Exception("fail!")
+  try
+    val x = 42 + 5
+    x + y
+  catch case e: Exception =&gt; 43</code></pre>
+<p>Calling this throws. Now apply substitution: replace <code>y</code> with its definition inside the <code>try</code>:</p>
+<pre><code class="language-scala">def failingFn2(i: Int): Int =
+  try
+    val x = 42 + 5
+    x + ((throw Exception("fail!")): Int)
+  catch case e: Exception =&gt; 43    // returns 43</code></pre>
+<p>Same code, different result, depending on <em>where</em> the expression sits. So <code>throw</code> isn't referentially transparent: its meaning depends on which <code>try</code> block surrounds it at runtime.</p>
+<p>Two more problems:</p>
+<ul>
+  <li><strong>Not type-safe.</strong> <code>def parse(s: String): Int</code> says nothing about failing. Callers forget, and you find out in production.</li>
+  <li><strong>Doesn't work with higher-order functions.</strong> If you pass a function that throws into <code>map</code>, <code>map</code> has no way to know or handle it.</li>
+</ul>
+<p>The fix is the same move as Chapter 1: <strong>represent the failure as a value</strong>, and put it in the return type.</p>
+
+<h2><span class="sec-no">4.2</span>Option: Maybe There's a Value</h2>
+<pre><code class="language-scala">enum Option[+A]:
+  case Some(get: A)
+  case None</code></pre>
+<p>A function that might not have an answer returns <code>Option</code>:</p>
+<pre><code class="language-scala">def mean(xs: Seq[Double]): Option[Double] =
+  if xs.isEmpty then None
+  else Some(xs.sum / xs.length)</code></pre>
+<p>The signature now tells the truth: "you might not get a <code>Double</code>." The caller can't use the result as a <code>Double</code> without dealing with <code>None</code>. The compiler won't allow it.</p>
+<div class="bridge">
+<p>This is <code>std::optional&lt;T&gt;</code>, and the C++23 monadic operations <code>transform</code>, <code>and_then</code> and <code>or_else</code> are exactly <code>map</code>, <code>flatMap</code> and <code>orElse</code> below. <code>Either</code> is <code>std::expected&lt;T, E&gt;</code>. C++ arrived at the same design for the same reasons.</p>
+</div>
+
+<h2><span class="sec-no">4.3</span>The Option Toolkit</h2>
+<p>If every caller pattern-matched every <code>Option</code>, code would be unreadable. Instead we write a few combinators once:</p>
+<pre><code class="language-scala">enum Option[+A]:
+  case Some(get: A)
+  case None
+
+  def map[B](f: A =&gt; B): Option[B] = this match
+    case None    =&gt; None
+    case Some(a) =&gt; Some(f(a))
+
+  def flatMap[B](f: A =&gt; Option[B]): Option[B] = this match
+    case None    =&gt; None
+    case Some(a) =&gt; f(a)
+
+  def getOrElse[B &gt;: A](default: =&gt; B): B = this match
+    case None    =&gt; default
+    case Some(a) =&gt; a
+
+  def orElse[B &gt;: A](ob: =&gt; Option[B]): Option[B] = this match
+    case None =&gt; ob
+    case _    =&gt; this
+
+  def filter(p: A =&gt; Boolean): Option[A] = this match
+    case Some(a) if p(a) =&gt; this
+    case _               =&gt; None</code></pre>
+<p>Two new bits of syntax:</p>
+<ul>
+  <li><code>B &gt;: A</code> means "B is a supertype of A". It's needed because <code>Option</code> is covariant. You can say <code>someDog.getOrElse(someCat)</code> and get an <code>Animal</code>.</li>
+  <li><code>default: =&gt; B</code> is a <strong>by-name parameter</strong>: it's evaluated only if used. <code>getOrElse(expensiveFallback())</code> doesn't run the fallback when there's a value. Chapter 5 is about this idea.</li>
+</ul>
+
+<h3>Reading it as a pipeline</h3>
+<pre><code class="language-scala">case class Employee(name: String, dept: String, manager: Option[String])
+def lookupByName(name: String): Option[Employee] = ???
+
+val managerOfJoe: String =
+  lookupByName("Joe")
+    .flatMap(_.manager)        // Joe might not exist, or might have no manager
+    .map(_.toUpperCase)
+    .getOrElse("(no manager)")</code></pre>
+<p>Each step is written as if the value is there. If any step returns <code>None</code>, the rest are skipped and <code>None</code> falls through to <code>getOrElse</code>. The error handling is still there; it's just been moved into <code>flatMap</code>.</p>
+<div class="keypoint">Use <code>map</code> when your function always succeeds. Use <code>flatMap</code> when your function can itself fail (returns an <code>Option</code>). Handle the failure once, at the end, with <code>getOrElse</code> or a <code>match</code>.</div>
+
+<div class="exercise" data-n="Exercise 4.1 · variance">
+<p>Using <code>flatMap</code> and the <code>mean</code> function above, write <code>variance(xs: Seq[Double]): Option[Double]</code>, the mean of <code>math.pow(x - m, 2)</code> for each <code>x</code>, where <code>m</code> is the mean.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def variance(xs: Seq[Double]): Option[Double] =
+  mean(xs).flatMap(m =&gt; mean(xs.map(x =&gt; math.pow(x - m, 2))))</code></pre>
+<p>The empty case is handled once, by the first <code>mean</code>. <code>flatMap</code> because the inner computation also returns <code>Option</code>.</p>
+</div></details>
+
+<h2><span class="sec-no">4.4</span>Lifting Ordinary Functions</h2>
+<p>Do we need to rewrite every existing function to accept <code>Option</code>s? No. We <strong>lift</strong> them:</p>
+<pre><code class="language-scala">def lift[A, B](f: A =&gt; B): Option[A] =&gt; Option[B] =
+  _.map(f)
+
+val absO: Option[Double] =&gt; Option[Double] = lift(math.abs)</code></pre>
+<p>Now a function of two arguments. Insurance quotes need age and number of tickets, both parsed from strings that might be malformed:</p>
+<pre><code class="language-scala">def insuranceRate(age: Int, tickets: Int): Double = ???
+
+def toIntOption(s: String): Option[Int] =
+  try Some(s.toInt)
+  catch case _: NumberFormatException =&gt; None</code></pre>
+<p>(This is the right way to deal with an exception-throwing library: catch it at the boundary and convert it to a value.) To combine two <code>Option</code>s with a two-argument function, we need <code>map2</code>:</p>
+
+<div class="exercise" data-n="Exercise 4.2 · map2">
+<p>Write <code>def map2[A, B, C](a: Option[A], b: Option[B])(f: (A, B) =&gt; C): Option[C]</code>. Then use it to write <code>parseInsuranceRateQuote(age: String, tickets: String): Option[Double]</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def map2[A, B, C](a: Option[A], b: Option[B])(f: (A, B) =&gt; C): Option[C] =
+  a.flatMap(aa =&gt; b.map(bb =&gt; f(aa, bb)))
+
+def parseInsuranceRateQuote(age: String, tickets: String): Option[Double] =
+  map2(toIntOption(age), toIntOption(tickets))(insuranceRate)</code></pre>
+<p>The nesting "flatMap on the outer, map on the inner" comes up constantly. Scala has syntax for it:</p>
+<pre><code class="language-scala">def map2[A, B, C](a: Option[A], b: Option[B])(f: (A, B) =&gt; C): Option[C] =
+  for
+    aa &lt;- a
+    bb &lt;- b
+  yield f(aa, bb)</code></pre>
+<p>A <strong>for-comprehension</strong> is just sugar: every <code>&lt;-</code> except the last becomes <code>flatMap</code>, the last becomes <code>map</code>. It works for any type with those methods, which is why it reads like a loop for lists and like sequential steps for <code>Option</code>.</p>
+</div></details>
+
+<h2><span class="sec-no">4.5</span>sequence and traverse</h2>
+<p>We have a list of strings and want to parse them all. If any fails, the whole thing fails.</p>
+
+<div class="exercise" data-n="Exercise 4.3 · sequence">
+<p>Write <code>def sequence[A](as: List[Option[A]]): Option[List[A]]</code>. It returns <code>Some</code> of all values if every element is <code>Some</code>, else <code>None</code>. (Use Scala's built-in <code>List</code> from here on.)</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def sequence[A](as: List[Option[A]]): Option[List[A]] =
+  as.foldRight(Some(Nil): Option[List[A]])((oa, acc) =&gt; map2(oa, acc)(_ :: _))</code></pre>
+<p>Start from <code>Some(Nil)</code>, and at each element use <code>map2</code> to prepend the value to the accumulated list. One <code>None</code> anywhere makes <code>map2</code> return <code>None</code>, and it stays <code>None</code>.</p>
+</div></details>
+<p>Using it: <code>sequence(strings.map(toIntOption))</code>. That walks the list twice: once to build a list of Options, once to sequence it. <code>traverse</code> does both in one pass:</p>
+<pre><code class="language-scala">def traverse[A, B](as: List[A])(f: A =&gt; Option[B]): Option[List[B]] =
+  as.foldRight(Some(Nil): Option[List[B]])((a, acc) =&gt; map2(f(a), acc)(_ :: _))
+
+def sequence[A](as: List[Option[A]]): Option[List[A]] =
+  traverse(as)(identity)
+
+traverse(List("1", "2", "3"))(toIntOption)   // Some(List(1, 2, 3))
+traverse(List("1", "x", "3"))(toIntOption)   // None</code></pre>
+<p>Remember <code>traverse</code>. In Chapter 12 it turns out to work for far more than <code>List</code> and <code>Option</code>, and it's one of the most useful functions in real FP code.</p>
+
+<h2><span class="sec-no">4.6</span>Either: Failure With a Reason</h2>
+<p><code>None</code> says <em>that</em> something failed, not <em>why</em>. <code>Either</code> carries the reason:</p>
+<pre><code class="language-scala">enum Either[+E, +A]:
+  case Left(value: E)      // failure, by convention
+  case Right(value: A)     // success ("right" as in correct)
+
+  def map[B](f: A =&gt; B): Either[E, B] = this match
+    case Right(a) =&gt; Right(f(a))
+    case Left(e)  =&gt; Left(e)
+
+  def flatMap[EE &gt;: E, B](f: A =&gt; Either[EE, B]): Either[EE, B] = this match
+    case Right(a) =&gt; f(a)
+    case Left(e)  =&gt; Left(e)
+
+  def orElse[EE &gt;: E, AA &gt;: A](b: =&gt; Either[EE, AA]): Either[EE, AA] = this match
+    case Left(_)  =&gt; b
+    case Right(a) =&gt; Right(a)</code></pre>
+<p>Notice that the definitions are nearly identical to <code>Option</code>'s. <code>Left(e)</code> plays the role of <code>None</code> but keeps <code>e</code>. Keep noticing that.</p>
+<pre><code class="language-scala">def safeDiv(x: Int, y: Int): Either[String, Int] =
+  if y == 0 then Left("division by zero") else Right(x / y)
+
+case class Person(name: String, age: Int)
+
+def mkName(name: String): Either[String, String] =
+  if name.isBlank then Left("Name is empty.") else Right(name)
+
+def mkAge(age: Int): Either[String, Int] =
+  if age &lt; 0 then Left("Age is out of range.") else Right(age)
+
+def mkPerson(name: String, age: Int): Either[String, Person] =
+  for
+    n &lt;- mkName(name)
+    a &lt;- mkAge(age)
+  yield Person(n, a)
+
+mkPerson("", -1)   // Left("Name is empty.")  — only the FIRST error</code></pre>
+<div class="warfield">
+<p><strong><code>flatMap</code> stops at the first error.</strong> It has to: the second step might depend on the result of the first. But in <code>mkPerson</code>, name and age are independent, and a user filling in a form wants to see <em>both</em> problems. That needs a different abstraction, less powerful than <code>flatMap</code>, which you'll meet in Chapter 12.</p>
+</div>
+
+<div class="exercise" data-n="Exercise 4.4 · catchNonFatal">
+<p>Write <code>def catchNonFatal[A](a: =&gt; A): Either[Throwable, A]</code> that runs <code>a</code> and captures any non-fatal exception as a <code>Left</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">import scala.util.control.NonFatal
+
+def catchNonFatal[A](a: =&gt; A): Either[Throwable, A] =
+  try Right(a)
+  catch case NonFatal(t) =&gt; Left(t)</code></pre>
+<p>The by-name parameter is essential: if <code>a</code> were evaluated before entering the function, the exception would be thrown before the <code>try</code>. <code>NonFatal</code> deliberately doesn't catch things like <code>OutOfMemoryError</code>.</p>
+</div></details>
+
+<h2><span class="sec-no">4.7</span>In the Standard Library</h2>
+<p>Scala's own <code>Option</code>, <code>Either</code> and <code>Try</code> work as described. Standard <code>Either</code> is right-biased, so <code>map</code> and <code>flatMap</code> work on <code>Right</code>, just like ours. <code>traverse</code> isn't in the standard library. It comes from the <strong>cats</strong> library, which we'll meet at the end of the book.</p>
+
+<dl class="jargon">
+  <dt>Option</dt><dd>A value that may be absent: <code>Some(a)</code> or <code>None</code>.</dd>
+  <dt>Either</dt><dd>A success <code>Right(a)</code> or a failure <code>Left(e)</code> that carries the error.</dd>
+  <dt>Lifting</dt><dd>Turning <code>A =&gt; B</code> into <code>F[A] =&gt; F[B]</code>, usually with <code>map</code>.</dd>
+  <dt>map2</dt><dd>Combine two wrapped values with a two-argument function.</dd>
+  <dt>traverse</dt><dd>Apply a failing function to each element, collecting results or failing as a whole.</dd>
+  <dt>By-name parameter (<code>=&gt; A</code>)</dt><dd>An argument evaluated only when (and each time) it's used.</dd>
+</dl>
+
+<div class="recap"><ul>
+  <li>Exceptions aren't RT and aren't in the type. Return <code>Option</code> or <code>Either</code> instead.</li>
+  <li>Catch exceptions at library boundaries and turn them into values.</li>
+  <li>Write the happy path with <code>map</code>, <code>flatMap</code> or a for-comprehension. Handle failure once at the end.</li>
+  <li><code>map2</code>, <code>sequence</code> and <code>traverse</code> combine many fallible values.</li>
+  <li><code>Option</code> and <code>Either</code> have nearly identical combinators. That's a clue.</li>
+</ul></div>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

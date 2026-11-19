@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ch. 1 · What Functional Programming Actually Is · FP in Scala: A Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+<header class="chapter-head">
+  <div class="chapter-num">01</div>
+  <div class="chapter-kicker">Part I · Foundations</div>
+  <h1>What Functional Programming Actually Is</h1>
+  <p class="chapter-sub">One constraint, no side effects, and why taking it seriously makes code easier to test, reuse and reason about. We'll refactor one impure function into a pure one and watch new abilities appear.</p>
+</header>
+
+<h2><span class="sec-no">1.1</span>The Definition</h2>
+<p>Functional programming means building programs out of <strong>pure functions</strong>. A pure function has <strong>no side effects</strong>: the only thing it does is compute a result from its inputs.</p>
+<p>A <strong>side effect</strong> is anything a function does besides returning a value:</p>
+<ul>
+  <li>modifying a variable outside its own scope, or mutating an argument</li>
+  <li>throwing an exception</li>
+  <li>printing, reading input, writing a file, making a network call</li>
+  <li>reading the clock, generating a random number</li>
+</ul>
+<p>That list looks like most of what useful programs do, and that's the fair objection. The answer, which the whole book builds toward, is that FP doesn't stop you doing these things. It changes <em>where</em> they happen. The core of the program is pure and only <em>describes</em> effects. A thin outer layer actually performs them.</p>
+<div class="keypoint">FP does not ban effects. It pushes them to the edges, so that the large, interesting middle of your program is made of functions you can understand in isolation.</div>
+
+<h2><span class="sec-no">1.2</span>A Function With Side Effects</h2>
+<p>Here's a typical piece of code: book a train ticket and charge the customer's card.</p>
+<pre><code class="language-scala">class Ticket(val route: String, val price: Int)
+
+class PaymentGateway:
+  def charge(card: String, amount: Int): Unit =
+    // talks to the bank over the network
+    ???
+
+class BookingService:
+  def book(card: String, route: String, gateway: PaymentGateway): Ticket =
+    val t = Ticket(route, 450)
+    gateway.charge(card, t.price)   // side effect!
+    t</code></pre>
+<p>It works, but look at what it costs us:</p>
+<ol>
+  <li><strong>Testing is awkward.</strong> To test <code>book</code> we need a fake <code>PaymentGateway</code>, a mock framework, and checks that <code>charge</code> was called exactly once with the right amount.</li>
+  <li><strong>It doesn't compose.</strong> A family books four tickets. Calling <code>book</code> four times hits the bank four times, with four fees and four chances to fail halfway. We'd like <em>one</em> charge for the total, but the charge is fused into <code>book</code>.</li>
+</ol>
+
+<h2><span class="sec-no">1.3</span>Step 1: Return the Effect Instead of Doing It</h2>
+<p>The fix is to make the charge a <strong>value</strong>. Instead of performing the charge, <code>book</code> returns a description of the charge alongside the ticket.</p>
+<pre><code class="language-scala">case class Charge(card: String, amount: Int):
+  def combine(other: Charge): Charge =
+    if card == other.card then Charge(card, amount + other.amount)
+    else throw IllegalArgumentException("different cards")
+
+class BookingService:
+  def book(card: String, route: String): (Ticket, Charge) =
+    val t = Ticket(route, 450)
+    (t, Charge(card, t.price))</code></pre>
+<p><code>book</code> is now pure. It doesn't know a payment gateway exists. Some other part of the program, the outer layer, takes the <code>Charge</code> and actually sends it to the bank.</p>
+<p>(<code>combine</code> still throws. We'll fix that in Chapter 4, when errors become values too.)</p>
+
+<h2><span class="sec-no">1.4</span>Step 2: Collect New Abilities for Free</h2>
+<p>Because charges are values, we can work with them like any data:</p>
+<pre><code class="language-scala">def bookMany(card: String, route: String, n: Int): (List[Ticket], Charge) =
+  val bookings = List.fill(n)(book(card, route))
+  val (tickets, charges) = bookings.unzip
+  (tickets, charges.reduce((c1, c2) =&gt; c1.combine(c2)))</code></pre>
+<p>Four tickets, one charge. We reused <code>book</code> unchanged. And since it's just values, we can go further: merge all charges from a whole day per card, before sending anything to the bank.</p>
+<pre><code class="language-scala">def coalesce(charges: List[Charge]): List[Charge] =
+  charges.groupBy(_.card).values.map(_.reduce(_.combine(_))).toList</code></pre>
+<p>Testing is now an equality check: <code>assert(book("c1", "BLR-JAI") == ...)</code>. No mocks.</p>
+<div class="analogy">The impure version is a chef who cooks and also pays the supplier while plating. The pure version writes the supplier's invoice and puts it on a spike. At the end of the day someone pays all the invoices in one go. The chef's job got simpler, and the restaurant can now batch, audit or cancel payments.</div>
+
+<h2><span class="sec-no">1.5</span>Referential Transparency</h2>
+<p>We need a precise test for "pure". Here it is.</p>
+<p>An expression is <strong>referentially transparent (RT)</strong> if you can replace it with its result anywhere in the program without changing what the program means. A function is <strong>pure</strong> if calling it with RT arguments always gives an RT expression.</p>
+<p><code>2 + 3</code> is RT: wherever it appears you can write <code>5</code> and nothing changes. Now strings:</p>
+<pre><code class="language-scala">val x = "Hello"
+val r1 = x.reverse       // "olleH"
+val r2 = x.reverse       // "olleH"
+// replace x with its definition:
+val r1b = "Hello".reverse
+val r2b = "Hello".reverse   // same results; x is RT</code></pre>
+<p>Now something mutable:</p>
+<pre><code class="language-scala">val sb = StringBuilder("Hello")
+val y  = sb.append(", World")
+val r1 = y.toString     // "Hello, World"
+val r2 = y.toString     // "Hello, World"
+
+// substitute y with its definition:
+val sb2 = StringBuilder("Hello")
+val r1b = sb2.append(", World").toString   // "Hello, World"
+val r2b = sb2.append(", World").toString   // "Hello, World, World"  ← different!</code></pre>
+<p><code>append</code> is not RT: the same expression gave two different answers because it changed hidden state. That's the whole problem with side effects. You can't understand an expression by looking at it. You also need to know everything that happened before.</p>
+
+<h2><span class="sec-no">1.6</span>The Substitution Model</h2>
+<p>RT gives you a simple way to reason about code: <strong>replace things with their definitions</strong>, like simplifying algebra.</p>
+<pre><code class="language-scala">def square(n: Int) = n * n
+def sumOfSquares(a: Int, b: Int) = square(a) + square(b)
+
+sumOfSquares(3, 4)
+= square(3) + square(4)
+= 3 * 3 + 4 * 4
+= 9 + 16
+= 25</code></pre>
+<p>Each step is a local rewrite. You never need to ask "what is the state of memory right now?" This is <strong>local reasoning</strong>, and it's what lets you understand a 30-line pure function without reading the 3,000 lines around it.</p>
+<div class="bridge">
+<p>You already prize this in C++. A <code>constexpr</code> function the compiler can evaluate at compile time is basically RT. A <code>const</code> member function that doesn't touch <code>mutable</code> fields is a step toward it. Data races are what you get when two threads break RT on shared state at once. FP applies that discipline to the whole program by default, not just to the hot paths you've had to debug.</p>
+</div>
+
+<h2><span class="sec-no">1.7</span>Why It's Worth It</h2>
+<ul>
+  <li><strong>Modularity.</strong> A pure function's behaviour is entirely in its signature and body. Anyone can reuse it without knowing its context.</li>
+  <li><strong>Testability.</strong> Inputs in, outputs out. You'll see in Chapter 8 that this enables <em>property-based</em> testing: checking a law against thousands of random inputs.</li>
+  <li><strong>Concurrency.</strong> Immutable data can be shared across threads without locks.</li>
+  <li><strong>Refactoring.</strong> If you can always replace an expression with its value, extracting, inlining and reordering code is safe.</li>
+</ul>
+<div class="warfield">
+<p><strong>"Pure" is about what callers can observe, not how the function is written inside.</strong> A function that builds a local mutable array, fills it in a loop, and returns an immutable copy is still pure: no one outside can tell. Chapter 13 makes this precise with the <code>ST</code> type. Don't refuse an efficient local loop for ideological reasons.</p>
+</div>
+
+<h2><span class="sec-no">1.8</span>Exercises</h2>
+<div class="exercise" data-n="Exercise 1.1">
+<p>Which of these are referentially transparent? <code>(a)</code> <code>math.max(3, 7)</code> <code>(b)</code> <code>System.currentTimeMillis()</code> <code>(c)</code> <code>List(1,2,3).map(_ + 1)</code> <code>(d)</code> <code>scala.util.Random.nextInt(10)</code> <code>(e)</code> <code>println("hi")</code></p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<p>(a) and (c) are RT. (b) and (d) give different results each call, so you can't replace them with any one value. (e) returns <code>()</code> every time, but replacing <code>println("hi")</code> with <code>()</code> deletes the printing, which changes the program's meaning. Not RT.</p>
+</div></details>
+
+<div class="exercise" data-n="Exercise 1.2">
+<p>Fix <code>Charge.combine</code> so the case "different cards" can't throw. Hint: what could the function return instead of a <code>Charge</code>?</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<p>Return a value that can say "no result": <code>Option[Charge]</code>.</p>
+<pre><code class="language-scala">def combine(other: Charge): Option[Charge] =
+  if card == other.card then Some(Charge(card, amount + other.amount))
+  else None</code></pre>
+<p>The type now tells callers the truth: combining can fail. Chapter 4 is all about making this pleasant to work with.</p>
+</div></details>
+
+<div class="exercise" data-n="Exercise 1.3">
+<p>This function uses a mutable variable. Is it pure?</p>
+<pre><code class="language-scala">def sumTo(n: Int): Int =
+  var acc = 0
+  for i &lt;- 1 to n do acc += i
+  acc</code></pre>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<p>Yes. <code>acc</code> is created, mutated and dropped inside the call, so no caller can observe it. <code>sumTo(10)</code> can always be replaced with <code>55</code>. Purity is about the outside view.</p>
+</div></details>
+
+<dl class="jargon">
+  <dt>Side effect</dt><dd>Anything a function does other than return a value: mutation, I/O, exceptions, reading the clock.</dd>
+  <dt>Pure function</dt><dd>A function whose result depends only on its inputs and which has no side effects.</dd>
+  <dt>Referential transparency</dt><dd>An expression can be replaced by its value without changing the program's meaning.</dd>
+  <dt>Substitution model</dt><dd>Reasoning about code by repeatedly replacing names with their definitions, like algebra.</dd>
+</dl>
+
+<div class="recap"><ul>
+  <li>FP is programming with pure functions. Effects move to the edge of the program.</li>
+  <li>Turn effects into values (a <code>Charge</code> instead of a charge) and you can combine, batch and test them.</li>
+  <li>RT is the test for purity: replace an expression with its result and nothing changes.</li>
+  <li>RT enables the substitution model and local reasoning.</li>
+</ul></div>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

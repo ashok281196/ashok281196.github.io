@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="FP in Scala">
+<meta name="theme-color" content="#f7f2e7">
+<title>Functional Programming in Scala · A Study Companion</title>
+<meta name="description" content="A chapter-by-chapter study companion to the concepts of Functional Programming in Scala: pure functions to monads to streaming I/O, taught step by step with Scala 3 code and exercises.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+  <div class="topbar" id="booktop"></div>
+
+  <div class="cover">
+    <div class="cover-kicker">A Study Companion · Scala 3 · 2026 Edition</div>
+    <h1>Functional<br>Programming<br><span class="accent">in Scala</span></h1>
+    <p class="cover-sub">The ideas of the "red book", rebuilt from first principles in fifteen chapters. Pure functions to monads to streaming I/O. Every concept is derived step by step, written in Scala 3, and followed by exercises with worked solutions you can hide until you've tried them.</p>
+    <div class="cover-rule"></div>
+  </div>
+
+  <h2><span class="sec-no">Before You Start</span>What This Book Is</h2>
+  <p><em>Functional Programming in Scala</em> by Paul Chiusano and R&uacute;nar Bjarnason (Manning; second edition with Michael Pilquist, updated for Scala 3) teaches FP by having you <strong>derive</strong> everything yourself: you write <code>List</code>, <code>Option</code>, a parallelism library, a test framework, a parser library, and then notice they all share the same shapes. That arc is what makes the book worth reading, and it's the arc this companion follows.</p>
+  <p>This is not a copy of the book. It's my own walk-through of its <strong>concepts</strong>, in my own words and my own code, written to be read on an iPad before or after the matching chapter. When the book gives you an exercise and moves on, this companion slows down: why the exercise exists, what the type signature is telling you, where people get stuck, and what the idea looks like if you've spent years in C++.</p>
+  <div class="keypoint">Functional programming is not a style of writing code. It's one constraint: <strong>write programs out of pure functions</strong>. Everything else in this book (immutable data, Option, monads, IO) is what you discover you need once you take that one constraint seriously.</div>
+
+  <h2><span class="sec-no">How To Read It</span>The Rhythm of a Chapter</h2>
+  <p>Every chapter has the same parts:</p>
+  <ul>
+    <li><strong>The problem first.</strong> Each idea is introduced by something that hurts without it.</li>
+    <li><strong>Step-by-step derivation.</strong> Small code blocks, each one change from the last. Read them in order.</li>
+    <li><strong>Boxes.</strong> <em>Analogy</em> for intuition, <em>Coming from C++</em> for the mapping to what you already know, <em>Hold onto this</em> for the one sentence to remember, <em>Things that bite</em> for common mistakes.</li>
+    <li><strong>Exercises.</strong> Try each one before opening the solution. In FP the struggle with the types <em>is</em> the learning.</li>
+    <li><strong>Recap and jargon decoder</strong> at the end, for review.</li>
+  </ul>
+
+  <h2><span class="sec-no">Contents</span>Fifteen Chapters, Four Parts</h2>
+  <p><strong>Part I</strong> (Ch. 1&ndash;6) gives you the basics: pure functions and the core data types. <strong>Part II</strong> (Ch. 7&ndash;9) designs three real libraries the functional way. <strong>Part III</strong> (Ch. 10&ndash;12) pulls the shared structure out of those libraries: monoids, monads, applicatives. <strong>Part IV</strong> (Ch. 13&ndash;14) handles the outside world: I/O, mutation and streams.</p>
+  <nav class="toc" id="toc"></nav>
+
+  <h2><span class="sec-no">Pacing</span>A Realistic Plan</h2>
+  <p>At about an hour a day: Part I takes two weeks. Do every exercise there, because the rest of the book assumes it's automatic. Part II takes two weeks. Read for the <em>design process</em>, not the specific library. Part III takes a week and a half and is where it clicks. Part IV takes a week. If you're short on time, read 1 &rarr; 3 &rarr; 4 &rarr; 6 &rarr; 10 &rarr; 11 &rarr; 13. That path covers the core ideas you'll use in real Scala codebases with cats-effect or ZIO.</p>
+  <p style="font-family:var(--mono); font-size:13px; color:var(--ink-soft); margin-top:50px;">Compiled November 2026 · An independent study companion, not affiliated with the authors or Manning · Get the book itself from Manning; the official exercises and answers live in the fpinscala GitHub repo.</p>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

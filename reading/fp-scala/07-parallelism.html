@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ch. 7 · Designing a Library: Parallelism · FP in Scala: A Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+<header class="chapter-head">
+  <div class="chapter-num">07</div>
+  <div class="chapter-kicker">Part II · Functional Design</div>
+  <h1>Designing a Library: Parallelism</h1>
+  <p class="chapter-sub">Part II is about the design process more than any particular library. We design a small parallel-computation API from scratch: start from how we'd like to use it, discover the primitives, choose a representation late, and use algebraic laws to find a real deadlock bug.</p>
+</header>
+
+<h2><span class="sec-no">7.1</span>How Functional Design Works</h2>
+<p>In object-oriented design you usually start from the representation: what classes, what fields, what methods mutate them. Functional design inverts this:</p>
+<ol>
+  <li>Write example code using the API you <em>wish</em> you had.</li>
+  <li>Let the examples tell you what types and functions you need. Leave their implementations as <code>???</code>.</li>
+  <li>Find the smallest set of <strong>primitive</strong> functions; express everything else as <strong>derived</strong> combinators.</li>
+  <li>Write down <strong>laws</strong>: equations the functions must satisfy.</li>
+  <li>Only then pick a representation that satisfies the laws.</li>
+</ol>
+<p>A set of types, functions and laws, with the representation left abstract, is called an <strong>algebra</strong>. That's what "algebraic design" means.</p>
+
+<h2><span class="sec-no">7.2</span>Starting From an Example</h2>
+<p>Summing a sequence by divide and conquer:</p>
+<pre><code class="language-scala">def sum(ints: IndexedSeq[Int]): Int =
+  if ints.size &lt;= 1 then ints.headOption.getOrElse(0)
+  else
+    val (l, r) = ints.splitAt(ints.size / 2)
+    sum(l) + sum(r)</code></pre>
+<p>The two halves are independent, so they could run in parallel. Invent a type for "a computation that may run in parallel and yields an <code>A</code>": <code>Par[A]</code>. We need a way to create one and a way to get the result:</p>
+<pre><code class="language-scala">def unit[A](a: =&gt; A): Par[A] = ???     // lift a computation, maybe evaluate it on another thread
+def get[A](a: Par[A]): A = ???         // wait for the result</code></pre>
+<pre><code class="language-scala">def sum(ints: IndexedSeq[Int]): Int =
+  if ints.size &lt;= 1 then ints.headOption.getOrElse(0)
+  else
+    val (l, r) = ints.splitAt(ints.size / 2)
+    val sumL: Par[Int] = unit(sum(l))
+    val sumR: Par[Int] = unit(sum(r))
+    get(sumL) + get(sumR)</code></pre>
+<p>Now substitute <code>sumL</code> and <code>sumR</code> into the last line: <code>get(unit(sum(l))) + get(unit(sum(r)))</code>. Scala evaluates left to right, so the left <code>get</code> <strong>blocks until the left half finishes</strong> before the right half even starts. Everything runs sequentially. The substitution model just exposed a design flaw: <code>get</code> is a side effect (waiting) that we called too early.</p>
+
+<h2><span class="sec-no">7.3</span>Combine Without Waiting: map2</h2>
+<p>Instead of extracting values to add them, combine the <em>parallel computations</em>:</p>
+<pre><code class="language-scala">def map2[A, B, C](pa: Par[A], pb: Par[B])(f: (A, B) =&gt; C): Par[C] = ???
+
+def sum(ints: IndexedSeq[Int]): Par[Int] =
+  if ints.size &lt;= 1 then unit(ints.headOption.getOrElse(0))
+  else
+    val (l, r) = ints.splitAt(ints.size / 2)
+    map2(sum(l), sum(r))(_ + _)</code></pre>
+<p>The result is a <code>Par[Int]</code>, a description. No waiting happens inside <code>sum</code>.</p>
+<p>Should <code>map2</code> evaluate its arguments eagerly or lazily? And should <code>unit</code> start a thread? If <code>unit</code> always forks, then <code>unit(1)</code> wastes a thread on nothing. Better to make forking <strong>explicit</strong>:</p>
+<pre><code class="language-scala">def unit[A](a: A): Par[A] = ???                 // already-computed value; no thread
+def fork[A](a: =&gt; Par[A]): Par[A] = ???         // mark: run this on a separate logical thread
+def lazyUnit[A](a: =&gt; A): Par[A] = fork(unit(a)) // derived!
+
+def sum(ints: IndexedSeq[Int]): Par[Int] =
+  if ints.size &lt;= 1 then unit(ints.headOption.getOrElse(0))
+  else
+    val (l, r) = ints.splitAt(ints.size / 2)
+    map2(fork(sum(l)), fork(sum(r)))(_ + _)</code></pre>
+<p>Now the programmer decides where parallelism happens, and <code>lazyUnit</code> fell out as a combination of two primitives. That's the design process working.</p>
+
+<h2><span class="sec-no">7.4</span>Separating Description From Running</h2>
+<p>Where does the thread pool come from? If <code>fork</code> grabbed a global pool, the library would be hard to test and configure. Instead: <code>Par</code> values are pure descriptions, and a separate <code>run</code> function executes them with a pool you provide. <em>Description vs evaluation</em> again.</p>
+<p>Now, finally, choose a representation. A <code>Par</code> needs a thread pool to run, and running gives a result we can wait on. Java's <code>ExecutorService</code> and <code>Future</code> fit:</p>
+<pre><code class="language-scala">import java.util.concurrent.{ExecutorService, Future, TimeUnit, Callable}
+
+opaque type Par[A] = ExecutorService =&gt; Future[A]
+
+object Par:
+  extension [A](pa: Par[A]) def run(es: ExecutorService): Future[A] = pa(es)
+
+  def unit[A](a: A): Par[A] = es =&gt; UnitFuture(a)
+
+  private case class UnitFuture[A](get: A) extends Future[A]:
+    def isDone = true
+    def get(timeout: Long, units: TimeUnit) = get
+    def isCancelled = false
+    def cancel(evenIfRunning: Boolean): Boolean = false
+
+  extension [A](pa: Par[A])
+    def map2[B, C](pb: Par[B])(f: (A, B) =&gt; C): Par[C] =
+      es =&gt;
+        val fa = pa(es)
+        val fb = pb(es)
+        UnitFuture(f(fa.get, fb.get))   // simple version; ignores timeouts
+
+  def fork[A](a: =&gt; Par[A]): Par[A] =
+    es =&gt; es.submit(new Callable[A] { def call = a(es).get })</code></pre>
+<p>Note that <code>map2</code> starts both computations <em>before</em> waiting on either, which is exactly what the naive version in 7.2 got wrong.</p>
+<div class="bridge">
+<p>This is <code>std::async</code> with explicit launch policy, but with the executor injected. <code>fork</code> is <code>std::launch::async</code>, <code>unit</code> is <code>std::launch::deferred</code> of an already-computed value, and <code>run</code> is where you finally call <code>.get()</code>. The difference is that a <code>Par</code> is a value you can build, pass around and combine before anything starts.</p>
+</div>
+
+<div class="exercise" data-n="Exercise 7.1 · asyncF and parMap">
+<p>Write <code>asyncF[A, B](f: A =&gt; B): A =&gt; Par[B]</code>, which evaluates <code>f</code>'s result asynchronously. Then write <code>parMap[A, B](ps: List[A])(f: A =&gt; B): Par[List[B]]</code>, mapping over a list in parallel. You'll need a <code>sequence</code> for <code>Par</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def asyncF[A, B](f: A =&gt; B): A =&gt; Par[B] =
+  a =&gt; lazyUnit(f(a))
+
+def sequence[A](ps: List[Par[A]]): Par[List[A]] =
+  ps.foldRight(unit(List.empty[A]))((pa, acc) =&gt; pa.map2(acc)(_ :: _))
+
+def parMap[A, B](ps: List[A])(f: A =&gt; B): Par[List[B]] =
+  fork(sequence(ps.map(asyncF(f))))</code></pre>
+<p>Once again, <code>sequence</code> is the same fold with <code>map2</code> and <code>unit</code>. The outer <code>fork</code> makes <code>parMap</code> return immediately, even for a long list.</p>
+</div></details>
+
+<h2><span class="sec-no">7.5</span>Laws</h2>
+<p>A law is an equation that must hold for every input. Laws make "correct" precise, they guide implementation, and (next chapter) they become tests.</p>
+<h3>The map law</h3>
+<p>Define <code>map</code> via <code>map2</code>: <code>pa.map(f) = pa.map2(unit(()))((a, _) =&gt; f(a))</code>. A natural law:</p>
+<pre><code class="language-text">unit(x).map(f) == unit(f(x))</code></pre>
+<p>Simplify it, as you would in algebra. Set <code>f = identity</code>: <code>unit(x).map(id) == unit(x)</code>. Then generalise <code>unit(x)</code> to any <code>y</code>:</p>
+<pre><code class="language-text">y.map(id) == y</code></pre>
+<p>This says: <code>map</code> can't change the structure, only the values. And because <code>map</code> is parametrically polymorphic (it can't inspect <code>A</code>), the original law follows from this simpler one for free. Laws like that, which hold just because of the types, are called <strong>free theorems</strong>.</p>
+
+<h3>The fork law, and a deadlock</h3>
+<p><code>fork</code> should only change <em>where</em> something runs, not the result:</p>
+<pre><code class="language-text">fork(x) == x</code></pre>
+<p>Try to break it. Run with a fixed thread pool of size 1:</p>
+<pre><code class="language-scala">val es = java.util.concurrent.Executors.newFixedThreadPool(1)
+fork(fork(unit(42))).run(es).get   // DEADLOCK</code></pre>
+<p>Trace it. The outer <code>fork</code> submits a task, and that task takes the pool's only thread. Inside it, <code>a(es)</code> evaluates the inner <code>fork</code>, which submits a second task to the queue, and then the outer task calls <code>.get</code> on it and waits. The second task needs a thread to run. The only thread is the one waiting for it. Neither can proceed. (<code>fork(unit(42))</code> alone is fine, because <code>unit</code> doesn't submit anything.)</p>
+<p>With any fixed pool of size N, enough nested forks deadlock. The law <code>fork(x) == x</code> doesn't hold for our implementation. Writing the law down is what led us to the bug.</p>
+<div class="warfield">
+<p><strong>Blocking inside a pool task is the root problem.</strong> Any implementation where a task calls <code>.get</code> on another task in the same bounded pool can deadlock. This is the same bug you'd hit with nested <code>std::async</code> on a fixed thread pool, or with <code>futures.wait()</code> inside a Python <code>ThreadPoolExecutor</code> worker.</p>
+</div>
+
+<h2><span class="sec-no">7.6</span>Fixing It: Never Block</h2>
+<p>The fix is to change the representation so nothing ever calls <code>get</code> inside the pool. Instead of returning a Java <code>Future</code> you wait on, a <code>Par</code> takes a <strong>callback</strong> to invoke when the result is ready:</p>
+<pre><code class="language-scala">// a result you can register a callback on, instead of blocking
+trait Future[+A]:
+  private[par] def apply(k: A =&gt; Unit): Unit
+
+opaque type Par[+A] = ExecutorService =&gt; Future[A]
+
+def unit[A](a: A): Par[A] =
+  es =&gt; new Future[A] { def apply(cb: A =&gt; Unit): Unit = cb(a) }
+
+def fork[A](a: =&gt; Par[A]): Par[A] =
+  es =&gt; new Future[A]:
+    def apply(cb: A =&gt; Unit): Unit =
+      es.submit(new Callable[Unit] { def call = a(es)(cb) })   // no waiting</code></pre>
+<p><code>map2</code> is the interesting part: it must wait for <em>two</em> callbacks without blocking. The usual approach keeps a small piece of state (has A arrived? has B?) behind a lock or an actor, and calls <code>f</code> when the second arrives. Only the top-level <code>run</code> blocks, once, outside the pool, on a <code>CountDownLatch</code>.</p>
+<p>The important part: <strong>the API didn't change</strong>. <code>unit</code>, <code>fork</code>, <code>map2</code>, <code>sequence</code> and <code>parMap</code> have the same signatures. Every program written against the algebra keeps working. That's the payoff of designing the algebra before the representation.</p>
+
+<h2><span class="sec-no">7.7</span>Choosing Between Computations</h2>
+<p>Say we want to run one of two parallel computations, depending on the result of a first:</p>
+<pre><code class="language-scala">def choice[A](cond: Par[Boolean])(t: Par[A], f: Par[A]): Par[A]</code></pre>
+<p>Then one of N, chosen by an <code>Int</code>. Then one from a <code>Map[K, Par[A]]</code>. Each time the shape is the same: get a value, use it to <em>choose</em> the next <code>Par</code>. Generalise:</p>
+<pre><code class="language-scala">def flatMap[A, B](pa: Par[A])(f: A =&gt; Par[B]): Par[B]
+
+def choice[A](cond: Par[Boolean])(t: Par[A], f: Par[A]): Par[A] =
+  flatMap(cond)(b =&gt; if b then t else f)</code></pre>
+<p>We've found <code>flatMap</code> again, by a completely different route. And it can be split further into <code>join(ppa: Par[Par[A]]): Par[A]</code> plus <code>map</code>: <code>flatMap(pa)(f) = join(pa.map(f))</code>.</p>
+
+<div class="exercise" data-n="Exercise 7.2 · flatMap and join">
+<p>Show that <code>flatMap</code> and <code>join</code> can each be written in terms of the other (with <code>map</code>).</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def join[A](ppa: Par[Par[A]]): Par[A] =
+  flatMap(ppa)(pa =&gt; pa)        // "the value IS the next computation"
+
+def flatMap[A, B](pa: Par[A])(f: A =&gt; Par[B]): Par[B] =
+  join(pa.map(f))</code></pre>
+<p>Two equally good choices of primitive. This works for <code>List</code> (where <code>join</code> is <code>flatten</code>) and <code>Option</code> too.</p>
+</div></details>
+
+<div class="keypoint">The process: example → wished-for API → primitives vs derived → laws → representation. Laws catch bugs before tests do, and a well-chosen algebra lets you swap the representation without breaking users.</div>
+
+<dl class="jargon">
+  <dt>Algebra</dt><dd>A set of types and functions plus the laws relating them, independent of representation.</dd>
+  <dt>Primitive / derived combinator</dt><dd>Functions that depend on the representation vs functions written using other combinators only.</dd>
+  <dt>Law</dt><dd>An equation that must hold for all inputs, like <code>y.map(id) == y</code>.</dd>
+  <dt>Free theorem</dt><dd>A law that holds automatically because of a function's polymorphic type.</dd>
+  <dt>Continuation / callback</dt><dd>A function to call with the result, instead of returning it. The way to avoid blocking.</dd>
+</dl>
+
+<div class="recap"><ul>
+  <li>Design from usage examples, and choose the representation last.</li>
+  <li>Make side effects like waiting and forking explicit and separate from description.</li>
+  <li>State laws. The law <code>fork(x) == x</code> found a deadlock in the blocking implementation.</li>
+  <li>A non-blocking, callback-based representation fixes it without changing the API.</li>
+  <li>Choosing a computation based on a result leads, again, to <code>flatMap</code>.</li>
+</ul></div>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

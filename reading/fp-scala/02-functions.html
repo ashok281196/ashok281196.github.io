@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ch. 2 · Functions, Recursion &amp; Types · FP in Scala: A Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+<header class="chapter-head">
+  <div class="chapter-num">02</div>
+  <div class="chapter-kicker">Part I · Foundations</div>
+  <h1>Functions, Recursion &amp; Types</h1>
+  <p class="chapter-sub">Loops without mutation, functions that take and return functions, and generic functions so constrained by their types that there's only one way to write them.</p>
+</header>
+
+<h2><span class="sec-no">2.1</span>Loops Become Recursion</h2>
+<p>If we can't mutate a counter, how do we loop? We write a function that calls itself with the <em>next</em> value of the counter. The "loop variables" become parameters.</p>
+<pre><code class="language-scala">// imperative
+def factorialLoop(n: Int): Int =
+  var acc = 1
+  var i = n
+  while i &gt; 0 do
+    acc *= i
+    i -= 1
+  acc
+
+// recursive: acc and i become parameters of an inner function
+def factorial(n: Int): Int =
+  def go(i: Int, acc: Int): Int =
+    if i &lt;= 0 then acc
+    else go(i - 1, acc * i)
+  go(n, 1)</code></pre>
+<p>Read <code>go</code> as a loop body: "if we're done, return the accumulator; otherwise run again with <code>i - 1</code> and an updated accumulator." This pattern, an inner <code>go</code> with an accumulator, is how you'll write most loops in FP.</p>
+
+<h3>Tail calls and the stack</h3>
+<p>Doesn't recursion blow the stack? It depends where the recursive call sits. In <code>go</code>, the call <code>go(i - 1, acc * i)</code> is the <strong>last thing</strong> the function does. Nothing is waiting for its result. That's a <strong>tail call</strong>, and the Scala compiler turns tail-recursive functions into a plain <code>while</code> loop in bytecode, so there's no stack growth.</p>
+<pre><code class="language-scala">import scala.annotation.tailrec
+
+def factorial(n: Int): Int =
+  @tailrec
+  def go(i: Int, acc: Int): Int =
+    if i &lt;= 0 then acc
+    else go(i - 1, acc * i)
+  go(n, 1)</code></pre>
+<p><code>@tailrec</code> asks the compiler to <em>fail</em> if it can't make the function a loop. Use it every time you mean "this is a loop".</p>
+<p>Compare a non-tail-recursive version:</p>
+<pre><code class="language-scala">def factorialNaive(n: Int): Int =
+  if n &lt;= 0 then 1
+  else n * factorialNaive(n - 1)   // must multiply AFTER the call returns</code></pre>
+<p>After the recursive call returns, we still need to multiply by <code>n</code>. Each frame waits, so a deep input overflows.</p>
+<div class="bridge">
+<p>C++ compilers often do tail-call optimisation at <code>-O2</code>, but the standard doesn't guarantee it, so you can't rely on it. In Scala, <code>@tailrec</code> turns it into a compile-time guarantee for self-recursive functions. (Mutual recursion and recursion through closures aren't covered; Chapter 13 handles those with trampolining.)</p>
+</div>
+
+<div class="exercise" data-n="Exercise 2.1">
+<p>Write a tail-recursive <code>fib(n: Int): Int</code> returning the n-th Fibonacci number, where <code>fib(0) = 0</code>, <code>fib(1) = 1</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def fib(n: Int): Int =
+  @tailrec
+  def go(k: Int, prev: Int, cur: Int): Int =
+    if k == 0 then prev
+    else go(k - 1, cur, prev + cur)
+  go(n, 0, 1)</code></pre>
+<p>Two accumulators: the pair <code>(prev, cur)</code> slides along the sequence. Each step is <code>(a, b) → (b, a + b)</code>.</p>
+</div></details>
+
+<h2><span class="sec-no">2.2</span>Higher-Order Functions</h2>
+<p>Functions are values. You can pass them in, return them, and store them. A function that takes or returns another function is a <strong>higher-order function</strong> (HOF).</p>
+<p>Suppose we print the absolute value and the factorial of a number:</p>
+<pre><code class="language-scala">def formatAbs(x: Int) = s"The absolute value of $x is ${x.abs}"
+def formatFactorial(n: Int) = s"The factorial of $n is ${factorial(n)}"</code></pre>
+<p>They differ only in a name and a function. Pull the difference out as parameters:</p>
+<pre><code class="language-scala">def formatResult(name: String, n: Int, f: Int =&gt; Int): String =
+  s"The $name of $n is ${f(n)}"
+
+formatResult("absolute value", -42, _.abs)
+formatResult("factorial", 7, factorial)</code></pre>
+<p>That's the basic FP move: <strong>whatever varies becomes a function parameter</strong>.</p>
+
+<h2><span class="sec-no">2.3</span>Polymorphic Functions</h2>
+<p>Here's a search that only works on arrays of strings:</p>
+<pre><code class="language-scala">def findFirst(ss: Array[String], key: String): Int =
+  @tailrec
+  def loop(i: Int): Int =
+    if i &gt;= ss.length then -1
+    else if ss(i) == key then i
+    else loop(i + 1)
+  loop(0)</code></pre>
+<p>Nothing about the algorithm depends on strings. Generalise the element type to <code>A</code>, and since we can't compare an unknown <code>A</code> to a key, take a predicate:</p>
+<pre><code class="language-scala">def findFirst[A](as: Array[A], p: A =&gt; Boolean): Int =
+  @tailrec
+  def loop(i: Int): Int =
+    if i &gt;= as.length then -1
+    else if p(as(i)) then i
+    else loop(i + 1)
+  loop(0)
+
+findFirst(Array(7, 9, 13), _ == 9)   // 1</code></pre>
+<p>A function with type parameters is <strong>polymorphic</strong> (more precisely, <em>parametrically</em> polymorphic). It must work the same way for every <code>A</code>, so it can't inspect or create <code>A</code>s. It can only move around the ones it's given.</p>
+
+<h2><span class="sec-no">2.4</span>Following the Types to the Implementation</h2>
+<p>That restriction is powerful: the less a function knows about its types, the fewer ways there are to write it. Sometimes there's exactly one.</p>
+<p>Take this signature:</p>
+<pre><code class="language-scala">def partial1[A, B, C](a: A, f: (A, B) =&gt; C): B =&gt; C</code></pre>
+<p>Reason it through:</p>
+<ol>
+  <li>We must return a <code>B =&gt; C</code>, a function. So start with <code>b =&gt; ???</code>.</li>
+  <li>Inside, we must produce a <code>C</code>. The only thing that produces a <code>C</code> is <code>f</code>.</li>
+  <li><code>f</code> needs an <code>A</code> and a <code>B</code>. We have <code>a</code> and, inside the lambda, <code>b</code>.</li>
+</ol>
+<pre><code class="language-scala">def partial1[A, B, C](a: A, f: (A, B) =&gt; C): B =&gt; C =
+  b =&gt; f(a, b)</code></pre>
+<p>No cleverness required. The types left only one option. You'll use this technique for the whole book.</p>
+<div class="keypoint">With a generic signature, ask: <em>what do I have, what do I need, and which values produce the thing I need?</em> Then fill in the holes. Scala lets you write <code>???</code> as a placeholder that compiles, so you can work one hole at a time.</div>
+
+<div class="exercise" data-n="Exercise 2.2 · curry">
+<p>Implement <code>def curry[A, B, C](f: (A, B) =&gt; C): A =&gt; (B =&gt; C)</code>. It turns a two-argument function into a function that takes the arguments one at a time.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def curry[A, B, C](f: (A, B) =&gt; C): A =&gt; (B =&gt; C) =
+  a =&gt; b =&gt; f(a, b)</code></pre>
+</div></details>
+
+<div class="exercise" data-n="Exercise 2.3 · uncurry">
+<p>Implement the reverse: <code>def uncurry[A, B, C](f: A =&gt; B =&gt; C): (A, B) =&gt; C</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def uncurry[A, B, C](f: A =&gt; B =&gt; C): (A, B) =&gt; C =
+  (a, b) =&gt; f(a)(b)</code></pre>
+<p>Note that <code>=&gt;</code> associates to the right: <code>A =&gt; B =&gt; C</code> means <code>A =&gt; (B =&gt; C)</code>.</p>
+</div></details>
+
+<div class="exercise" data-n="Exercise 2.4 · compose">
+<p>Implement <code>def compose[A, B, C](f: B =&gt; C, g: A =&gt; B): A =&gt; C</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def compose[A, B, C](f: B =&gt; C, g: A =&gt; B): A =&gt; C =
+  a =&gt; f(g(a))</code></pre>
+<p>The standard library has it as <code>f.compose(g)</code> or <code>g.andThen(f)</code>.</p>
+</div></details>
+
+<h2><span class="sec-no">2.5</span>Anonymous Functions and Shorthand</h2>
+<p>Scala gives you several ways to write the same function value. You'll see all of them in real code:</p>
+<pre><code class="language-scala">(x: Int) =&gt; x + 1      // full form
+x =&gt; x + 1             // type inferred from context
+_ + 1                  // placeholder: each _ is the next argument
+(a, b) =&gt; a + b
+_ + _                  // same as above</code></pre>
+<p>Underneath, a function value is an object with an <code>apply</code> method. <code>f(x)</code> is <code>f.apply(x)</code>.</p>
+<div class="warfield">
+<p><code>_</code> shorthand gets confusing quickly. <code>_ + _</code> is a two-argument function, not "x plus x". And <code>f(_ + 1)</code> means <code>f(x =&gt; x + 1)</code>, which is often right but not always. When in doubt, name the parameter.</p>
+</div>
+
+<h2><span class="sec-no">2.6</span>Why "Point-Free" Code Shows Up</h2>
+<p>Once functions compose, you can describe a pipeline without mentioning the data:</p>
+<pre><code class="language-scala">val trim: String =&gt; String = _.trim
+val lower: String =&gt; String = _.toLowerCase
+val normalise = trim.andThen(lower)
+
+List("  Hello", "WORLD ").map(normalise)   // List("hello", "world")</code></pre>
+<p>You'll see this a lot in FP code. Use it where it reads well and name intermediate values where it doesn't.</p>
+
+<dl class="jargon">
+  <dt>Tail call</dt><dd>A call that is the last action of a function, so its frame can be reused.</dd>
+  <dt>Higher-order function</dt><dd>A function that takes or returns functions.</dd>
+  <dt>Parametric polymorphism</dt><dd>Generic code that behaves the same for every type argument and can't inspect it.</dd>
+  <dt>Currying</dt><dd>Turning a function of N arguments into N nested one-argument functions.</dd>
+  <dt>Point-free style</dt><dd>Defining functions by composing other functions, without naming the argument.</dd>
+</dl>
+
+<div class="recap"><ul>
+  <li>Loops become recursive inner functions with accumulators. Mark them <code>@tailrec</code>.</li>
+  <li>Whatever varies between two functions becomes a function parameter.</li>
+  <li>Generic code can't inspect its types, which often leaves only one valid implementation.</li>
+  <li>Solve type puzzles by listing what you have and what you need.</li>
+</ul></div>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ch. 5 · Strictness &amp; Laziness · FP in Scala: A Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+<header class="chapter-head">
+  <div class="chapter-num">05</div>
+  <div class="chapter-kicker">Part I · Foundations</div>
+  <h1>Strictness &amp; Laziness</h1>
+  <p class="chapter-sub">Chaining map and filter on lists builds a new list at every step. By delaying evaluation we can fuse those steps into one pass, stop early, and even describe infinite sequences. We'll build a lazy list of our own to see how.</p>
+</header>
+
+<h2><span class="sec-no">5.1</span>The Problem: Intermediate Lists</h2>
+<pre><code class="language-scala">List(1, 2, 3, 4).map(_ + 10).filter(_ % 2 == 0).map(_ * 3)</code></pre>
+<p>This builds three lists: one after <code>map</code>, one after <code>filter</code>, and the final one. Each step traverses the whole input before the next starts. For four elements it doesn't matter; for a million, or for a pipeline that only needs the first result, it's wasteful. A hand-written <code>while</code> loop would do it in one pass.</p>
+<p>We want to <strong>write</strong> the pipeline with high-level combinators but have it <strong>run</strong> like the fused loop. The key is <strong>non-strictness</strong>.</p>
+
+<h2><span class="sec-no">5.2</span>Strict and Non-Strict</h2>
+<p>A function is <strong>strict</strong> in a parameter if it always evaluates that argument. Most functions are. Some aren't, and you already use them:</p>
+<pre><code class="language-scala">false &amp;&amp; { println("!!"); true }    // prints nothing
+if input.isEmpty then sys.error("empty") else input   // only one branch runs</code></pre>
+<p><code>&amp;&amp;</code>, <code>||</code> and <code>if</code> are non-strict. We can write our own non-strict functions with <strong>by-name parameters</strong>, which you saw in Chapter 4:</p>
+<pre><code class="language-scala">def if2[A](cond: Boolean, onTrue: =&gt; A, onFalse: =&gt; A): A =
+  if cond then onTrue else onFalse
+
+if2(false, sys.error("fail"), 3)   // 3; the error is never evaluated</code></pre>
+<p>Under the hood, a by-name argument is passed as a <strong>thunk</strong>: a zero-argument function <code>() =&gt; A</code> the callee calls when it needs the value.</p>
+
+<h3>Evaluated each time, unless cached</h3>
+<pre><code class="language-scala">def maybeTwice(b: Boolean, i: =&gt; Int) = if b then i + i else 0
+
+maybeTwice(true, { println("hi"); 1 + 41 })
+// prints "hi" TWICE, returns 84</code></pre>
+<p>A by-name parameter is re-evaluated at every reference. To evaluate once and remember, use <code>lazy val</code>:</p>
+<pre><code class="language-scala">def maybeTwice2(b: Boolean, i: =&gt; Int) =
+  lazy val j = i          // not evaluated yet
+  if b then j + j else 0  // evaluated on first use, then cached
+
+maybeTwice2(true, { println("hi"); 1 + 41 })   // prints "hi" once</code></pre>
+<div class="bridge">
+<p>A thunk is a <code>std::function&lt;A()&gt;</code>; a <code>lazy val</code> is a thunk plus <code>std::call_once</code> and a cached result. Scala generates the thread-safe initialisation for you.</p>
+</div>
+
+<h2><span class="sec-no">5.3</span>A Lazy List</h2>
+<p>Take the list from Chapter 3 and make the head and tail thunks:</p>
+<pre><code class="language-scala">enum LazyList[+A]:
+  case Empty
+  case Cons(h: () =&gt; A, t: () =&gt; LazyList[A])
+
+object LazyList:
+  // "smart constructor": caches head and tail so each is computed at most once
+  def cons[A](hd: =&gt; A, tl: =&gt; LazyList[A]): LazyList[A] =
+    lazy val head = hd
+    lazy val tail = tl
+    Cons(() =&gt; head, () =&gt; tail)
+
+  def empty[A]: LazyList[A] = Empty
+
+  def apply[A](as: A*): LazyList[A] =
+    if as.isEmpty then empty
+    else cons(as.head, apply(as.tail*))</code></pre>
+<p>Use <code>cons</code>, never <code>Cons</code> directly. It's the smart constructor that adds caching. Without it, each time someone looked at the head, the head expression would run again.</p>
+<p>A first helper, to see what's inside:</p>
+<pre><code class="language-scala">  def toList: List[A] =
+    @annotation.tailrec
+    def go(ll: LazyList[A], acc: List[A]): List[A] = ll match
+      case Cons(h, t) =&gt; go(t(), h() :: acc)
+      case Empty      =&gt; acc.reverse
+    go(this, Nil)</code></pre>
+<p>(This and the following methods go inside <code>enum LazyList</code>.)</p>
+
+<div class="exercise" data-n="Exercise 5.1 · take and takeWhile">
+<p>Write <code>take(n: Int): LazyList[A]</code> and <code>takeWhile(p: A =&gt; Boolean): LazyList[A]</code>. They should do no work until the result is consumed.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">  def take(n: Int): LazyList[A] = this match
+    case Cons(h, t) if n &gt; 1  =&gt; LazyList.cons(h(), t().take(n - 1))
+    case Cons(h, _) if n == 1 =&gt; LazyList.cons(h(), LazyList.empty)
+    case _                    =&gt; LazyList.empty
+
+  def takeWhile(p: A =&gt; Boolean): LazyList[A] = this match
+    case Cons(h, t) if p(h()) =&gt; LazyList.cons(h(), t().takeWhile(p))
+    case _                    =&gt; LazyList.empty</code></pre>
+<p>The recursive call sits inside <code>cons</code>'s by-name tail, so it doesn't run until someone asks for the tail. Calling <code>take(3)</code> just returns one <code>Cons</code> immediately.</p>
+</div></details>
+
+<h2><span class="sec-no">5.4</span>A Lazy Fold Can Stop Early</h2>
+<p>Here's the trick that makes everything work. Write <code>foldRight</code> with a <em>by-name</em> second argument to <code>f</code>:</p>
+<pre><code class="language-scala">  def foldRight[B](acc: =&gt; B)(f: (A, =&gt; B) =&gt; B): B = this match
+    case Cons(h, t) =&gt; f(h(), t().foldRight(acc)(f))
+    case Empty      =&gt; acc</code></pre>
+<p>The recursion <code>t().foldRight(acc)(f)</code> is passed to <code>f</code> unevaluated. If <code>f</code> doesn't look at it, the rest of the list is never touched:</p>
+<pre><code class="language-scala">  def exists(p: A =&gt; Boolean): Boolean =
+    foldRight(false)((a, b) =&gt; p(a) || b)    // || doesn't evaluate b if p(a)</code></pre>
+<p><code>exists</code> stops at the first match, like a loop with <code>break</code>, but it's a fold.</p>
+
+<div class="exercise" data-n="Exercise 5.2 · forAll, map, filter, append, flatMap">
+<p>Using <code>foldRight</code>, write <code>forAll</code>, <code>map</code>, <code>filter</code>, <code>append</code> and <code>flatMap</code>. They must stay lazy.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">  def forAll(p: A =&gt; Boolean): Boolean =
+    foldRight(true)((a, b) =&gt; p(a) &amp;&amp; b)
+
+  def map[B](f: A =&gt; B): LazyList[B] =
+    foldRight(LazyList.empty[B])((a, acc) =&gt; LazyList.cons(f(a), acc))
+
+  def filter(p: A =&gt; Boolean): LazyList[A] =
+    foldRight(LazyList.empty[A])((a, acc) =&gt; if p(a) then LazyList.cons(a, acc) else acc)
+
+  def append[A2 &gt;: A](that: =&gt; LazyList[A2]): LazyList[A2] =
+    foldRight(that)((a, acc) =&gt; LazyList.cons(a, acc))
+
+  def flatMap[B](f: A =&gt; LazyList[B]): LazyList[B] =
+    foldRight(LazyList.empty[B])((a, acc) =&gt; f(a).append(acc))</code></pre>
+<p>In each, <code>acc</code> is by-name, and it's passed into <code>cons</code>'s by-name tail, so it stays unevaluated.</p>
+</div></details>
+
+<h2><span class="sec-no">5.5</span>Watching It Run</h2>
+<p>Trace the pipeline from 5.1 on a lazy list, asking for the result with <code>toList</code>:</p>
+<pre><code class="language-text">LazyList(1,2,3,4).map(_ + 10).filter(_ % 2 == 0).toList
+
+map 1 → 11 · filter 11 → odd, skip
+map 2 → 12 · filter 12 → even, emit 12
+map 3 → 13 · filter 13 → odd, skip
+map 4 → 14 · filter 14 → even, emit 14
+→ List(12, 14)</code></pre>
+<p>Each element goes all the way through the pipeline before the next element is touched. No intermediate lists are built. That's the fused loop we wanted, assembled from separate combinators. Lazy lists are sometimes called "first-class loops".</p>
+<p>It also means that something like <code>find</code> does only as much work as needed:</p>
+<pre><code class="language-scala">  def find(p: A =&gt; Boolean): Option[A] = filter(p).headOption</code></pre>
+<p>Even though it's written with <code>filter</code>, it stops at the first match.</p>
+
+<h2><span class="sec-no">5.6</span>Infinite Lists</h2>
+<p>Since nothing runs until it's needed, a lazy list can be infinite:</p>
+<pre><code class="language-scala">val ones: LazyList[Int] = LazyList.cons(1, ones)
+
+ones.take(5).toList           // List(1, 1, 1, 1, 1)
+ones.exists(_ % 2 != 0)       // true
+ones.map(_ + 1).exists(_ % 2 == 0)   // true
+ones.forAll(_ == 1)           // never terminates! (stack overflow)</code></pre>
+<div class="warfield">
+<p>On an infinite list, anything that must look at every element (<code>forAll</code> when it's true, <code>toList</code>, <code>length</code>) never finishes. Laziness lets you <em>describe</em> infinite data. You still have to consume it with something that stops.</p>
+</div>
+
+<div class="exercise" data-n="Exercise 5.3 · from and fibs">
+<p>Write <code>continually[A](a: A): LazyList[A]</code>, <code>from(n: Int): LazyList[Int]</code> (n, n+1, n+2, ...) and <code>fibs: LazyList[Int]</code> (0, 1, 1, 2, 3, 5, ...).</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def continually[A](a: A): LazyList[A] =
+  lazy val single: LazyList[A] = LazyList.cons(a, single)
+  single
+
+def from(n: Int): LazyList[Int] =
+  LazyList.cons(n, from(n + 1))
+
+val fibs: LazyList[Int] =
+  def go(cur: Int, next: Int): LazyList[Int] =
+    LazyList.cons(cur, go(next, cur + next))
+  go(0, 1)</code></pre>
+<p><code>continually</code> refers to itself, so it's one node pointing to itself in memory. <code>from</code> creates new nodes as you go.</p>
+</div></details>
+
+<h2><span class="sec-no">5.7</span>unfold: the General Generator</h2>
+<p><code>foldRight</code> consumes a list down to a value. Its opposite, <code>unfold</code>, produces a list from a seed. You give it a starting state and a function that either says "stop" or gives the next element and the next state:</p>
+<pre><code class="language-scala">def unfold[A, S](state: S)(f: S =&gt; Option[(A, S)]): LazyList[A] =
+  f(state) match
+    case Some((a, next)) =&gt; LazyList.cons(a, unfold(next)(f))
+    case None            =&gt; LazyList.empty
+
+val fibsViaUnfold = unfold((0, 1)) { case (cur, next) =&gt; Some((cur, (next, cur + next))) }
+def fromViaUnfold(n: Int) = unfold(n)(s =&gt; Some((s, s + 1)))</code></pre>
+<p>Folding consumes data; unfolding produces it. Functions that consume are <em>recursive</em>; functions like <code>unfold</code> that produce lazily are called <strong>corecursive</strong>. A corecursive function doesn't need to terminate. It just needs to keep producing.</p>
+
+<div class="exercise" data-n="Exercise 5.4 · map and take via unfold">
+<p>Write <code>map</code> and <code>take</code> using <code>unfold</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">  def mapViaUnfold[B](f: A =&gt; B): LazyList[B] =
+    unfold(this):
+      case Cons(h, t) =&gt; Some((f(h()), t()))
+      case Empty      =&gt; None
+
+  def takeViaUnfold(n: Int): LazyList[A] =
+    unfold((this, n)):
+      case (Cons(h, t), k) if k &gt; 0 =&gt; Some((h(), (t(), k - 1)))
+      case _                        =&gt; None</code></pre>
+<p>The state is whatever you need to remember: the rest of the list, plus a counter for <code>take</code>.</p>
+</div></details>
+
+<h2><span class="sec-no">5.8</span>The Big Idea: Description vs Evaluation</h2>
+<p>Step back. A lazy list is a <strong>description</strong> of a computation that produces elements. Building it does nothing. Running it (<code>toList</code>, <code>exists</code>, <code>take(5).toList</code>) decides how much of that description to evaluate.</p>
+<div class="keypoint">Separating the description of a computation from its evaluation is the theme of the whole book. Lazy lists separate "what sequence" from "how much of it". Chapter 7 separates "what to compute in parallel" from "how to schedule it". Chapter 13 separates "what effects to perform" from "performing them".</div>
+<p>Scala's standard <code>LazyList</code> works like ours: lazy, memoised, with all the combinators.</p>
+
+<dl class="jargon">
+  <dt>Strict / non-strict</dt><dd>Whether a function always evaluates an argument or may skip it.</dd>
+  <dt>Thunk</dt><dd>An unevaluated expression packaged as <code>() =&gt; A</code>.</dd>
+  <dt>Memoisation</dt><dd>Caching a computed value so it's evaluated at most once (<code>lazy val</code>).</dd>
+  <dt>Smart constructor</dt><dd>A function that builds a value while enforcing extra invariants, here caching.</dd>
+  <dt>Corecursion / unfold</dt><dd>Producing data step by step from a seed, possibly forever.</dd>
+</dl>
+
+<div class="recap"><ul>
+  <li>By-name parameters and <code>lazy val</code> delay evaluation.</li>
+  <li>A lazy list with a lazy <code>foldRight</code> can stop early and fuses pipelines into one pass.</li>
+  <li>Laziness allows infinite structures, as long as the consumer stops.</li>
+  <li><code>unfold</code> generates lists from a seed; it's the dual of fold.</li>
+  <li>Separate the description of a computation from running it.</li>
+</ul></div>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

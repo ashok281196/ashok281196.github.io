@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ch. 13 · Effects, IO &amp; Local Mutation · FP in Scala: A Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+<header class="chapter-head">
+  <div class="chapter-num">13</div>
+  <div class="chapter-kicker">Part IV · Effects and I/O</div>
+  <h1>Effects, IO &amp; Local Mutation</h1>
+  <p class="chapter-sub">How a pure program talks to the world. We build an IO type that describes effects as values, hit a stack overflow, fix it by trampolining, and then use the type system to allow mutation that nobody outside can see.</p>
+</header>
+
+<h2><span class="sec-no">13.1</span>Factor the Effect Out</h2>
+<p>An impure function, mixing a decision with output:</p>
+<pre><code class="language-scala">case class Player(name: String, score: Int)
+
+def contest(p1: Player, p2: Player): Unit =
+  if p1.score &gt; p2.score then println(s"${p1.name} wins")
+  else if p2.score &gt; p1.score then println(s"${p2.name} wins")
+  else println("It's a draw")</code></pre>
+<p>Separate the pure logic from the effect, one layer at a time:</p>
+<pre><code class="language-scala">def winner(p1: Player, p2: Player): Option[Player] =             // pure: who won
+  if p1.score &gt; p2.score then Some(p1)
+  else if p2.score &gt; p1.score then Some(p2)
+  else None
+
+def winnerMsg(p: Option[Player]): String =                       // pure: what to say
+  p.map(w =&gt; s"${w.name} wins").getOrElse("It's a draw")
+
+def contest(p1: Player, p2: Player): Unit =                      // impure, but tiny
+  println(winnerMsg(winner(p1, p2)))</code></pre>
+<p>This is the general shape: <strong>any function with side effects can be split into a pure core and two thin impure layers</strong>, one that gathers input and one that performs output. "Functional core, imperative shell." The rest of the chapter asks: can we make the shell pure too?</p>
+
+<h2><span class="sec-no">13.2</span>A Simple IO Type</h2>
+<p>Make the effect a value, like <code>Charge</code> in Chapter 1:</p>
+<pre><code class="language-scala">trait IO[A]:
+  self =&gt;
+  def unsafeRun: A                                 // performing it is the only impure part
+
+  def map[B](f: A =&gt; B): IO[B] = new:
+    def unsafeRun = f(self.unsafeRun)
+
+  def flatMap[B](f: A =&gt; IO[B]): IO[B] = new:
+    def unsafeRun = f(self.unsafeRun).unsafeRun
+
+object IO:
+  def apply[A](a: =&gt; A): IO[A] = new:          // suspend any side-effecting expression
+    def unsafeRun = a
+
+  given Monad[IO] with
+    def unit[A](a: =&gt; A) = IO(a)
+    extension [A](fa: IO[A])
+      override def flatMap[B](f: A =&gt; IO[B]) = fa.flatMap(f)
+
+def PrintLine(msg: String): IO[Unit] = IO(println(msg))
+val ReadLine: IO[String] = IO(scala.io.StdIn.readLine())</code></pre>
+<p>A program is now a value of type <code>IO[A]</code>. Building it does nothing. Composing it is pure. Only <code>unsafeRun</code>, called once at the very edge (in <code>main</code>), performs anything.</p>
+<pre><code class="language-scala">def fahrenheitToCelsius(f: Double): Double = (f - 32) * 5.0 / 9.0
+
+val converter: IO[Unit] =
+  for
+    _ &lt;- PrintLine("Enter a temperature in degrees Fahrenheit:")
+    d &lt;- ReadLine.map(_.toDouble)
+    _ &lt;- PrintLine(f"${fahrenheitToCelsius(d)}%.1f °C")
+  yield ()
+
+@main def run(): Unit = converter.unsafeRun</code></pre>
+<p>And since <code>IO</code> is a monad, the whole toolkit applies: <code>replicateM(10, ReadLine)</code> reads ten lines, <code>traverse</code> runs an action per element, and you can write your own loops as functions:</p>
+<pre><code class="language-scala">def forever[A, B](a: IO[A]): IO[B] =
+  a.flatMap(_ =&gt; forever(a))
+
+val echo: IO[Nothing] = forever(ReadLine.flatMap(PrintLine))</code></pre>
+<div class="keypoint">An <code>IO[A]</code> is a <em>recipe</em> for interacting with the world, not the interaction. Because recipes are values, you can combine, repeat, retry, time-limit or test them before anything runs. The program's main function is "build one big recipe, then run it once".</div>
+
+<h2><span class="sec-no">13.3</span>The Stack Overflow</h2>
+<p>Run <code>forever(PrintLine("hi")).unsafeRun</code> and it prints a few thousand times, then throws <code>StackOverflowError</code>. Look at <code>flatMap</code>'s <code>unsafeRun</code>: it calls <code>self.unsafeRun</code>, then <code>f(...).unsafeRun</code>, which calls the next <code>flatMap</code>'s <code>unsafeRun</code>, and so on. Every step adds a stack frame, and nothing ever returns. <code>@tailrec</code> can't help: these are calls through different objects.</p>
+
+<h3>Trampolining</h3>
+<p>The fix is to stop <em>calling</em> the next step and instead <em>return</em> a description of it. Then a single loop interprets the description, keeping its own explicit stack on the heap:</p>
+<pre><code class="language-scala">enum IO[A]:
+  case Return(a: A)                                  // done, here's the value
+  case Suspend(resume: () =&gt; A)                      // run this effect
+  case FlatMap[A, B](sub: IO[A], k: A =&gt; IO[B]) extends IO[B]   // do sub, then continue with k
+
+  def flatMap[B](f: A =&gt; IO[B]): IO[B] = FlatMap(this, f)
+  def map[B](f: A =&gt; B): IO[B] = flatMap(a =&gt; Return(f(a)))
+
+  @annotation.tailrec
+  final def unsafeRun(): A = this match
+    case Return(a)  =&gt; a
+    case Suspend(r) =&gt; r()
+    case FlatMap(x, f) =&gt; x match
+      case Return(a)     =&gt; f(a).unsafeRun()
+      case Suspend(r)    =&gt; f(r()).unsafeRun()
+      case FlatMap(y, g) =&gt; y.flatMap(a =&gt; g(a).flatMap(f)).unsafeRun()   // reassociate</code></pre>
+<p>Every recursive call to <code>unsafeRun</code> is now a tail call, so it compiles to a loop. The last case uses the <strong>monad associativity law</strong> to rewrite <code>(y flatMap g) flatMap f</code> into <code>y flatMap (a =&gt; g(a) flatMap f)</code>, rotating left-nested chains to the right so the loop always makes progress. A law from Chapter 11 is what makes the interpreter correct.</p>
+<div class="analogy">On a trampoline you don't climb a ladder of stack frames. Each bounce returns you to the same spot (the loop), with a note saying what to do next. However long the program, you never get higher than one bounce.</div>
+<div class="bridge">
+<p>This is the same technique as turning a recursive tree walk into a loop with an explicit <code>std::stack</code>, or how a coroutine scheduler resumes continuations from a run loop instead of letting them call each other. The <code>FlatMap</code> nodes are the explicit continuation stack.</p>
+</div>
+<p>The same structure generalises: replace <code>Suspend(() =&gt; A)</code> with any type of "instruction" <code>F[A]</code> and you get the <strong>free monad</strong>, a program written in some instruction set, plus separate interpreters (one that performs real I/O, one that runs against an in-memory fake for tests). That's how you test effectful code without mocks.</p>
+
+<h2><span class="sec-no">13.4</span>What IO Doesn't Give You</h2>
+<p>Be honest about the limits. <code>IO</code> doesn't make a program correct. Inside an <code>IO</code>, code can still have race conditions or ignore errors. What it gives you is: effects are visible in types (<code>IO[Int]</code> vs <code>Int</code>), programs are values you can compose and transform, and the pure parts stay pure. Real effect systems add a lot more on top: async and non-blocking I/O, cancellation, resource safety, structured concurrency, error handling. That's what cats-effect and ZIO are.</p>
+
+<h2><span class="sec-no">13.5</span>Local Effects: Mutation Nobody Can See</h2>
+<p>Recall Exercise 1.3: a function that mutates local variables is still pure if no caller can observe the mutation. Quicksort on an array is fast precisely because it mutates in place. Can we write that inside a pure program, and have the <em>compiler</em> verify the mutation can't leak?</p>
+<p>Yes, with a type called <code>ST</code> (state thread). Here's a sketch of the idea, where <code>ST(a)</code> wraps a value without touching the state and <code>ST.lift</code> wraps a state function:</p>
+<pre><code class="language-scala">opaque type ST[S, A] = S =&gt; (A, S)       // like State, tagged with a phantom type S
+
+final class STRef[S, A] private (private var cell: A):
+  def read: ST[S, A] = ST(cell)
+  def write(a: =&gt; A): ST[S, Unit] = ST.lift(s =&gt; { cell = a; ((), s) })
+
+object STRef:
+  def apply[S, A](a: A): ST[S, STRef[S, A]] = ST(new STRef[S, A](a))</code></pre>
+<p>Every mutable reference is tagged with the same type <code>S</code> as the computation that created it. To run an <code>ST</code> computation, you must provide one that works for <strong>every</strong> <code>S</code>:</p>
+<pre><code class="language-scala">// a computation polymorphic in S
+type RunnableST[A] = [s] =&gt; () =&gt; ST[s, A]
+
+def runST[A](st: RunnableST[A]): A = ...    // picks an S internally and runs it
+
+val p: RunnableST[(Int, Int)] = [s] =&gt; () =&gt;
+  for
+    r1 &lt;- STRef[s, Int](1)
+    r2 &lt;- STRef[s, Int](2)
+    x  &lt;- r1.read
+    y  &lt;- r2.read
+    _  &lt;- r1.write(y + 1)
+    _  &lt;- r2.write(x + 1)
+    a  &lt;- r1.read
+    b  &lt;- r2.read
+  yield (a, b)
+
+runST(p)   // (3, 2)</code></pre>
+<p>Why is this safe? Try to return the reference itself: the result type would be <code>STRef[s, Int]</code>, which mentions <code>s</code>. But <code>RunnableST[A]</code> requires <code>A</code> not to depend on <code>s</code>, so it doesn't type-check. A mutable reference can't escape the computation that created it. Mutation happens; the type system proves nobody else can see it.</p>
+<p>With an <code>STArray</code> built the same way, you can write an in-place quicksort whose signature is just <code>def quicksort(xs: List[Int]): List[Int]</code>, pure from outside, mutating inside, and safe by construction.</p>
+<div class="warfield">
+<p><strong>Purity depends on what you choose to observe.</strong> Allocating memory is an effect if you watch the heap. Returning a fresh object is an effect if you compare with reference equality (<code>eq</code>). FP treats these as unobservable by convention. The useful question is always "what can callers of this function observe?"</p>
+</div>
+
+<dl class="jargon">
+  <dt>Functional core, imperative shell</dt><dd>Design with pure logic in the middle and a thin layer of effects around it.</dd>
+  <dt>IO</dt><dd>A type whose values describe effectful programs; running them is separate.</dd>
+  <dt>Trampolining</dt><dd>Returning descriptions of the next step to a loop instead of calling it, avoiding stack growth.</dd>
+  <dt>Free monad</dt><dd>A monad built from any instruction set, interpreted later by a separate function.</dd>
+  <dt>ST / phantom type</dt><dd>A type parameter used only to tag values at compile time, here to stop mutable references escaping.</dd>
+</dl>
+
+<div class="recap"><ul>
+  <li>Any effectful function splits into a pure core and a thin effectful shell.</li>
+  <li>An IO type makes effects into composable values; <code>unsafeRun</code> happens once at the edge.</li>
+  <li>The naive IO overflows the stack; trampolining plus the associativity law fixes it.</li>
+  <li><code>ST</code> lets you mutate locally with a compile-time guarantee that it can't leak.</li>
+  <li>Real-world effect systems (cats-effect, ZIO) build on these ideas.</li>
+</ul></div>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

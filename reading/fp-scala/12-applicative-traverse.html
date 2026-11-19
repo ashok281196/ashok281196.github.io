@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ch. 12 · Applicative &amp; Traversable · FP in Scala: A Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+<header class="chapter-head">
+  <div class="chapter-num">12</div>
+  <div class="chapter-kicker">Part III · Common Structures</div>
+  <h1>Applicative &amp; Traversable</h1>
+  <p class="chapter-sub">Most of the functions we derived from Monad only ever used map2 and unit. Making those the primitives gives a weaker abstraction, Applicative, with more instances: validation that collects every error, applicatives that compose, and a traverse that works over any data structure.</p>
+</header>
+
+<h2><span class="sec-no">12.1</span>A Weaker Interface</h2>
+<p>Look back at the <code>Monad</code> trait. <code>sequence</code>, <code>traverse</code> and <code>replicateM</code> were written using only <code>map2</code> and <code>unit</code>, never <code>flatMap</code> directly. So split it out:</p>
+<pre><code class="language-scala">trait Applicative[F[_]] extends Functor[F]:
+  def unit[A](a: =&gt; A): F[A]
+
+  extension [A](fa: F[A])
+    def map2[B, C](fb: F[B])(f: (A, B) =&gt; C): F[C]
+
+    def map[B](f: A =&gt; B): F[B] =
+      fa.map2(unit(()))((a, _) =&gt; f(a))
+
+    def product[B](fb: F[B]): F[(A, B)] =
+      fa.map2(fb)((_, _))
+
+  def traverse[A, B](as: List[A])(f: A =&gt; F[B]): F[List[B]] =
+    as.foldRight(unit(List.empty[B]))((a, acc) =&gt; f(a).map2(acc)(_ :: _))
+
+  def sequence[A](fas: List[F[A]]): F[List[A]] = traverse(fas)(identity)
+
+trait Monad[F[_]] extends Applicative[F]:
+  extension [A](fa: F[A])
+    def flatMap[B](f: A =&gt; F[B]): F[B]
+    override def map2[B, C](fb: F[B])(f: (A, B) =&gt; C): F[C] =
+      fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))</code></pre>
+<p>Every monad is an <strong>applicative functor</strong>. Not every applicative is a monad. Why would we want the weaker one?</p>
+
+<h2><span class="sec-no">12.2</span>The Real Difference</h2>
+<pre><code class="language-scala">// Monad: the second computation is CHOSEN using the first result
+fa.flatMap(a =&gt; if a &gt; 0 then fb else fc)
+
+// Applicative: both computations are FIXED up front; only the values are combined
+fa.map2(fb)((a, b) =&gt; a + b)</code></pre>
+<p>With <code>map2</code>, the structure of the computation is known before anything runs. With <code>flatMap</code>, it's only known as it runs. That gives each side something:</p>
+<ul>
+  <li><strong>Monad</strong>: more power for the <em>user</em>. Later steps can depend on earlier results.</li>
+  <li><strong>Applicative</strong>: more freedom for the <em>implementer</em>. Since steps are independent, an applicative can run them in parallel, inspect the whole structure ahead of time, or keep going after a failure.</li>
+</ul>
+<div class="analogy">A monadic program is a conversation: what you ask next depends on the answer you just got. An applicative program is a printed form: every question is on the page before anyone answers. You can't adapt a form to earlier answers, but you can hand page 1 and page 2 to two people at once, and you can list every unanswered question at the end.</div>
+<p>Parsers make it concrete. An applicative parser is a fixed grammar: <code>name ** age ** email</code>. A monadic parser can read a header and choose a format, which is more expressive. But applicative parsers can be analysed and optimised before running, which monadic ones can't, because the next parser is hidden inside a function.</p>
+
+<h2><span class="sec-no">12.3</span>Validation: Collecting Every Error</h2>
+<p>Recall the form from Chapter 4. <code>Either</code>'s <code>flatMap</code> stops at the first error, so a user with a bad name <em>and</em> a bad age only hears about the name. The fields are independent, so we don't need <code>flatMap</code>. We need an applicative that collects errors:</p>
+<pre><code class="language-scala">enum Validated[+E, +A]:
+  case Valid(get: A)
+  case Invalid(errors: List[E])    // keep all of them
+
+given validatedApplicative[E]: Applicative[[x] =&gt;&gt; Validated[E, x]] with
+  def unit[A](a: =&gt; A) = Validated.Valid(a)
+  extension [A](fa: Validated[E, A])
+    override def map2[B, C](fb: Validated[E, B])(f: (A, B) =&gt; C): Validated[E, C] =
+      (fa, fb) match
+        case (Validated.Valid(a), Validated.Valid(b))       =&gt; Validated.Valid(f(a, b))
+        case (Validated.Invalid(e1), Validated.Invalid(e2)) =&gt; Validated.Invalid(e1 ++ e2)
+        case (e @ Validated.Invalid(_), _)                  =&gt; e
+        case (_, e @ Validated.Invalid(_))                  =&gt; e</code></pre>
+<p>The case with two <code>Invalid</code>s is the point: both error lists are kept. This would break the monad laws if we also defined a <code>flatMap</code> (which can't know the second step's errors without the first's value), so <code>Validated</code> is an applicative but deliberately not a monad.</p>
+<pre><code class="language-scala">import Validated.*
+
+def validName(n: String): Validated[String, String] =
+  if n.isBlank then Invalid(List("name is empty")) else Valid(n)
+
+def validAge(a: Int): Validated[String, Int] =
+  if a &lt; 0 || a &gt; 150 then Invalid(List(s"age $a out of range")) else Valid(a)
+
+def validEmail(e: String): Validated[String, String] =
+  if e.contains("@") then Valid(e) else Invalid(List(s"bad email '$e'"))
+
+case class User(name: String, age: Int, email: String)
+
+def validUser(n: String, a: Int, e: String): Validated[String, User] =
+  validName(n).map2(validAge(a))((_, _)).map2(validEmail(e)) { case ((n, a), e) =&gt; User(n, a, e) }
+
+validUser("", -5, "nope")
+// Invalid(List("name is empty", "age -5 out of range", "bad email 'nope'"))</code></pre>
+<p>All three errors, in one pass. This is what form validation and config loading should do, and it's why the cats library ships <code>Validated</code> next to <code>Either</code>.</p>
+<div class="keypoint">Use the least powerful abstraction that does the job. If your steps don't depend on each other, an applicative gives you more: parallelism, error accumulation, static analysis.</div>
+
+<h2><span class="sec-no">12.4</span>Applicative Laws and Composition</h2>
+<p>The laws, in terms of <code>map2</code> and <code>unit</code>:</p>
+<pre><code class="language-text">unit(()).map2(fa)((_, a) =&gt; a) == fa                     // left identity
+fa.map2(unit(()))((a, _) =&gt; a) == fa                     // right identity
+fa.product(fb).product(fc) == fa.product(fb.product(fc))  // associativity (up to tuple nesting)</code></pre>
+<p>Identity and associativity again: a monoid, at one more level of abstraction.</p>
+<p>And unlike monads, <strong>applicatives compose</strong>. If <code>F</code> and <code>G</code> are applicatives, so is <code>F[G[_]]</code>:</p>
+<pre><code class="language-scala">def compose[F[_], G[_]](F: Applicative[F], G: Applicative[G]): Applicative[[x] =&gt;&gt; F[G[x]]] =
+  new:
+    def unit[A](a: =&gt; A) = F.unit(G.unit(a))
+    extension [A](fga: F[G[A]])
+      override def map2[B, C](fgb: F[G[B]])(f: (A, B) =&gt; C) =
+        F.map2(fga)(fgb)((ga, gb) =&gt; G.map2(ga)(gb)(f))</code></pre>
+<p>(<code>F.map2(x)(y)(f)</code> is the explicit way to call an extension method from a specific instance.) For example, <code>Par</code> composed with <code>Validated</code> gives "validate many inputs in parallel, collecting all errors" without writing anything new.</p>
+
+<h2><span class="sec-no">12.5</span>Traverse: Beyond Lists</h2>
+<p>So far, <code>traverse</code> works on <code>List</code>. But nothing about it is specific to lists. You can traverse a tree, an <code>Option</code>, a <code>Map</code>'s values. Abstract over the <em>container</em> too:</p>
+<pre><code class="language-scala">trait Traverse[F[_]] extends Functor[F], Foldable[F]:
+  extension [A](fa: F[A])
+    def traverse[G[_]: Applicative, B](f: A =&gt; G[B]): G[F[B]]
+
+  extension [G[_]: Applicative, A](fga: F[G[A]])
+    def sequence: G[F[A]] = fga.traverse(ga =&gt; ga)</code></pre>
+<p><code>G[_]: Applicative</code> is shorthand for "and a <code>using Applicative[G]</code> parameter". So <code>traverse</code> has two dimensions of generality: the structure being walked (<code>F</code>), and the effect applied at each element (<code>G</code>). Some combinations:</p>
+<table>
+  <tr><th>F (structure)</th><th>G (effect)</th><th>Meaning</th></tr>
+  <tr><td>List</td><td>Option</td><td>parse every item; fail if any fails</td></tr>
+  <tr><td>List</td><td>Validated</td><td>check every item; report all failures</td></tr>
+  <tr><td>Tree</td><td>Par</td><td>process every node in parallel, keep the tree shape</td></tr>
+  <tr><td>Map[K, _]</td><td>Future / IO</td><td>fetch a value for every key concurrently</td></tr>
+  <tr><td>Option</td><td>Either</td><td>validate an optional field only if present</td></tr>
+</table>
+<p>And <code>sequence</code> <strong>swaps the layers</strong>: <code>List[Option[A]]</code> becomes <code>Option[List[A]]</code>, a <code>Map[K, Future[V]]</code> becomes <code>Future[Map[K, V]]</code>.</p>
+
+<div class="exercise" data-n="Exercise 12.1 · Traverse for Option and Tree">
+<p>Write <code>Traverse</code> instances for <code>Option</code> and for a rose tree <code>case class Tree[+A](head: A, tail: List[Tree[A]])</code>. You only need <code>traverse</code>; assume <code>map</code> and the fold methods are filled in.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">// Option: if empty, there's nothing to do but wrap; otherwise apply f and rewrap
+extension [A](oa: Option[A])
+  def traverse[G[_], B](f: A =&gt; G[B])(using G: Applicative[G]): G[Option[B]] =
+    oa match
+      case Some(a) =&gt; f(a).map(Some(_))
+      case None    =&gt; G.unit(None)
+
+// Tree: apply f to the head, traverse the children (a List of Trees), rebuild
+extension [A](ta: Tree[A])
+  def traverse[G[_], B](f: A =&gt; G[B])(using G: Applicative[G]): G[Tree[B]] =
+    f(ta.head).map2(G.traverse(ta.tail)(t =&gt; t.traverse(f)))(Tree(_, _))</code></pre>
+<p>The structure is always preserved: a <code>Some</code> stays a <code>Some</code>, the tree keeps its shape. Traverse is "map with an effect".</p>
+</div></details>
+
+<h2><span class="sec-no">12.6</span>Traverse Generalises Map and Fold</h2>
+<p>Two surprising facts:</p>
+<p><strong>map is traverse with no effect.</strong> Use the identity "applicative" <code>Id[x] = x</code>: <code>fa.traverse[Id, B](f)</code> is just <code>fa.map(f)</code>. So every <code>Traverse</code> is a <code>Functor</code>.</p>
+<p><strong>foldMap is traverse with a monoid.</strong> Every monoid gives an applicative that ignores its type parameter: <code>Const[M, x] = M</code>, with <code>unit = M.empty</code> and <code>map2 = M.combine</code>. Traversing with it accumulates a monoid value across the structure, which is <code>foldMap</code>. So every <code>Traverse</code> is a <code>Foldable</code>.</p>
+<p>And with the <code>State</code> applicative, traverse can carry state across a structure: number every node of a tree, or zip it with a list.</p>
+<pre><code class="language-scala">// label each element with its index, for ANY traversable structure
+extension [F[_]: Traverse, A](fa: F[A])
+  def zipWithIndex: F[(A, Int)] =
+    fa.traverse[[x] =&gt;&gt; State[Int, x], (A, Int)](a =&gt;
+      for
+        i &lt;- State.get[Int]
+        _ &lt;- State.set(i + 1)
+      yield (a, i)
+    ).run(0)(0)</code></pre>
+<p>One function, written once, and it works for lists, trees, options and maps. That's the payoff of Part III.</p>
+
+<dl class="jargon">
+  <dt>Applicative functor</dt><dd><code>unit</code> + <code>map2</code> with identity and associativity laws. Combines independent effects.</dd>
+  <dt>Validated</dt><dd>An applicative like <code>Either</code> that accumulates errors instead of stopping at the first.</dd>
+  <dt>Traverse</dt><dd>A type class for structures you can walk with an applicative effect, keeping their shape.</dd>
+  <dt>Context bound <code>G[_]: Applicative</code></dt><dd>Shorthand for a <code>using Applicative[G]</code> parameter.</dd>
+  <dt>Const applicative</dt><dd>An applicative made from a monoid, ignoring its value type. Turns traverse into foldMap.</dd>
+</dl>
+
+<div class="recap"><ul>
+  <li>Applicative = <code>unit</code> + <code>map2</code>. Every monad is one; not the other way round.</li>
+  <li>Applicative steps are fixed in advance, so they can run in parallel or accumulate errors.</li>
+  <li><code>Validated</code> collects all errors; use it for independent checks.</li>
+  <li>Applicatives compose; monads don't.</li>
+  <li><code>traverse</code> generalises over both the structure and the effect, and subsumes <code>map</code> and <code>foldMap</code>.</li>
+</ul></div>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

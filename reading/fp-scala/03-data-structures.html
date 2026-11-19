@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ch. 3 · Functional Data Structures · FP in Scala: A Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+<header class="chapter-head">
+  <div class="chapter-num">03</div>
+  <div class="chapter-kicker">Part I · Foundations</div>
+  <h1>Functional Data Structures</h1>
+  <p class="chapter-sub">If nothing can be mutated, how do you "add" to a list? We build an immutable singly linked list from scratch, see why sharing makes it cheap, and find the one function, fold, that most list operations are built from.</p>
+</header>
+
+<h2><span class="sec-no">3.1</span>Immutable by Construction</h2>
+<p>A <strong>functional data structure</strong> is operated on only by pure functions. You never change it in place. "Adding" an element returns a <em>new</em> structure, and the old one is still there, unchanged.</p>
+<p>That sounds expensive. It isn't, because of <strong>structural sharing</strong>: the new structure reuses the parts of the old one it didn't change. Since nothing can be mutated, sharing is always safe.</p>
+
+<h2><span class="sec-no">3.2</span>Defining a List</h2>
+<p>A list is either empty, or an element followed by another list. That "either/or" maps directly to an <code>enum</code>, which is Scala's <strong>algebraic data type</strong> (ADT):</p>
+<pre><code class="language-scala">enum List[+A]:
+  case Nil
+  case Cons(head: A, tail: List[A])
+
+object List:
+  def apply[A](as: A*): List[A] =       // variadic: List(1, 2, 3)
+    if as.isEmpty then Nil
+    else Cons(as.head, apply(as.tail*))
+
+import List.*</code></pre>
+<p><code>List(1, 2, 3)</code> is <code>Cons(1, Cons(2, Cons(3, Nil)))</code>. Draw it as boxes: each <code>Cons</code> holds a value and an arrow to the rest.</p>
+
+<h3>What does <code>+A</code> mean?</h3>
+<p>The <code>+</code> makes <code>List</code> <strong>covariant</strong>: if <code>Dog</code> is a subtype of <code>Animal</code>, then <code>List[Dog]</code> is a subtype of <code>List[Animal]</code>. This also lets one <code>Nil</code> serve every list: <code>Nil</code> is a <code>List[Nothing]</code>, and <code>Nothing</code> is a subtype of every type, so <code>Nil</code> fits anywhere a <code>List[Int]</code> or <code>List[String]</code> is expected.</p>
+<div class="bridge">
+<p>In C++, <code>std::vector&lt;Dog*&gt;</code> is unrelated to <code>std::vector&lt;Animal*&gt;</code>. That's correct for a mutable container: if it converted, you could push a <code>Cat*</code> into a vector of dogs. An immutable list has no "push into this list" operation, so covariance is safe. Immutability is what makes variance work.</p>
+</div>
+
+<h2><span class="sec-no">3.3</span>Pattern Matching</h2>
+<p>We take lists apart with <code>match</code>. Each case is a shape to compare against, and it binds names to the parts:</p>
+<pre><code class="language-scala">def sum(ints: List[Int]): Int = ints match
+  case Nil              =&gt; 0
+  case Cons(x, xs)      =&gt; x + sum(xs)
+
+def product(ds: List[Double]): Double = ds match
+  case Nil              =&gt; 1.0
+  case Cons(0.0, _)     =&gt; 0.0        // match a literal; _ ignores the rest
+  case Cons(x, xs)      =&gt; x * product(xs)</code></pre>
+<p>Notice the definitions follow the data. The list has two cases, so the function has two cases. The tail is a list, so the function recurses on it. Most functions over ADTs write themselves this way.</p>
+
+<div class="exercise" data-n="Exercise 3.1 · tail and setHead">
+<p>Implement <code>tail</code> (everything but the first element) and <code>setHead</code> (replace the first element). Both should take constant time. What should <code>tail(Nil)</code> do?</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def tail[A](as: List[A]): List[A] = as match
+  case Nil         =&gt; sys.error("tail of empty list")
+  case Cons(_, t)  =&gt; t
+
+def setHead[A](as: List[A], h: A): List[A] = as match
+  case Nil         =&gt; sys.error("setHead on empty list")
+  case Cons(_, t)  =&gt; Cons(h, t)</code></pre>
+<p>Both are O(1) because they <em>share</em> <code>t</code>: no copying. For <code>Nil</code> we have three choices: throw, return <code>Nil</code>, or return an <code>Option</code>. Throwing is honest for now. Chapter 4 gives us the better answer.</p>
+</div></details>
+
+<div class="exercise" data-n="Exercise 3.2 · drop and dropWhile">
+<p>Implement <code>drop[A](as: List[A], n: Int): List[A]</code> and <code>dropWhile[A](as: List[A], f: A =&gt; Boolean): List[A]</code>, which removes elements from the front while they match the predicate.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">@tailrec
+def drop[A](as: List[A], n: Int): List[A] =
+  if n &lt;= 0 then as
+  else as match
+    case Nil        =&gt; Nil
+    case Cons(_, t) =&gt; drop(t, n - 1)
+
+@tailrec
+def dropWhile[A](as: List[A], f: A =&gt; Boolean): List[A] = as match
+  case Cons(h, t) if f(h) =&gt; dropWhile(t, f)     // a guard
+  case _                  =&gt; as</code></pre>
+</div></details>
+
+<h2><span class="sec-no">3.4</span>What Sharing Can't Do</h2>
+<pre><code class="language-scala">def append[A](a1: List[A], a2: List[A]): List[A] = a1 match
+  case Nil        =&gt; a2
+  case Cons(h, t) =&gt; Cons(h, append(t, a2))</code></pre>
+<p><code>append</code> copies <code>a1</code> but shares all of <code>a2</code>. Its cost depends only on the length of the first list.</p>
+<p>Now try <code>init</code>: all elements except the <em>last</em>.</p>
+<pre><code class="language-scala">def init[A](as: List[A]): List[A] = as match
+  case Nil          =&gt; sys.error("init of empty list")
+  case Cons(_, Nil) =&gt; Nil
+  case Cons(h, t)   =&gt; Cons(h, init(t))</code></pre>
+<p>This copies every node, O(n), because every <code>Cons</code> on the way to the end points to something that changes. A singly linked list is cheap at the front and expensive at the back. Choose structures to match how you'll use them: Scala's standard <code>Vector</code> is a wide immutable tree with effectively constant-time access at both ends.</p>
+<div class="analogy">A singly linked list is a chain of train cars, each coupled to the one behind it. You can add a new engine at the front without touching the train. To remove the last car, you'd have to rebuild every coupling from the front, because each car "contains" the rest of the train.</div>
+
+<h2><span class="sec-no">3.5</span>Finding Fold</h2>
+<p>Look at <code>sum</code> and <code>product</code> side by side:</p>
+<pre><code class="language-scala">case Nil         =&gt; 0              |   case Nil         =&gt; 1.0
+case Cons(x, xs) =&gt; x + sum(xs)    |   case Cons(x, xs) =&gt; x * product(xs)</code></pre>
+<p>They differ in two places: the value for <code>Nil</code> and the operator that combines the head with the result for the tail. Make both parameters:</p>
+<pre><code class="language-scala">def foldRight[A, B](as: List[A], acc: B, f: (A, B) =&gt; B): B = as match
+  case Nil         =&gt; acc
+  case Cons(x, xs) =&gt; f(x, foldRight(xs, acc, f))
+
+def sum(ns: List[Int])         = foldRight(ns, 0, _ + _)
+def product(ns: List[Double])  = foldRight(ns, 1.0, _ * _)</code></pre>
+<p>A useful picture: <code>foldRight</code> <strong>replaces the constructors</strong>. Every <code>Cons</code> becomes <code>f</code> and the <code>Nil</code> becomes <code>acc</code>.</p>
+<pre><code class="language-text">Cons(1, Cons(2, Cons(3, Nil)))
+   f(1,    f(2,    f(3, acc)))</code></pre>
+<p>Try it with <code>Cons</code> and <code>Nil</code> themselves: <code>foldRight(xs, Nil, Cons(_, _))</code> gives back the same list. That's a quick check that fold captures the full structure of a list.</p>
+
+<h3>foldLeft: the stack-safe one</h3>
+<p><code>foldRight</code> isn't tail-recursive: it calls itself and then still has to apply <code>f</code>. A long list will overflow the stack. <code>foldLeft</code> combines from the left with an accumulator, and is a loop:</p>
+<pre><code class="language-scala">@tailrec
+def foldLeft[A, B](as: List[A], acc: B, f: (B, A) =&gt; B): B = as match
+  case Nil         =&gt; acc
+  case Cons(x, xs) =&gt; foldLeft(xs, f(acc, x), f)</code></pre>
+<pre><code class="language-text">foldLeft:   f(f(f(acc, 1), 2), 3)
+foldRight:  f(1, f(2, f(3, acc)))</code></pre>
+<p>For an associative operator like <code>+</code> both give the same result. For others, like subtraction or building a list, the order matters.</p>
+
+<div class="exercise" data-n="Exercise 3.3 · via foldLeft">
+<p>Write <code>length</code> and <code>reverse</code> using <code>foldLeft</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def length[A](as: List[A]): Int =
+  foldLeft(as, 0, (n, _) =&gt; n + 1)
+
+def reverse[A](as: List[A]): List[A] =
+  foldLeft(as, Nil: List[A], (acc, a) =&gt; Cons(a, acc))</code></pre>
+<p>The type ascription <code>Nil: List[A]</code> helps inference. Without it, Scala infers <code>B</code> from the bare <code>Nil</code> as <code>List[Nothing]</code>, and then rejects <code>Cons(a, acc)</code> because a <code>List[A]</code> isn't a <code>List[Nothing]</code>.</p>
+</div></details>
+
+<div class="exercise" data-n="Exercise 3.4 · stack-safe foldRight">
+<p>Write <code>foldRight</code> in terms of <code>foldLeft</code>, so it no longer overflows the stack.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def foldRightSafe[A, B](as: List[A], acc: B, f: (A, B) =&gt; B): B =
+  foldLeft(reverse(as), acc, (b, a) =&gt; f(a, b))</code></pre>
+<p>Reverse first, then fold from the left with the arguments swapped. It costs an extra pass and an extra list, but it's stack-safe. This is what you'd use in practice.</p>
+</div></details>
+
+<h2><span class="sec-no">3.6</span>The Big Three: map, filter, flatMap</h2>
+<p>Most list processing combines three operations. All of them are folds.</p>
+<pre><code class="language-scala">def map[A, B](as: List[A])(f: A =&gt; B): List[B] =
+  foldRightSafe(as, Nil: List[B], (a, acc) =&gt; Cons(f(a), acc))
+
+def filter[A](as: List[A])(p: A =&gt; Boolean): List[A] =
+  foldRightSafe(as, Nil: List[A], (a, acc) =&gt; if p(a) then Cons(a, acc) else acc)
+
+def concat[A](ls: List[List[A]]): List[A] =
+  foldRightSafe(ls, Nil: List[A], append)
+
+def flatMap[A, B](as: List[A])(f: A =&gt; List[B]): List[B] =
+  concat(map(as)(f))</code></pre>
+<p>Note the separate parameter list <code>(f: A =&gt; B)</code>. Scala infers types left to right across parameter lists, so by the time it reaches <code>f</code> it already knows <code>A</code>, and you can write <code>map(xs)(_ + 1)</code> without type annotations.</p>
+<p><code>flatMap</code> deserves attention: each element produces a <em>list</em> of results, and they're flattened. <code>flatMap(List(1,2,3))(i =&gt; List(i, i))</code> is <code>List(1,1,2,2,3,3)</code>. You'll see <code>flatMap</code> in almost every chapter from here on.</p>
+
+<div class="exercise" data-n="Exercise 3.5 · filter via flatMap">
+<p>Implement <code>filter</code> using only <code>flatMap</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def filterViaFlatMap[A](as: List[A])(p: A =&gt; Boolean): List[A] =
+  flatMap(as)(a =&gt; if p(a) then List(a) else Nil)</code></pre>
+<p>Keep an element by returning a one-element list; drop it by returning an empty one. <code>flatMap</code> is more powerful than <code>map</code> or <code>filter</code>: both can be written with it.</p>
+</div></details>
+
+<div class="exercise" data-n="Exercise 3.6 · zipWith">
+<p>Write <code>zipWith[A, B, C](as: List[A], bs: List[B])(f: (A, B) =&gt; C): List[C]</code>, combining elements pairwise and stopping at the shorter list.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def zipWith[A, B, C](as: List[A], bs: List[B])(f: (A, B) =&gt; C): List[C] =
+  (as, bs) match
+    case (Cons(a, at), Cons(b, bt)) =&gt; Cons(f(a, b), zipWith(at, bt)(f))
+    case _                          =&gt; Nil</code></pre>
+<p>Matching on a tuple lets you take two structures apart at once. (Not tail-recursive; make it so with an accumulator plus a final <code>reverse</code> as practice.)</p>
+</div></details>
+
+<h2><span class="sec-no">3.7</span>Trees</h2>
+<p>Same technique, different shape. A binary tree is either a leaf holding a value or a branch with two subtrees:</p>
+<pre><code class="language-scala">enum Tree[+A]:
+  case Leaf(value: A)
+  case Branch(left: Tree[A], right: Tree[A])
+
+  def size: Int = this match
+    case Leaf(_)      =&gt; 1
+    case Branch(l, r) =&gt; 1 + l.size + r.size
+
+  def depth: Int = this match
+    case Leaf(_)      =&gt; 0
+    case Branch(l, r) =&gt; 1 + (l.depth max r.depth)
+
+  def map[B](f: A =&gt; B): Tree[B] = this match
+    case Leaf(a)      =&gt; Leaf(f(a))
+    case Branch(l, r) =&gt; Branch(l.map(f), r.map(f))</code></pre>
+<p>The pattern repeats: one case per constructor, and recursion wherever the type refers to itself. And again, these functions share a skeleton, which we can extract as a fold.</p>
+
+<div class="exercise" data-n="Exercise 3.7 · fold for trees">
+<p>Write <code>fold[B](f: A =&gt; B, g: (B, B) =&gt; B): B</code> on <code>Tree</code>, then rewrite <code>size</code>, <code>depth</code> and <code>map</code> using it.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">  def fold[B](f: A =&gt; B, g: (B, B) =&gt; B): B = this match
+    case Leaf(a)      =&gt; f(a)
+    case Branch(l, r) =&gt; g(l.fold(f, g), r.fold(f, g))
+
+  def sizeViaFold: Int  = fold(_ =&gt; 1, 1 + _ + _)
+  def depthViaFold: Int = fold(_ =&gt; 0, (dl, dr) =&gt; 1 + (dl max dr))
+  def mapViaFold[B](f: A =&gt; B): Tree[B] =
+    fold(a =&gt; Leaf(f(a)): Tree[B], Branch(_, _))</code></pre>
+<p>Just like <code>foldRight</code> for lists: <code>fold</code> replaces <code>Leaf</code> with <code>f</code> and <code>Branch</code> with <code>g</code>. Every ADT has such a fold, and once you have it, most other functions are one-liners.</p>
+</div></details>
+
+<div class="warfield">
+<p><strong>Pattern matching on an <code>enum</code> is checked for exhaustiveness.</strong> If you forget a case, the compiler warns you. Treat that warning as an error. It's one of the biggest practical wins of ADTs over class hierarchies with virtual methods.</p>
+</div>
+
+<dl class="jargon">
+  <dt>Algebraic data type (ADT)</dt><dd>A type defined as a choice between cases (sum), each holding some fields (product). In Scala 3, an <code>enum</code>.</dd>
+  <dt>Structural sharing</dt><dd>New immutable structures reusing unchanged parts of old ones.</dd>
+  <dt>Covariance (<code>+A</code>)</dt><dd><code>F[Sub]</code> is a subtype of <code>F[Super]</code>. Safe for immutable containers.</dd>
+  <dt>Fold</dt><dd>A function that replaces each constructor of a data structure with a function, reducing it to a single value.</dd>
+</dl>
+
+<div class="recap"><ul>
+  <li>Immutable structures return new versions and share what didn't change.</li>
+  <li>An ADT plus pattern matching: functions follow the shape of the data.</li>
+  <li><code>foldRight</code> replaces constructors. <code>foldLeft</code> is a stack-safe loop.</li>
+  <li><code>map</code>, <code>filter</code> and <code>flatMap</code> are all folds, and <code>flatMap</code> can express the other two.</li>
+</ul></div>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

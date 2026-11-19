@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ch. 11 · Monads · FP in Scala: A Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+<header class="chapter-head">
+  <div class="chapter-num">11</div>
+  <div class="chapter-kicker">Part III · Common Structures</div>
+  <h1>Monads</h1>
+  <p class="chapter-sub">Since Chapter 3 we've written unit, map, map2, flatMap and sequence over and over. Here we write them once. First Functor (things you can map), then Monad (things you can flatMap), their laws, and what a monad means once you've seen enough of them.</p>
+</header>
+
+<h2><span class="sec-no">11.1</span>The Duplication Problem</h2>
+<p>Here's <code>map2</code> for four types we've written:</p>
+<pre><code class="language-scala">// Option
+def map2[A, B, C](fa: Option[A], fb: Option[B])(f: (A, B) =&gt; C) = fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))
+// State
+def map2[A, B, C](fa: State[S, A], fb: State[S, B])(f: (A, B) =&gt; C) = fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))
+// Gen
+def map2[A, B, C](fa: Gen[A], fb: Gen[B])(f: (A, B) =&gt; C) = fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))
+// Parser
+def map2[A, B, C](fa: Parser[A], fb: Parser[B])(f: (A, B) =&gt; C) = fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))</code></pre>
+<p>The bodies are character-for-character identical. Only the type constructor differs. In C++ you'd reach for a template over the container template. In Scala we abstract over the type constructor <code>F[_]</code>, as we did with <code>Parsers</code> and <code>Foldable</code>.</p>
+
+<h2><span class="sec-no">11.2</span>Functor: Things You Can Map</h2>
+<p>Start with the smallest piece: <code>map</code>.</p>
+<pre><code class="language-scala">trait Functor[F[_]]:
+  extension [A](fa: F[A])
+    def map[B](f: A =&gt; B): F[B]
+
+given Functor[List] with
+  extension [A](as: List[A])
+    def map[B](f: A =&gt; B): List[B] = as.map(f)</code></pre>
+<p>A <strong>functor</strong> is a type constructor with a <code>map</code> that obeys two laws:</p>
+<pre><code class="language-text">fa.map(identity)    == fa                    // identity
+fa.map(f).map(g)    == fa.map(f.andThen(g))  // composition</code></pre>
+<p>The first is the law from Chapter 7: <code>map</code> preserves structure. It can't drop list elements, swap <code>Some</code> to <code>None</code>, or change how many items there are. It only transforms values.</p>
+<p>With just <code>map</code> we can already write generic functions:</p>
+<pre><code class="language-scala">  extension [A, B](fab: F[(A, B)])
+    def distribute: (F[A], F[B]) = (fab.map(_(0)), fab.map(_(1)))   // "unzip" for any functor</code></pre>
+
+<h2><span class="sec-no">11.3</span>Monad: Things You Can flatMap</h2>
+<p>We've seen many times that <code>unit</code> and <code>flatMap</code> are enough to derive <code>map</code>, <code>map2</code>, <code>sequence</code> and <code>traverse</code>. So make them the primitives:</p>
+<pre><code class="language-scala">trait Monad[F[_]] extends Functor[F]:
+  def unit[A](a: =&gt; A): F[A]
+
+  extension [A](fa: F[A])
+    def flatMap[B](f: A =&gt; F[B]): F[B]
+
+    def map[B](f: A =&gt; B): F[B] =
+      fa.flatMap(a =&gt; unit(f(a)))
+
+    def map2[B, C](fb: F[B])(f: (A, B) =&gt; C): F[C] =
+      fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))
+
+  def sequence[A](fas: List[F[A]]): F[List[A]] =
+    traverse(fas)(identity)
+
+  def traverse[A, B](as: List[A])(f: A =&gt; F[B]): F[List[B]] =
+    as.foldRight(unit(List.empty[B]))((a, acc) =&gt; f(a).map2(acc)(_ :: _))
+
+  def replicateM[A](n: Int, fa: F[A]): F[List[A]] =
+    sequence(List.fill(n)(fa))</code></pre>
+<p>Now each type needs just two functions, and gets all the rest:</p>
+<pre><code class="language-scala">given optionMonad: Monad[Option] with
+  def unit[A](a: =&gt; A) = Some(a)
+  extension [A](fa: Option[A])
+    override def flatMap[B](f: A =&gt; Option[B]) = fa.flatMap(f)
+
+given listMonad: Monad[List] with
+  def unit[A](a: =&gt; A) = List(a)
+  extension [A](fa: List[A])
+    override def flatMap[B](f: A =&gt; List[B]) = fa.flatMap(f)
+
+summon[Monad[Option]].sequence(List(Some(1), Some(2)))   // Some(List(1, 2))
+summon[Monad[List]].replicateM(2, List(0, 1))            // List(List(0,0), List(0,1), List(1,0), List(1,1))</code></pre>
+<p>Look at <code>replicateM</code>. For <code>Option</code> it means "n copies, or None". For <code>List</code> it means "every combination of n choices". For <code>Gen</code> it means "a list of n random values" (that's <code>listOfN</code>). For <code>Parser</code> it means "parse exactly n times" (also <code>listOfN</code>). One generic function, a different meaningful behaviour for each monad.</p>
+
+<h3>State needs a type lambda</h3>
+<p><code>State[S, A]</code> has two type parameters, but <code>Monad</code> wants a type constructor with one. Fix <code>S</code> and leave <code>A</code> open:</p>
+<pre><code class="language-scala">given stateMonad[S]: Monad[[x] =&gt;&gt; State[S, x]] with
+  def unit[A](a: =&gt; A): State[S, A] = State.unit(a)
+  extension [A](st: State[S, A])
+    override def flatMap[B](f: A =&gt; State[S, B]): State[S, B] =
+      State.flatMap(st)(f)</code></pre>
+<p><code>[x] =&gt;&gt; State[S, x]</code> is a <strong>type lambda</strong>: a type-level function from <code>x</code> to <code>State[S, x]</code>. It's how you partially apply a type constructor.</p>
+
+<h2><span class="sec-no">11.4</span>The Monad Laws</h2>
+<p>As with monoids, the laws define the abstraction. To state them neatly, use <strong>Kleisli composition</strong>: composing two "monadic functions" <code>A =&gt; F[B]</code> and <code>B =&gt; F[C]</code>:</p>
+<pre><code class="language-scala">def compose[A, B, C](f: A =&gt; F[B], g: B =&gt; F[C]): A =&gt; F[C] =
+  a =&gt; f(a).flatMap(g)</code></pre>
+<p>Then the laws are:</p>
+<pre><code class="language-text">compose(compose(f, g), h) == compose(f, compose(g, h))   // associativity
+compose(f, unit)          == f                           // right identity
+compose(unit, f)          == f                           // left identity</code></pre>
+<p>Those are exactly the monoid laws, with <code>compose</code> as the combine and <code>unit</code> as the identity. Written with <code>flatMap</code> they're less pretty but say the same thing:</p>
+<pre><code class="language-text">x.flatMap(f).flatMap(g) == x.flatMap(a =&gt; f(a).flatMap(g))
+x.flatMap(unit)         == x
+unit(y).flatMap(f)      == f(y)</code></pre>
+<div class="keypoint">The associativity law is why for-comprehensions work. It guarantees that nesting a sequence of <code>&lt;-</code> steps one way or another gives the same program, so you can extract any group of steps into a helper function without changing behaviour.</div>
+
+<div class="exercise" data-n="Exercise 11.1 · flatMap via compose">
+<p>Write <code>flatMap</code> in terms of <code>compose</code> and <code>unit</code>. This shows <code>compose</code> + <code>unit</code> is another valid set of primitives.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def flatMapViaCompose[A, B](fa: F[A])(f: A =&gt; F[B]): F[B] =
+  compose((_: Unit) =&gt; fa, f)(())</code></pre>
+<p>Make a function that ignores its <code>Unit</code> argument and returns <code>fa</code>, compose it with <code>f</code>, and call it with <code>()</code>. There are three equivalent minimal sets: <code>unit</code> + <code>flatMap</code>, <code>unit</code> + <code>compose</code>, and <code>unit</code> + <code>map</code> + <code>join</code> (from Chapter 7).</p>
+</div></details>
+
+<h2><span class="sec-no">11.5</span>So What Is a Monad?</h2>
+<p>Look at the simplest possible monad, one that does nothing:</p>
+<pre><code class="language-scala">case class Id[A](value: A):
+  def map[B](f: A =&gt; B): Id[B] = Id(f(value))
+  def flatMap[B](f: A =&gt; Id[B]): Id[B] = f(value)
+
+for
+  a &lt;- Id("Hello, ")
+  b &lt;- Id("monad!")
+yield a + b       // Id("Hello, monad!")</code></pre>
+<p>With <code>Id</code>, a for-comprehension is just variable binding: <code>val a = ...; val b = ...; a + b</code>. Every other monad is "variable binding, plus something extra happens between the lines":</p>
+<table>
+  <tr><th>Monad</th><th>What happens between steps</th></tr>
+  <tr><td><code>Id</code></td><td>nothing; plain sequencing</td></tr>
+  <tr><td><code>Option</code></td><td>may stop early with no result</td></tr>
+  <tr><td><code>Either[E, _]</code></td><td>may stop early with an error</td></tr>
+  <tr><td><code>List</code></td><td>may branch into many results (nondeterminism)</td></tr>
+  <tr><td><code>State[S, _]</code></td><td>a state is threaded along</td></tr>
+  <tr><td><code>Gen</code></td><td>randomness is threaded along</td></tr>
+  <tr><td><code>Parser</code></td><td>input position is threaded; may fail or backtrack</td></tr>
+  <tr><td><code>Par</code></td><td>steps may run on other threads</td></tr>
+</table>
+<div class="analogy">A monad is a programmable semicolon. In an ordinary language, <code>;</code> means "do the next thing". A monad's <code>flatMap</code> lets you define what "next" means: stop if empty, try every branch, pass the state along, wait for a thread. The for-comprehension is the code; the monad is the rule for how the lines connect.</div>
+<p>So a monad isn't a container, and it isn't specifically about side effects. It's a minimal interface (<code>unit</code> and an associative <code>flatMap</code>) for <strong>sequencing computations where each step can depend on the previous result</strong>. Different monads give that sequencing different extra behaviour.</p>
+
+<h2><span class="sec-no">11.6</span>Reader: One More Useful Monad</h2>
+<p>Many functions need the same configuration passed in. The <strong>Reader</strong> monad represents "a computation that needs an <code>R</code>":</p>
+<pre><code class="language-scala">opaque type Reader[R, A] = R =&gt; A
+
+object Reader:
+  def apply[R, A](f: R =&gt; A): Reader[R, A] = f
+  def ask[R]: Reader[R, R] = r =&gt; r            // read the environment
+  extension [R, A](ra: Reader[R, A]) def run(r: R): A = ra(r)
+
+  given readerMonad[R]: Monad[[x] =&gt;&gt; Reader[R, x]] with
+    def unit[A](a: =&gt; A): Reader[R, A] = _ =&gt; a
+    extension [A](fa: Reader[R, A])
+      override def flatMap[B](f: A =&gt; Reader[R, B]): Reader[R, B] =
+        r =&gt; f(fa(r))(r)              // same r goes to every step
+
+case class Config(baseUrl: String, retries: Int)
+
+val endpoint: Reader[Config, String] =
+  for
+    cfg &lt;- Reader.ask[Config]
+  yield s"${cfg.baseUrl}/v1/data?retries=${cfg.retries}"
+
+endpoint.run(Config("https://api.example.com", 3))</code></pre>
+<p>It's dependency injection with no framework: functions describe what they need, and you supply it once at the top.</p>
+<div class="bridge">
+<p>If you've written C++ functions that all take a <code>const Context&amp;</code> as their first parameter and pass it to every callee, Reader is that pattern with the passing done for you by <code>flatMap</code>.</p>
+</div>
+
+<div class="warfield">
+<p><strong>Monads don't compose in general.</strong> <code>Option</code> is a monad and <code>State</code> is a monad, but there's no generic way to make <code>State[S, Option[A]]</code> a monad from those two alone. Real code needs specific <em>monad transformers</em> (<code>OptionT</code>, <code>EitherT</code>, <code>StateT</code> in cats) or an effect type that bundles common capabilities (like cats-effect's <code>IO</code> or ZIO). Functors and the abstraction in the next chapter <em>do</em> compose.</p>
+</div>
+
+<dl class="jargon">
+  <dt>Functor</dt><dd>A type constructor with a structure-preserving <code>map</code>.</dd>
+  <dt>Monad</dt><dd>A functor with <code>unit</code> and an associative <code>flatMap</code> that obeys identity laws.</dd>
+  <dt>Kleisli arrow</dt><dd>A function <code>A =&gt; F[B]</code>; Kleisli composition chains them with <code>flatMap</code>.</dd>
+  <dt>Type lambda</dt><dd><code>[x] =&gt;&gt; T[S, x]</code>: a type constructor made by fixing some parameters of another.</dd>
+  <dt>Reader</dt><dd>The monad of computations that read a shared, read-only environment.</dd>
+</dl>
+
+<div class="recap"><ul>
+  <li>Abstract over the type constructor <code>F[_]</code> to write <code>map2</code>, <code>sequence</code>, <code>traverse</code> once.</li>
+  <li>Functor: <code>map</code> plus identity and composition laws.</li>
+  <li>Monad: <code>unit</code> + <code>flatMap</code>, plus associativity and identity laws (the monoid laws for Kleisli composition).</li>
+  <li>A monad defines what "do this, then that" means for a type.</li>
+  <li>Monads don't compose generically, which motivates the next chapter.</li>
+</ul></div>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

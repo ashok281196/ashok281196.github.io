@@ -1,0 +1,77 @@
+"use strict";
+
+/* ============================================================
+   BOOK DATA - Functional Programming in Scala: A Companion.
+   The chapter list drives the contents page, every chapter
+   topbar and the prev/next navigation (rendered by book-ui.js).
+   ============================================================ */
+
+const BOOK = {
+  title: 'FP in Scala: A Companion',
+  siteHref: '../../',
+  siteLabel: 'ashok281196.github.io',
+  badge: 'A Study Companion · 2026',
+
+  chapters: [
+    { file: '00-orientation.html', num: '00', title: 'Orientation & Setup',
+      navTitle: 'Ch. 0 · Orientation',
+      sub: 'What the red book is, how to study it, and a five-minute Scala 3 toolchain with scala-cli.',
+      tag: 'Start' },
+    { file: '01-what-is-fp.html', num: '01', title: 'What Functional Programming Actually Is',
+      navTitle: 'Ch. 1 · What is FP',
+      sub: 'Side effects, pure functions, referential transparency and the substitution model, through one refactor of a ticket-booking function.',
+      tag: 'Part I' },
+    { file: '02-functions.html', num: '02', title: 'Functions, Recursion & Types',
+      navTitle: 'Ch. 2 · Functions',
+      sub: 'Tail recursion, higher-order functions, polymorphic functions, and letting the types write the code.',
+      tag: 'Part I' },
+    { file: '03-data-structures.html', num: '03', title: 'Functional Data Structures',
+      navTitle: 'Ch. 3 · Data Structures',
+      sub: 'Enums and pattern matching, an immutable List built by hand, structural sharing, folds, and trees.',
+      tag: 'Part I' },
+    { file: '04-errors.html', num: '04', title: 'Errors as Values',
+      navTitle: 'Ch. 4 · Errors',
+      sub: 'Why exceptions break purity, and how Option and Either with map, flatMap and traverse replace them.',
+      tag: 'Part I' },
+    { file: '05-laziness.html', num: '05', title: 'Strictness & Laziness',
+      navTitle: 'Ch. 5 · Laziness',
+      sub: 'By-name parameters, thunks, a lazy list of our own, infinite streams, and separating description from evaluation.',
+      tag: 'Part I' },
+    { file: '06-state.html', num: '06', title: 'Purely Functional State',
+      navTitle: 'Ch. 6 · State',
+      sub: 'Random numbers without mutation, threading state by hand, then the State type and for-comprehensions.',
+      tag: 'Part I' },
+    { file: '07-parallelism.html', num: '07', title: 'Designing a Library: Parallelism',
+      navTitle: 'Ch. 7 · Parallelism',
+      sub: 'Algebraic design in practice: start from usage, find the primitives, state the laws, and fix a deadlock.',
+      tag: 'Part II' },
+    { file: '08-testing.html', num: '08', title: 'Property-Based Testing',
+      navTitle: 'Ch. 8 · Testing',
+      sub: 'Generators as State, properties as values, and a tiny ScalaCheck-style library from scratch.',
+      tag: 'Part II' },
+    { file: '09-parsers.html', num: '09', title: 'Parser Combinators',
+      navTitle: 'Ch. 9 · Parsers',
+      sub: 'Design the algebra first, implement it last: a JSON parser from a dozen small combinators.',
+      tag: 'Part II' },
+    { file: '10-monoids.html', num: '10', title: 'Monoids',
+      navTitle: 'Ch. 10 · Monoids',
+      sub: 'The first abstract structure: associativity, identity, foldMap, parallel folds and composing monoids.',
+      tag: 'Part III' },
+    { file: '11-monads.html', num: '11', title: 'Monads',
+      navTitle: 'Ch. 11 · Monads',
+      sub: 'Spotting the same flatMap in five places, extracting the Monad trait, its laws, and Reader and State as monads.',
+      tag: 'Part III' },
+    { file: '12-applicative-traverse.html', num: '12', title: 'Applicative & Traversable',
+      navTitle: 'Ch. 12 · Applicative',
+      sub: 'Less power, more uses: independent effects, validation that collects every error, and traverse everywhere.',
+      tag: 'Part III' },
+    { file: '13-io.html', num: '13', title: 'Effects, IO & Local Mutation',
+      navTitle: 'Ch. 13 · IO',
+      sub: 'Programs as values, an IO monad, stack safety by trampolining, and ST for mutation nobody can see.',
+      tag: 'Part IV' },
+    { file: '14-streaming.html', num: '14', title: 'Streaming I/O & Where Next',
+      navTitle: 'Ch. 14 · Streaming',
+      sub: 'Why lazy I/O fails, a pull-based stream with resource safety, and the map to cats, cats-effect, fs2 and ZIO.',
+      tag: 'Part IV' }
+  ]
+};

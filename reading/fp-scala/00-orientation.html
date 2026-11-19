@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Ch. 0 · Orientation &amp; Setup · FP in Scala: A Companion</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..700&family=IBM+Plex+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="page">
+
+<div class="topbar" id="booktop"></div>
+
+<header class="chapter-head">
+  <div class="chapter-num">00</div>
+  <div class="chapter-kicker">Start here</div>
+  <h1>Orientation &amp; Setup</h1>
+  <p class="chapter-sub">What the red book is trying to teach, how to study a book made of exercises, and just enough Scala 3 to read every code block in this companion.</p>
+</header>
+
+<h2><span class="sec-no">0.1</span>Why This Book Has a Reputation</h2>
+<p>Most programming books show you finished tools and explain how to use them. The red book does the reverse. It gives you a constraint, <em>no side effects</em>, and then asks you to build the tools yourself, one exercise at a time. You write a linked list. Then an optional value. Then a random number generator that never mutates anything. Around chapter 6 you notice that the last three things you built have methods with exactly the same shape. Around chapter 11 the book names that shape: a monad.</p>
+<p>That's why people call it hard and also why they call it the best FP book. The difficulty isn't the syntax. You're asked to <strong>discover</strong> the abstractions rather than be told them, and discovering takes effort.</p>
+<div class="analogy">Learning FP from a list of definitions ("a monad is a type with flatMap and unit satisfying three laws") is like learning chess from the rulebook. The red book makes you play hundreds of small games first, so when you finally read the rule, you've already used it.</div>
+
+<h2><span class="sec-no">0.2</span>How to Study It</h2>
+<ol>
+  <li><strong>Read the signature, then stop.</strong> Most exercises give you a type signature like <code>def map[A, B](as: List[A])(f: A =&gt; B): List[B]</code>. Before writing anything, ask: what values do I have, what do I need to produce, and what can I do with what I have? Often only one implementation compiles.</li>
+  <li><strong>Write it on paper or in a REPL, not in your head.</strong> The compiler is your teacher here. Type errors are hints.</li>
+  <li><strong>Get stuck for ten minutes, not two hours.</strong> If you can't see it after ten honest minutes, open the solution, understand it, close it, and write it again from memory the next day.</li>
+  <li><strong>Re-derive, don't memorise.</strong> The goal is to be able to <em>reconstruct</em> <code>foldRight</code> or <code>flatMap</code> for a new type, not to remember the one for <code>List</code>.</li>
+</ol>
+<div class="keypoint">When you're stuck on an FP exercise, follow the types. Write down every value you have in scope and its type. The answer is almost always "combine these in the only way that makes the types line up."</div>
+
+<h2><span class="sec-no">0.3</span>A Five-Minute Toolchain</h2>
+<p>You don't need sbt, an IDE project or a build file to follow this book. <strong>scala-cli</strong> runs single files and has a REPL.</p>
+<div class="setup">
+<p>On macOS or Linux:</p>
+<pre><code class="language-bash"># install (macOS)
+brew install Virtuslab/scala-cli/scala-cli
+
+# or Linux
+curl -sSLf https://scala-cli.virtuslab.org/get | sh
+
+# a REPL
+scala-cli repl
+
+# run a file
+scala-cli run Hello.scala</code></pre>
+<p>On the iPad itself you can't install a JVM, but <a href="https://scastie.scala-lang.org">Scastie</a> runs Scala 3 in the browser. Set the target to Scala 3 in Build Settings and paste any code block from this book.</p>
+</div>
+<p>Your first file:</p>
+<pre><code class="language-scala">// Hello.scala
+@main def hello(): Unit =
+  val xs = List(1, 2, 3)
+  println(xs.map(_ * 10))   // List(10, 20, 30)</code></pre>
+
+<h2><span class="sec-no">0.4</span>Scala 3 in One Sitting</h2>
+<p>This is the subset of Scala that the rest of the companion uses. Skim it now and come back when a later code block looks unfamiliar.</p>
+
+<h3>Values and methods</h3>
+<pre><code class="language-scala">val x: Int = 42            // immutable binding (like `const auto` in C++)
+var y = 0                  // mutable; we'll almost never use this
+def square(n: Int): Int = n * n
+def add(a: Int, b: Int) = a + b      // return type inferred
+
+// Scala 3 allows indentation instead of braces
+def describe(n: Int): String =
+  if n &lt; 0 then "negative"
+  else if n == 0 then "zero"
+  else "positive"</code></pre>
+<p>Everything is an expression: <code>if</code> returns a value, a block returns its last line, and there's no need for <code>return</code>.</p>
+
+<h3>Functions as values</h3>
+<pre><code class="language-scala">val inc: Int =&gt; Int = n =&gt; n + 1     // a function value
+val twice = (f: Int =&gt; Int, x: Int) =&gt; f(f(x))
+twice(inc, 5)                         // 7
+List(1, 2, 3).map(_ + 1)              // `_ + 1` is shorthand for x =&gt; x + 1</code></pre>
+
+<h3>Generics use square brackets</h3>
+<pre><code class="language-scala">def first[A](xs: List[A]): A = xs.head     // like template&lt;typename A&gt;</code></pre>
+
+<h3>Enums and pattern matching</h3>
+<pre><code class="language-scala">enum Shape:
+  case Circle(r: Double)
+  case Rect(w: Double, h: Double)
+
+import Shape.*
+def area(s: Shape): Double = s match
+  case Circle(r)  =&gt; math.Pi * r * r
+  case Rect(w, h) =&gt; w * h</code></pre>
+
+<h3>Traits, case classes, objects</h3>
+<pre><code class="language-scala">trait Greeter:                 // like an abstract class / interface
+  def greet(name: String): String
+
+case class Point(x: Int, y: Int)    // immutable record with equals, copy, pattern matching
+val p = Point(1, 2)
+val q = p.copy(y = 5)               // Point(1, 5); p is unchanged
+
+object MathUtil:                    // a singleton; home for "static" functions
+  def clamp(n: Int, lo: Int, hi: Int) = n.max(lo).min(hi)</code></pre>
+
+<h3>Extension methods</h3>
+<pre><code class="language-scala">extension (s: String)
+  def shout: String = s.toUpperCase + "!"
+
+"hi".shout   // "HI!"</code></pre>
+<p>We'll use extension methods a lot. They let us write <code>opt.map(f)</code> on a type we define ourselves, without putting every method inside the type.</p>
+
+<div class="bridge">
+<p>Some quick mappings. <code>val</code> is <code>const</code>. A trait is an abstract base class that can also carry implementations. <code>[A]</code> is <code>template&lt;typename A&gt;</code>, but the generic code is checked once at the definition, not at each use. An <code>enum</code> with cases is a <code>std::variant</code> where pattern matching is a type-checked <code>std::visit</code>, and the compiler warns if you forget a case. <code>A =&gt; B</code> is <code>std::function&lt;B(A)&gt;</code>.</p>
+</div>
+
+<h2><span class="sec-no">0.5</span>A Word on Our Naming</h2>
+<p>Scala's standard library already has <code>List</code>, <code>Option</code>, <code>Either</code> and <code>LazyList</code>. In chapters 3&ndash;5 we build our own versions to understand them. To avoid clashes, put each chapter's code in its own file, or wrap it in an <code>object</code>, and hide the standard names when needed:</p>
+<pre><code class="language-scala">import scala.{Option as _, Some as _, None as _, Either as _, Left as _, Right as _}</code></pre>
+
+<div class="exercise" data-n="Exercise 0.1">
+<p>Install scala-cli (or open Scastie), and write a function <code>isSorted[A](as: List[A], gt: (A, A) =&gt; Boolean): Boolean</code> that returns true if no element is "greater than" the one after it. Use a <code>match</code>. Don't worry about elegance yet.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-scala">def isSorted[A](as: List[A], gt: (A, A) =&gt; Boolean): Boolean = as match
+  case a :: b :: rest =&gt; !gt(a, b) &amp;&amp; isSorted(b :: rest, gt)
+  case _              =&gt; true      // empty or single element
+
+isSorted(List(1, 2, 3), _ &gt; _)    // true
+isSorted(List(1, 3, 2), _ &gt; _)    // false</code></pre>
+<p><code>a :: b :: rest</code> matches a list with at least two elements. Note the function is generic: it doesn't know what <code>A</code> is, so it <em>must</em> use <code>gt</code> to compare. That's your first taste of types constraining an implementation.</p>
+</div></details>
+
+<div class="recap"><ul>
+  <li>The book teaches by derivation. Do the exercises, because they <em>are</em> the content.</li>
+  <li>When stuck, list what's in scope and its type, then combine.</li>
+  <li>scala-cli or Scastie is all the tooling you need.</li>
+  <li>Scala 3 essentials: <code>val</code>, <code>def</code>, <code>enum</code>, <code>match</code>, <code>case class</code>, <code>trait</code>, extension methods.</li>
+</ul></div>
+
+<nav class="booknav" id="booknav"></nav>
+
+</div>
+<script src="book.js"></script>
+<script src="book-ui.js"></script>
+</body>
+</html>

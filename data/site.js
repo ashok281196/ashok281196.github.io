@@ -27,6 +27,17 @@ const SITE = {
       ]
     },
     {
+      file: 'reading/fp-scala/index.html',
+      title: 'Functional Programming in Scala — A Study Companion',
+      desc: 'The concepts of the “red book”, rebuilt step by step in fifteen chapters of Scala 3: pure functions, functional data structures, errors as values, laziness, State, library design, property testing, parsers, monoids, monads, applicatives, IO and streaming. Exercises with hidden solutions in every chapter.',
+      meta: [
+        { label: 'NEW', hot: true },
+        { label: 'book' },
+        { label: '15 chapters' },
+        { label: 'updated Nov 2026' }
+      ]
+    },
+    {
       file: 'autonomous-mobile-robot-navigation/index.html',
       title: 'Autonomous Mobile Robot Navigation — A Field Book',
       desc: 'The full navigation stack in eight deep-dive chapters — math and optimization, odometry, SLAM, relocalization, planning and control, ROS-free infrastructure, outdoor navigation, and learning-based methods. Equations, diagrams, and runnable C++ in every chapter.',
