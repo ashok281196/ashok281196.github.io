@@ -25,10 +25,10 @@ function paperCardHTML(href, p, extent){
   const tags = (p.tags || []).map(t => `<span>${esc(t)}</span>`).join('');
   return `
   <a class="paper" href="${esc(href)}">
-    <span class="spine" aria-hidden="true">${esc(p.stamp)}</span>
+    <span class="spine" aria-hidden="true">${esc(p.stamp || paperStamp(p))}</span>
     <span class="paper-body">
       <span class="p-title">${esc(p.title)} <span class="arrow">&nearr;</span></span>
-      <span class="p-authors">${esc(p.authors)}</span>
+      ${p.authors ? `<span class="p-authors">${esc(p.authors)}</span>` : ''}
       <span class="p-desc">${esc(p.desc)}</span>
       <span class="p-meta">
         <span class="hot">${esc(String(p.year))}</span>
@@ -49,8 +49,9 @@ function shelfHTML(cat){
     </div>
     <p class="shelf-blurb">${esc(cat.blurb)}</p>
     <div class="paper-list">
-      ${cat.papers.map(p => paperCardHTML(
-        `view.html?c=${encodeURIComponent(cat.slug)}&p=${encodeURIComponent(p.file)}`, p, `${p.pages} pp`)).join('')}
+      ${cat.papers.map(p => p.arxiv
+        ? paperCardHTML(`read.html?c=${encodeURIComponent(cat.slug)}&id=${encodeURIComponent(p.arxiv)}`, p, 'arXiv link')
+        : paperCardHTML(`view.html?c=${encodeURIComponent(cat.slug)}&p=${encodeURIComponent(p.file)}`, p, `${p.pages} pp`)).join('')}
     </div>
   </section>`;
 }
