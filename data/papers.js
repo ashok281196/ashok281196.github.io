@@ -45,6 +45,16 @@ const PAPERS = {
         minutes: 55,
         desc: "How DDPM's denoising trick became the standard way robots learn skills from human demos: diffusing 16-step action chunks conditioned on camera input, receding-horizon control, CNN vs transformer backbones, why it beats IBC/BET/LSTM-GMM by 46.9%, and real-robot results from Push-T to shirt folding. Includes an interactive demo comparing averaged, step-by-step and chunked policies.",
         tags: ['explainer', 'robotics', 'imitation learning', 'diffusion']
+      },
+      {
+        href: 'explainers/umi-2402.10329/',
+        title: 'Universal Manipulation Interface: In-The-Wild Robot Teaching Without In-The-Wild Robots — explained in depth',
+        authors: 'Cheng Chi, Zhenjia Xu et al. · Stanford, Columbia, Toyota Research Institute',
+        stamp: 'arXiv:2402.10329 [cs.RO]',
+        year: 2024,
+        minutes: 35,
+        desc: 'How a $371 hand-held gripper and one GoPro replaced the robot during data collection: fisheye lens and side mirrors for context and depth, visual-inertial SLAM to recover the hand\'s path, and the two interface choices — latency matching and relative trajectories — that let the same policy run on different arms. Covers all four capability tasks, the 30-location in-the-wild experiment, and an interactive latency demo.',
+        tags: ['explainer', 'robotics', 'data collection', 'imitation learning']
       }
     ]
   },

@@ -1,0 +1,489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F7F1E5">
+<title>UMI Explained</title>
+<meta name="description" content="Universal Manipulation Interface, explained from zero: hand-held grippers, a GoPro, and the interface design that lets robots learn from demos collected without robots.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../folio.css">
+<style>
+/* page-only additions on top of folio.css (shared rules mirror the Diffusion Policy explainer) */
+.paper-meta { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin-top: var(--s5); }
+details.q { border: 1px solid var(--rule); border-radius: var(--radius); margin: var(--s3) 0; background: var(--sheet); }
+details.q summary { cursor: pointer; padding: var(--s4); min-height: 44px; font-weight: 600; list-style: none; }
+details.q summary::-webkit-details-marker { display: none; }
+details.q summary::before { content: "＋"; color: var(--oxblood); margin-right: var(--s2); font-family: var(--sans); }
+details.q[open] summary::before { content: "−"; }
+details.q div { padding: 0 var(--s4) var(--s4); color: var(--ink-soft); font-size: var(--fs-sm); }
+dl.gloss dt { font-weight: 600; margin-top: var(--s4); color: var(--oxblood); }
+dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-soft); }
+.demo { background: var(--sheet-alt); border: 1px solid var(--rule); border-radius: var(--radius-lg); padding: var(--s5); margin: var(--s6) 0; font-family: var(--sans); }
+.demo canvas { width: 100%; height: auto; aspect-ratio: 600 / 360; display: block; border-radius: var(--radius); background: var(--sheet); box-shadow: var(--shadow-card); touch-action: manipulation; }
+.demo-status { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); align-items: center; justify-content: space-between; margin-top: var(--s3); font-size: var(--fs-sm); color: var(--ink-soft); }
+.demo-status b { color: var(--ink); }
+.tally { font: 500 var(--fs-xs) var(--mono); color: var(--ink-faint); }
+.trio { display: grid; gap: var(--s4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); margin: var(--s5) 0; }
+.trio .card { border-top: 3px solid var(--c, var(--slate)); }
+.trio .card ul { font-size: var(--fs-sm); color: var(--ink-soft); padding-left: 1.1em; margin: var(--s2) 0 0; }
+.trio .card li { margin-bottom: var(--s1); }
+.verdict { display: inline-block; font: 600 var(--fs-xs) var(--sans); padding: 3px 8px; border-radius: 999px; margin-top: var(--s2); }
+.v-bad { background: var(--oxblood-tint); color: var(--oxblood); }
+.v-mid { background: var(--gold-tint); color: #7D5D1F; }
+.v-good { background: var(--sage-tint); color: var(--sage); }
+td.best { font-weight: 700; color: var(--oxblood); }
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: var(--s3); margin: var(--s5) 0; }
+.stat { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius-lg); padding: var(--s4); text-align: center; box-shadow: var(--shadow-card); }
+.stat b { display: block; font: 700 var(--fs-2xl)/1.1 var(--serif); color: var(--oxblood); }
+.stat span { font: var(--fs-xs)/1.4 var(--sans); color: var(--ink-soft); }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; margin-bottom: var(--s3); }
+.seg button { min-height: 44px; border: 0; border-radius: 7px; background: transparent; font: 500 var(--fs-xs)/1.25 var(--sans); color: var(--ink-soft); cursor: pointer; padding: 4px 6px; }
+.seg button[aria-pressed="true"] { background: var(--oxblood); color: #FFF8F2; }
+.seg.two { grid-template-columns: repeat(2, 1fr); }
+.sliders { display: grid; gap: var(--s3); margin: var(--s3) 0; }
+.sliders label { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--s3); font-size: var(--fs-sm); color: var(--ink-soft); }
+.sliders input[type=range] { grid-column: 1 / -1; width: 100%; min-height: 32px; accent-color: var(--oxblood); }
+.sliders output { font: 500 var(--fs-xs) var(--mono); color: var(--ink); }
+.frame-fig { background: var(--sheet-alt); border: 1px solid var(--rule); border-radius: var(--radius-lg); padding: var(--s4); }
+.frame-fig svg { width: 100%; max-width: 520px; margin: 0 auto; font-family: var(--sans); }
+.six { counter-reset: six; list-style: none; padding: 0; display: grid; gap: var(--s3); }
+.six li { counter-increment: six; position: relative; margin: 0; padding: var(--s4) var(--s4) var(--s4) calc(var(--s4) + 40px); background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }
+.six li::before { content: counter(six); position: absolute; left: var(--s4); top: var(--s4); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--oxblood); color: #FFF8F2; font: 600 var(--fs-sm) var(--sans); }
+.six b { display: block; margin-bottom: 2px; }
+.six span { font-size: var(--fs-sm); color: var(--ink-soft); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open contents" aria-controls="sidebar" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+  </button>
+  <a class="icon-btn" href="../../" aria-label="Back to papers" title="Back to papers">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+  </a>
+  <div class="title"><b>Folio</b>UMI, Explained</div>
+  <span class="chapter-label" id="chapterLabel">Cover</span>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Table of contents">
+    <p class="toc-head">Contents</p>
+    <ol class="toc">
+      <li><a href="#cover"><span class="num">·</span>Cover</a></li>
+      <li><a href="#ch1"><span class="num">1</span>The Data Problem</a></li><li><a href="#ch2"><span class="num">2</span>A Robot Hand You Hold</a></li><li><a href="#ch3"><span class="num">3</span>Six Design Choices</a></li><li><a href="#ch4"><span class="num">4</span>Where Was My Hand?</a></li><li><a href="#ch5"><span class="num">5</span>Three Gaps</a></li><li><a href="#ch6"><span class="num">6</span>Latency Matching</a></li><li><a href="#ch7"><span class="num">7</span>Relative Trajectories</a></li><li><a href="#ch8"><span class="num">8</span>The Whole Pipeline</a></li><li><a href="#ch9"><span class="num">9</span>Four Hard Tasks</a></li><li><a href="#ch10"><span class="num">10</span>Into the Wild</a></li><li><a href="#ch11"><span class="num">11</span>Speed, Accuracy, Limits</a></li><li><a href="#ch12"><span class="num">12</span>Recap &amp; Quiz</a></li>
+    </ol>
+  </nav>
+  <div class="scrim" id="scrim"></div>
+
+  <main class="page" id="main">
+
+    <section class="cover" id="cover" data-label="Cover">
+      <svg class="mark" viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M28 14c-5-4-13-5-20-4v32c7-1 15 0 20 4 5-4 13-5 20-4V10c-7-1-15 0-20 4Z"/><path d="M28 14v32"/>
+      </svg>
+      <span class="eyebrow">A Beginner’s Guide · arXiv 2402.10329</span>
+      <h1>Universal Manipulation Interface</h1>
+      <p class="lead">In-the-wild robot teaching without in-the-wild robots — how a hand-held gripper and a single action camera turned “collect robot data” into something you can do in a café.</p>
+      <div class="paper-meta">
+        <span class="chip accent">Cheng Chi* · Zhenjia Xu* · Chuer Pan · Eric Cousineau · Benjamin Burchfiel · Siyuan Feng · Russ Tedrake · Shuran Song</span>
+        <span class="chip">Stanford · Columbia · Toyota Research Institute</span>
+        <span class="chip">RSS 2024 · Best Systems Paper finalist</span>
+      </div>
+      <p class="meta">TWELVE CHAPTERS · ~35 MIN READ · <a href="https://arxiv.org/pdf/2402.10329">ORIGINAL PDF</a> · PREREQUISITE (OPTIONAL): <a href="../diffusion-policy-2303.04137/">DIFFUSION POLICY EXPLAINER</a></p>
+    </section>
+
+    <div class="callout key"><div><strong>The whole paper in one sentence</strong><p>Give a person a 3D-printed gripper with a GoPro on it, let them do the task with their own hands anywhere in the world, recover what the gripper did from the video alone — and, with a few careful choices about <em>how</em> observations and actions are represented, a robot that was never in the room can run the learned skill.</p></div></div>
+
+    <div class="stat-row">
+      <div class="stat"><b>0</b><span>robots needed while collecting data</span></div>
+      <div class="stat"><b>$371</b><span>per gripper: $73 printed parts + $298 GoPro and accessories</span></div>
+      <div class="stat"><b>71.7%</b><span>success in places and on cups the policy had never seen</span></div>
+      <div class="stat"><b>6.1 mm</b><span>mean position error of the recovered hand trajectory</span></div>
+    </div>
+
+    <section class="chapter" id="ch1" data-label="1 · The Data Problem">
+<header class="chapter-head"><span class="num">Chapter 1</span><h2>The Data Problem</h2></header>
+      <p class="dropcap">The <a href="../diffusion-policy-2303.04137/">Diffusion Policy</a> paper showed that a robot can learn hard skills by imitating a few hundred human demonstrations. That moved the bottleneck. The learning algorithm was no longer the weak link; the demonstrations were. Where do you get thousands of them, in enough different kitchens, offices and cafés that the robot stops being surprised by the world?</p>
+      <p>In early 2024 there were three answers on the table, and each had a catch.</p>
+      <div class="trio">
+        <div class="card" style="--c:var(--slate)"><h4>Teleoperation</h4><p>A person drives the real robot with a joystick, VR controller or a second “leader” arm.</p><ul><li>Data is exactly what the robot needs</li><li>Needs the robot, on site, for every demo</li><li>Slow, and awkward for fast or two-handed motions</li></ul><span class="verdict v-mid">Good data, hard to scale</span></div>
+        <div class="card" style="--c:var(--gold)"><h4>Human video</h4><p>Film people doing things with their bare hands; there is no shortage of footage.</p><ul><li>Nearly free, endlessly diverse</li><li>A hand is not a gripper: the embodiment gap</li><li>No recorded actions — they must be guessed</li></ul><span class="verdict v-bad">Scales, hard to use</span></div>
+        <div class="card" style="--c:var(--sage)"><h4>Hand-held grippers</h4><p>Hold a copy of the robot’s gripper, with a camera on it, and do the task yourself.</p><ul><li>No robot needed, portable</li><li>Same “hand” as the robot</li><li>Before UMI: only simple, slow pick-and-place</li></ul><span class="verdict v-good">The one UMI fixes</span></div>
+      </div>
+      <p>Hand-held grippers were not new. What earlier versions could teach was limited: mostly grasping and quasi-static pick-and-place. The paper’s claim is that this was never a limit of the <em>idea</em>, only of the details — what the camera sees, how precisely the motion is recovered, and how the data is handed to the policy. Fix those and the same cheap device can teach tossing, two-handed folding and a seven-step dish wash.</p>
+      <div class="callout note"><div><strong>What “in-the-wild” means here</strong><p>Outside the lab, in places nobody prepared: a café table, a water fountain, someone’s kitchen. “Without in-the-wild robots” is the punchline — the data goes to those places, the robot does not.</p></div></div>
+    <div class="folio"><span>The Data Problem</span><span>1</span></div>
+</section>
+
+    <section class="chapter" id="ch2" data-label="2 · A Robot Hand You Hold">
+<header class="chapter-head"><span class="num">Chapter 2</span><h2>A Robot Hand You Hold</h2></header>
+      <p class="dropcap">The UMI gripper is a trigger-operated parallel-jaw gripper, 3D printed, with soft fingers. Squeeze the trigger and the two fingers close, exactly like the robot’s gripper will. A GoPro sits on top, looking down past the fingers at whatever you are about to grab.</p>
+      <div class="stat-row">
+        <div class="stat"><b>780 g</b><span>total weight in the hand</span></div>
+        <div class="stat"><b>80 mm</b><span>finger stroke</span></div>
+        <div class="stat"><b>1</b><span>sensor and recorder: the GoPro</span></div>
+        <div class="stat"><b>1</b><span>MP4 file per demonstration</span></div>
+      </div>
+      <p>That last number is the quiet design decision. There is no laptop, no tracking base stations, no motion-capture cage, no cable. The camera records video and, inside the same MP4, the readings of its own accelerometer and gyroscope. Everything the pipeline needs is in that one file, so a demonstration can be collected by anyone, anywhere, and sent over the internet like any other clip.</p>
+      <p>The robot side mirrors the hand-held side on purpose. The real arm carries the same camera in the same position above the same kind of fingers, so the picture the policy sees at test time looks like the picture it was trained on. The robot’s arm is never in frame in a way that matters; the wrist camera only sees fingers and world.</p>
+      <div class="callout tip"><div><strong>Why a wrist camera and nothing else</strong><p>A camera bolted to the room ties the data to that room and to where the robot stands in it. A camera on the wrist moves with the hand, so the view is the same whether the “wrist” belongs to a person in a café or a UR5 in a lab. That is what makes the data portable — and it is also what creates the problems the next chapters solve.</p></div></div>
+    <div class="folio"><span>A Robot Hand You Hold</span><span>2</span></div>
+</section>
+
+    <section class="chapter" id="ch3" data-label="3 · Six Design Choices">
+<header class="chapter-head"><span class="num">Chapter 3</span><h2>Six Design Choices</h2></header>
+      <p class="dropcap">The paper numbers its hardware decisions ① to ⑥. None is exotic on its own. Together they answer one question: how do you get enough information for hard tasks out of a single camera on a stick?</p>
+      <ol class="six">
+        <li><b>Wrist-mounted camera</b><span>The only sensor. No external cameras, so no per-scene calibration and no dependence on where the robot is standing.</span></li>
+        <li><b>Wide fisheye lens (155°)</b><span>Sees the fingers, the object and a wide slice of the surroundings at once. The raw, curved image goes straight to the policy with no un-distortion.</span></li>
+        <li><b>Side mirrors</b><span>Two small physical mirrors at the edges of the frame show the scene from slightly different angles — depth cues from one camera.</span></li>
+        <li><b>IMU-aware tracking</b><span>The GoPro’s motion sensors are fused with the video so the hand’s path is recovered at true metric scale, even through fast motion.</span></li>
+        <li><b>Continuous gripper tracking</b><span>Fiducial markers on the fingers give the exact opening width at every frame, not just “open” or “closed”.</span></li>
+        <li><b>Kinematic data filtering</b><span>Before training for a particular robot, throw away demos that robot could not physically reproduce.</span></li>
+      </ol>
+
+      <h3>What the camera actually sees</h3>
+      <figure class="frame-fig">
+        <svg viewBox="0 0 520 300" role="img" aria-label="Schematic of one fisheye frame: a wide central view with the two gripper fingers at the bottom and a mirror view in each lower corner">
+          <rect x="10" y="10" width="500" height="280" rx="14" fill="var(--sheet)" stroke="var(--rule)"/>
+          <ellipse cx="260" cy="150" rx="238" ry="132" fill="var(--slate-tint)" stroke="var(--slate)" stroke-width="1.5"/>
+          <path d="M60 150 Q260 96 460 150" fill="none" stroke="var(--slate)" stroke-width="1" stroke-dasharray="4 5" opacity=".7"/>
+          <path d="M92 206 Q260 176 428 206" fill="none" stroke="var(--slate)" stroke-width="1" stroke-dasharray="4 5" opacity=".7"/>
+          <text x="260" y="66" text-anchor="middle" font-size="19" font-weight="600" fill="var(--slate)">155° fisheye view</text>
+          <ellipse cx="260" cy="150" rx="26" ry="16" fill="var(--sheet)" stroke="var(--ink-soft)" stroke-width="1.5"/>
+          <path d="M286 150h14" stroke="var(--ink-soft)" stroke-width="3" stroke-linecap="round"/>
+          <text x="260" y="124" text-anchor="middle" font-size="17" fill="var(--ink-soft)">cup</text>
+          <path d="M214 282 L226 196 L244 196 L240 282Z" fill="var(--oxblood)" opacity=".85"/>
+          <path d="M306 282 L294 196 L276 196 L280 282Z" fill="var(--oxblood)" opacity=".85"/>
+          <text x="260" y="188" text-anchor="middle" font-size="17" font-weight="600" fill="var(--oxblood)">fingers</text>
+          <rect x="40" y="196" width="112" height="70" rx="8" fill="var(--sage-tint)" stroke="var(--sage)" stroke-width="1.5"/>
+          <rect x="368" y="196" width="112" height="70" rx="8" fill="var(--sage-tint)" stroke="var(--sage)" stroke-width="1.5"/>
+          <text x="96" y="237" text-anchor="middle" font-size="18" font-weight="600" fill="var(--sage)">mirror</text>
+          
+          <text x="424" y="237" text-anchor="middle" font-size="18" font-weight="600" fill="var(--sage)">mirror</text>
+          
+        </svg>
+        <figcaption><b>Figure 3.1</b> — A simplified sketch of one frame (after the paper’s Figure 2). One image carries the main view plus two extra viewpoints from the mirrors: “implicit stereo”.</figcaption>
+      </figure>
+
+      <h3>Why a fisheye, when it bends everything?</h3>
+      <p>A normal lens sees a narrow cone. Hold a cup close and the cup fills the frame: the table, the saucer and your sense of where you are all vanish. A fisheye trades straight lines for context. The centre keeps high resolution where the action is; the edges compress the periphery so it still fits. The network does not care that lines are curved, as long as they are curved the same way in training and at test time.</p>
+      <p>The paper tested this directly by cropping the image to a 69° view, about what a phone’s main camera or a RealSense sees. Same task, same data, same policy: success fell from 20/20 to 11/20.</p>
+
+      <h3>Why mirrors?</h3>
+      <p>One camera cannot measure depth from a single image. Two cameras can, by comparing their slightly different views. A mirror at the edge of the frame gives the single camera a second, virtual viewpoint for free — no extra sensor, no synchronisation, no extra cost.</p>
+      <p>There is a subtlety the authors found by experiment. A mirror image is flipped, so an object moving right in the main view moves left in the mirror. Feeding the raw mirror view to the policy actually hurt slightly. Digitally flipping each mirror crop back, and swapping the two sides, made the views consistent with the main image and recovered full performance.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Camera setup (cup arrangement)</th><th>Success</th></tr></thead>
+        <tbody>
+          <tr><td>Fisheye + digitally reflected mirrors (UMI)</td><td class="best">20/20 · 100%</td></tr>
+          <tr><td>Fisheye, no mirrors</td><td>18/20 · 90%</td></tr>
+          <tr><td>Fisheye + raw mirror images</td><td>17/20 · 85%</td></tr>
+          <tr><td>No fisheye (69° crop)</td><td>11/20 · 55%</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Soft fingers, continuous width</h3>
+      <p>The fingers are compliant, and the gripper width is recorded as a continuous number. Together those two facts give the policy a crude form of force control: closing the fingers a little further than the object’s width squeezes harder, because the soft finger bends. A binary open/close signal throws that away, and tasks like tossing — where release timing is everything — need it.</p>
+    <div class="folio"><span>Six Design Choices</span><span>3</span></div>
+</section>
+
+    <section class="chapter" id="ch4" data-label="4 · Where Was My Hand?">
+<header class="chapter-head"><span class="num">Chapter 4</span><h2>Where Was My Hand?</h2></header>
+      <p class="dropcap">A video is not a demonstration. To train a robot you need actions: where the gripper was, in three dimensions and three rotations, at every moment. Nobody measured that while the person was working. It has to be recovered from the footage afterwards.</p>
+      <p>The tool for this is <strong>SLAM</strong> — simultaneous localisation and mapping. Watch a video, find distinctive visual points, and work out both where those points are in space and how the camera moved to see them the way it did. UMI builds on ORB-SLAM3, a widely used open-source system.</p>
+      <h3>Why vision alone is not enough</h3>
+      <p>Earlier hand-held devices used purely visual reconstruction, and two things went wrong.</p>
+      <ul>
+        <li><strong>Scale.</strong> From a single camera, a small room filmed up close and a big room filmed from far away look identical. Pure vision recovers the shape of the path but not its size — and a robot needs millimetres.</li>
+        <li><strong>Fast motion.</strong> Swing the gripper quickly and the frames blur; the visual tracker loses its points exactly when the motion is most interesting.</li>
+      </ul>
+      <p>The IMU fixes both. An accelerometer measures real acceleration in real units, so fusing it with the video pins down metric scale. And it samples far faster than the camera, bridging the moments when the image is useless. This is the “inertial-monocular” in the paper’s description.</p>
+      <h3>Map first, then localise</h3>
+      <p>For each new scene the collector first records a slow mapping video. SLAM turns it into a map of that place. Every demonstration recorded there is then <em>re-localised</em> against that one map, which has two payoffs: all demos from the scene share a single coordinate frame, and — crucially for two-handed tasks — the left and right grippers can be located in the <em>same</em> frame, so their pose relative to each other is known.</p>
+      <div class="stat-row">
+        <div class="stat"><b>6.1 mm</b><span>mean absolute position error vs motion capture</span></div>
+        <div class="stat"><b>3.5°</b><span>mean absolute rotation error</span></div>
+        <div class="stat"><b>10.1 mm</b><span>relative position error between two grippers</span></div>
+        <div class="stat"><b>0.8°</b><span>relative rotation error between two grippers</span></div>
+      </div>
+      <p>Those numbers come from comparing the recovered trajectories against a motion-capture system across fourteen tasks. Under a centimetre is good enough for placing a cup on a saucer; it is not good enough for threading a needle, and the paper does not claim otherwise.</p>
+    <div class="folio"><span>Where Was My Hand?</span><span>4</span></div>
+</section>
+
+    <section class="chapter" id="ch5" data-label="5 · Three Gaps">
+<header class="chapter-head"><span class="num">Chapter 5</span><h2>Three Gaps</h2></header>
+      <p class="dropcap">Suppose the hardware works perfectly. You still do not have a robot policy. A person holding a gripper and a robot arm holding a gripper differ in ways that have nothing to do with fingers, and a policy trained naively on hand-held data fails on the robot. The paper’s second half is about closing three gaps.</p>
+      <div class="trio">
+        <div class="card" style="--c:var(--slate)"><h4>What is seen</h4><p>A wrist camera sees little, and one camera sees no depth.</p><span class="verdict v-good">Fisheye + mirrors (Ch. 3)</span></div>
+        <div class="card" style="--c:var(--gold)"><h4>When things happen</h4><p>A hand acts the instant the eye sees. A robot’s camera, computer and motors each add delay.</p><span class="verdict v-good">Latency matching (Ch. 6)</span></div>
+        <div class="card" style="--c:var(--oxblood)"><h4>Where things are</h4><p>The demo has no “robot base”. Any action expressed in a fixed world frame is meaningless on a different robot.</p><span class="verdict v-good">Relative trajectories (Ch. 7)</span></div>
+      </div>
+      <p>The authors call the solution to the last two the <strong>policy interface</strong>: the precise definition of what goes into the network and what comes out. It is the least glamorous part of the paper and the reason it works.</p>
+      <div class="callout key"><div><strong>The idea worth keeping</strong><p>The policy never learns about any particular robot. It learns a mapping from “what a wrist camera sees” to “how the hand should move from here”. Everything robot-specific — delays, kinematics, base position — is handled outside the network, at deployment.</p></div></div>
+    <div class="folio"><span>Three Gaps</span><span>5</span></div>
+</section>
+
+    <section class="chapter" id="ch6" data-label="6 · Latency Matching">
+<header class="chapter-head"><span class="num">Chapter 6</span><h2>Latency Matching</h2></header>
+      <p class="dropcap">When a person holds the gripper, seeing and acting are fused. The frame recorded at one instant and the hand position at that instant belong together, with zero delay between them. The training data is perfectly synchronised by construction.</p>
+      <p>A robot is not. The camera takes time to deliver a frame. The arm’s reported position arrives over a different link with a different delay. The network takes time to think. The motors take time to reach where they were told to go. If you ignore all that, the policy at test time is fed inputs that are out of step with each other, in a way it never saw in training, and its outputs land late.</p>
+      <h3>Observation side: line everything up on the camera</h3>
+      <p>Each sensor stream’s delay is measured once. At run time, every image is stamped with the moment it was actually captured, and the robot’s pose and gripper width are interpolated to that same instant. The policy receives a picture and a body state that describe the same moment — just as in the demos. With two arms, the two cameras are soft-synchronised to the nearest frame, at most a sixtieth of a second apart.</p>
+      <h3>Action side: send early, drop what is stale</h3>
+      <p>The policy outputs a short sequence of future poses, each meant for a specific time. By the time inference finishes, the first few of those times have already passed; they are discarded. For the rest, the arm’s and gripper’s measured execution delays are subtracted, so each command is sent early enough to <em>arrive</em> on time.</p>
+
+      <div class="demo" id="latDemo">
+        <div class="seg two" role="group" aria-label="Latency matching">
+          <button type="button" data-m="0" aria-pressed="true">No latency matching</button>
+          <button type="button" data-m="1" aria-pressed="false">With latency matching</button>
+        </div>
+        <canvas width="600" height="300" aria-label="Animation of a gripper trying to stay over a moving target"></canvas>
+        <div class="sliders">
+          <label>Observation delay <output id="oOut">120 ms</output><input id="oLat" type="range" min="0" max="300" step="10" value="120"></label>
+          <label>Action delay <output id="aOut">150 ms</output><input id="aLat" type="range" min="0" max="300" step="10" value="150"></label>
+        </div>
+        <div class="demo-status"><span>Average miss distance: <b id="latErr">–</b></span><span class="tally">target sweeps side to side · gripper tries to stay above it</span></div>
+      </div>
+      <p class="small muted">A toy model, not the paper’s experiment: the target follows a smooth path and the “policy” is assumed to predict it perfectly. It isolates one effect — delays that are ignored become position error that grows with speed; delays that are measured and compensated cost nothing.</p>
+
+      <h3>What it bought on a real robot</h3>
+      <p>The test case was dynamic tossing: throw six different objects into bins that sit beyond the arm’s reach. Release a fraction of a second late and the object flies somewhere else.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Dynamic tossing (120 throws)</th><th>Objects in the right bin</th></tr></thead>
+        <tbody>
+          <tr><td>UMI with latency matching</td><td class="best">105/120 · 87.5%</td></tr>
+          <tr><td>No latency matching</td><td>69/120 · 57.5%</td></tr>
+        </tbody>
+      </table></div>
+      <p>Without matching, the arm also moves with visible jitter: each new plan disagrees slightly with the last because each was computed from misaligned inputs.</p>
+    <div class="folio"><span>Latency Matching</span><span>6</span></div>
+</section>
+
+    <section class="chapter" id="ch7" data-label="7 · Relative Trajectories">
+<header class="chapter-head"><span class="num">Chapter 7</span><h2>Relative Trajectories</h2></header>
+      <p class="dropcap">An action is a target pose for the gripper. A pose needs a reference: relative to <em>what</em>? There are three reasonable answers, and the choice matters more than it looks.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Representation</th><th>Each target is measured from…</th><th>Problem</th><th>Cup task</th></tr></thead>
+        <tbody>
+          <tr><td><b>Absolute</b></td><td>a fixed frame, e.g. the robot’s base</td><td>Needs the demo frame calibrated to the robot’s frame; any calibration or tracking offset becomes a miss</td><td>5/20 · 25%</td></tr>
+          <tr><td><b>Delta</b></td><td>the previous target in the sequence</td><td>Small errors in each step add up along the chain</td><td>16/20 · 80%</td></tr>
+          <tr><td><b>Relative trajectory</b> (UMI)</td><td>the gripper’s pose right now, at the start of the chunk</td><td>—</td><td class="best">20/20 · 100%</td></tr>
+        </tbody>
+      </table></div>
+      <p>In UMI’s scheme the policy says, in effect: “from where the hand is this instant, be 2 cm forward in a tenth of a second, 4 cm forward and slightly rotated after that…”. Every target in the chunk hangs off the same anchor — the current pose — so errors do not chain, and no global frame appears anywhere. Move the robot’s base, swap the robot, shift the camera slightly on its mount: the policy’s numbers mean the same thing.</p>
+      <div class="callout note"><div><strong>An analogy</strong><p>Absolute actions are street addresses: useless if your map is shifted by a block. Delta actions are “take a step, then another, then another” with your eyes shut: fine for three steps, lost after thirty. A relative trajectory is “from where you are standing: the door is four metres ahead, the desk two metres beyond it”, re-issued every time you open your eyes.</p></div></div>
+      <h3>The same trick for the robot’s sense of itself</h3>
+      <p>The policy also receives the gripper’s recent poses — proprioception. UMI expresses these relative to the current pose too. With an observation horizon of two, that pair of poses is effectively a velocity: the policy can tell how fast and in which direction the hand is already moving, without ever knowing where it is in the room.</p>
+      <h3>Two hands: inter-gripper proprioception</h3>
+      <p>For bimanual tasks there is one thing that genuinely must be known between the arms: where the other hand is. Because both grippers are localised in the same SLAM map (Chapter 4), the pose of one relative to the other is available in the demos, and is given to the policy as an input. On the robot it comes from the two arms’ known positions.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Bimanual sweater folding</th><th>Success</th></tr></thead>
+        <tbody>
+          <tr><td>UMI, with inter-gripper proprioception</td><td class="best">14/20 · 70%</td></tr>
+          <tr><td>Without it</td><td>6/20 · 30%</td></tr>
+        </tbody>
+      </table></div>
+    <div class="folio"><span>Relative Trajectories</span><span>7</span></div>
+</section>
+
+    <section class="chapter" id="ch8" data-label="8 · The Whole Pipeline">
+<header class="chapter-head"><span class="num">Chapter 8</span><h2>The Whole Pipeline</h2></header>
+      <p class="dropcap">Put the pieces in order. Nothing here is specific to one task; the paper’s point is that only the demonstrations change between a cup, a sweater and a sink full of dishes.</p>
+      <figure class="flow2">
+        <div class="f2-head"><b>From a hand-held demo to a robot skill</b><span>one framework, any task</span></div>
+        <div class="f2-track" role="list"><div class="f2-step is-start" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg></span><div class="f2-card"><span class="k">Begin</span><b>A person picks up the UMI gripper</b><p>No robot in the room. Just the hand-held gripper and the place where the task happens.</p></div></div><div class="f2-phase" aria-hidden="true">① Collect</div><div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg><i>1</i></span><div class="f2-card"><span class="k">Map</span><b>Record a mapping video of the scene</b><p>A slow sweep of the workspace. SLAM turns it into a map that every later demo is localised against.</p></div></div><div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="13" rx="2"/><circle cx="12" cy="12.5" r="3.2"/><path d="M8 6l1.5-2h5L16 6"/></svg><i>2</i></span><div class="f2-card"><span class="k">Demonstrate</span><b>Do the task, many times</b><p>Each demo is one MP4: fisheye video with mirror views, plus IMU telemetry embedded in the file.</p><code>305 demos for cups · 1400 for in-the-wild</code></div></div><div class="f2-phase" aria-hidden="true">② Process</div><div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/></svg><i>3</i></span><div class="f2-card"><span class="k">Recover actions</span><b>SLAM + marker tracking</b><p>Visual-inertial SLAM gives the 6-DoF gripper pose in metric units; fiducial markers on the fingers give gripper width.</p><code>video → (pose, width) at every frame</code></div></div><div class="f2-step is-dec" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4-2v-4z"/></svg><i>4</i></span><div class="f2-card"><span class="k">Filter</span><b>Could this robot actually do that?</b><p>With the robot’s base position and kinematics known, drop demos that break joint or speed limits. The raw data stays robot-agnostic.</p></div></div><div class="f2-phase" aria-hidden="true">③ Learn</div><div class="f2-step is-net" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="6" r="2"/><circle cx="5" cy="18" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="19" cy="18" r="2"/><path d="M7 7l3 4M7 17l3-4M14 11l3-4M14 13l3 4"/></svg><i>5</i></span><div class="f2-card"><span class="k">Train</span><b>Diffusion Policy on relative trajectories</b><p>Inputs: fisheye image, relative pose history, gripper width. Output: a chunk of future poses relative to the current one.</p><code>observation horizon 2 · actions relative to pose at t₀</code></div></div><div class="f2-phase" aria-hidden="true">④ Deploy</div><div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="8.5"/><path d="M12 7v5l3 2"/></svg><i>6</i></span><div class="f2-card"><span class="k">Match latency</span><b>Align observations, send actions early</b><p>Line every sensor stream up with the camera’s timestamp; drop actions that are already stale; time the rest to land on schedule.</p></div></div><div class="f2-step is-end" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h8M8 20v-6l6-6 4 2"/><circle cx="8" cy="14" r="1.6"/><circle cx="14" cy="8" r="1.6"/><path d="M18 10l2-1M18 10l1 2"/></svg></span><div class="f2-card"><span class="k">Finish</span><b>The policy runs on a real arm</b><p>Same checkpoint on a UR5 or a Franka — nothing in the data ever mentioned which robot.</p></div></div></div>
+        <div class="f2-stats"><span>policy <b>Diffusion Policy</b></span><span>encoder <b>CLIP ViT</b></span><span>obs horizon <b>2</b></span><span>actions <b>relative SE(3)</b></span></div>
+        <figcaption><b>Figure 8.1</b> — The UMI pipeline (paper Sections III and IV). Steps 1–3 need no robot; step 4 is the only place a specific robot’s limits enter.</figcaption>
+      </figure>
+      <h3>About that filtering step</h3>
+      <p>A human arm reaches places a particular robot arm, bolted to a particular table, cannot. Those demos are not wrong; they are just impossible for <em>that</em> robot. Because SLAM gives absolute poses within the scene, you can place a virtual robot there, check each demo against its joint and speed limits, and train only on the feasible ones. Change robots, re-run the filter, retrain — the raw data is untouched.</p>
+      <h3>The learner</h3>
+      <p>The policy is <a href="../diffusion-policy-2303.04137/">Diffusion Policy</a>, used essentially as published: denoise a chunk of future actions conditioned on recent observations, execute part of it, re-plan. The authors note that another chunk-predicting method such as ACT could be dropped in. The vision encoder is a CLIP-pretrained vision transformer, fine-tuned — a choice Chapter 9 shows is not optional for the hardest tasks.</p>
+    <div class="folio"><span>The Whole Pipeline</span><span>8</span></div>
+</section>
+
+    <section class="chapter" id="ch9" data-label="9 · Four Hard Tasks">
+<header class="chapter-head"><span class="num">Chapter 9</span><h2>Four Hard Tasks</h2></header>
+      <p class="dropcap">The experiments are chosen so that each task stresses a different part of the design. All four use the same pipeline; only the training data differs.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Task</th><th>What makes it hard</th><th>Demos</th><th>Success</th></tr></thead>
+        <tbody>
+          <tr><td><b>Cup arrangement</b><br><span class="muted">Espresso cup onto saucer, handle within ±15° of left</span></td><td>Precise 6-DoF placement; pushing to re-orient the cup, not just grasping; depth from one camera</td><td>305</td><td class="best">20/20 · 100%</td></tr>
+          <tr><td><b>Dynamic tossing</b><br><span class="muted">Sort six objects into bins out of reach</span></td><td>Fast motion; release timing within a fraction of a second</td><td>280</td><td class="best">105/120 · 87.5%</td></tr>
+          <tr><td><b>Sweater folding</b><br><span class="muted">Two arms, one policy</span></td><td>Deformable cloth; the two hands must agree</td><td>250</td><td class="best">14/20 · 70%</td></tr>
+          <tr><td><b>Dish washing</b><br><span class="muted">Seven dependent steps, start to finish</span></td><td>Long horizon; water, a sponge, a faucet; one early failure ends the run</td><td>258</td><td class="best">14/20 · 70%</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Same data, different robot</h3>
+      <p>The cup policy was trained once and run, unchanged, on a second arm from a different manufacturer with a different number of joints. It scored 18/20. Both failures were the arm hitting a joint limit — a consequence of where it happened to be mounted, not of the policy.</p>
+      <h3>Dish washing and the encoder</h3>
+      <p>The dish task chains seven actions: turn on the faucet, pick up the plate, pick up the sponge, scrub until the ketchup is gone, rack the plate, put the sponge back, turn the water off. It involves an articulated object, a deformable one, and a fluid. Here the vision encoder decided everything.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Dish washing</th><th>Success</th></tr></thead>
+        <tbody>
+          <tr><td>CLIP-pretrained ViT-B/16, fine-tuned</td><td class="best">14/20 · 70%</td></tr>
+          <tr><td>ResNet-34 trained from scratch</td><td>0/10 · 0%</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout warn"><div><strong>Worth noticing</strong><p>In the Diffusion Policy paper’s own encoder comparison, on one simulated task, a small ResNet trained from scratch came within a few points of a fine-tuned CLIP ViT (0.94 vs 0.98). On this longer, visually messier real task the gap is total. How much pretraining matters depends on how much visual variety the task throws at the policy.</p></div></div>
+    <div class="folio"><span>Four Hard Tasks</span><span>9</span></div>
+</section>
+
+    <section class="chapter" id="ch10" data-label="10 · Into the Wild">
+<header class="chapter-head"><span class="num">Chapter 10</span><h2>Into the Wild</h2></header>
+      <p class="dropcap">Everything so far could, in principle, have been done with teleoperation in a lab. This chapter is the experiment that could not.</p>
+      <p>Three people took UMI grippers out of the building and recorded the cup-arrangement task wherever they found a surface.</p>
+      <div class="stat-row">
+        <div class="stat"><b>1400</b><span>demonstrations</span></div>
+        <div class="stat"><b>30</b><span>different locations</span></div>
+        <div class="stat"><b>15</b><span>different cups</span></div>
+        <div class="stat"><b>12</b><span>person-hours in total</span></div>
+      </div>
+      <p>A policy trained on that data, with a larger CLIP ViT-L/14 encoder, was then put on a robot and wheeled to two places that appear nowhere in the training set — a café table and a water fountain — and tested on cups it had seen and cups it had not.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Unseen environments</th><th>Success</th></tr></thead>
+        <tbody>
+          <tr><td>Cups from the training set</td><td>28/40 · 70%</td></tr>
+          <tr><td>Cups never seen before</td><td>15/20 · 75%</td></tr>
+          <tr><td><b>Combined</b></td><td class="best">43/60 · 71.7%</td></tr>
+          <tr><td>Same method, trained only on the single-scene lab data</td><td>0% — the arm never moved toward the cup</td></tr>
+        </tbody>
+      </table></div>
+      <p>The last row is the argument of the whole paper in one line. The lab policy scored 100% in its own lab and zero outside it. Nothing about the algorithm changed between the two rows; only where the data came from. Generalisation was bought with diversity, and diversity was affordable only because collecting it did not require moving a robot to thirty places.</p>
+      <div class="callout key"><div><strong>Zero-shot, precisely</strong><p>“Zero-shot” here means no data and no fine-tuning from the test location. The robot arrives, the policy runs. It does not mean the policy never saw a cup.</p></div></div>
+    <div class="folio"><span>Into the Wild</span><span>10</span></div>
+</section>
+
+    <section class="chapter" id="ch11" data-label="11 · Speed, Accuracy, Limits">
+<header class="chapter-head"><span class="num">Chapter 11</span><h2>Speed, Accuracy, Limits</h2></header>
+      <h3>How fast is collection?</h3>
+      <p class="dropcap">The authors timed fifteen-minute sessions, counting resets and mistakes, and compared three ways of producing demonstrations.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Task</th><th>UMI vs teleoperation</th><th>UMI vs bare hand</th></tr></thead>
+        <tbody>
+          <tr><td>Cup arrangement</td><td>More than 3× faster</td><td>48% of bare-hand speed</td></tr>
+          <tr><td>Dynamic tossing</td><td>Teleoperation produced no successful demo in 15 minutes</td><td>64% of bare-hand speed</td></tr>
+        </tbody>
+      </table></div>
+      <p>So a UMI gripper is roughly half as fast as using your own hand, and several times faster than driving a robot with a 3D mouse — and for dynamic motions, teleoperation was not slow so much as impossible.</p>
+      <h3>Limitations the authors list</h3>
+      <ul>
+        <li><strong>The collector cannot feel the robot’s limits.</strong> Nothing stops a person from making a motion the robot cannot reproduce. Filtering afterwards wastes data; learning that is aware of the embodiment is left as future work.</li>
+        <li><strong>SLAM needs texture.</strong> A blank white table or a featureless wall gives the tracker nothing to hold on to. The paper suggests fixed external cameras with fiducial markers as a fallback.</li>
+        <li><strong>It is still a 780 g tool with two fingers.</strong> Heavier, bulkier and less dexterous than a hand, which is where the lost speed goes. Lighter builds and multi-fingered versions are proposed.</li>
+      </ul>
+      <h3>Why it mattered</h3>
+      <p>UMI changed what “a robot dataset” could be. Before it, scaling data meant scaling robots. After it, the unit of data collection was a person with a cheap device and a memory card, and the hardware and software were open-sourced so other labs could build their own. Much of the later work on portable grippers, wearable capture devices and large out-of-lab datasets starts from this design — including the tactile gloves and exoskeletons on the <a href="../../#shelves">tactile shelf</a> of this reading room, which ask the same question for whole hands instead of two fingers.</p>
+      <p>It also quietly established a recipe that outlived the device: wrist camera, wide lens, relative end-effector actions, action chunks, measured latency. Those choices recur in many of the manipulation systems built since.</p>
+    <div class="folio"><span>Speed, Accuracy, Limits</span><span>11</span></div>
+</section>
+
+    <section class="chapter" id="ch12" data-label="12 · Recap &amp; Quiz">
+<header class="chapter-head"><span class="num">Chapter 12</span><h2>Recap &amp; Quiz</h2></header>
+      <h3>Eight-line recap</h3>
+      <ol>
+        <li>Robot learning was limited by data, and good data needed a robot on site.</li>
+        <li>UMI replaces the robot with a hand-held copy of its gripper and one GoPro.</li>
+        <li>A 155° fisheye lens and two side mirrors give context and depth from that single camera.</li>
+        <li>Visual-inertial SLAM recovers the hand’s path at metric scale, to about 6 mm and 3.5°.</li>
+        <li>Latency matching re-creates on the robot the perfect timing the human data had for free.</li>
+        <li>Actions and proprioception are relative to the current pose, so no robot or world frame is baked in.</li>
+        <li>One pipeline learns precise, dynamic, bimanual and long-horizon tasks by changing only the data.</li>
+        <li>1400 demos from 30 places gave 71.7% success in places never seen; lab-only data gave 0%.</li>
+      </ol>
+
+      <h3>Check yourself</h3>
+      <details class="q"><summary>Why does UMI use a wrist-mounted camera instead of a camera fixed in the room?</summary><div>A fixed camera ties the data to one room and to where the robot stands in it. A wrist camera sees the same thing whether a person or a robot is holding the gripper, so the data transfers across places and robots.</div></details>
+      <details class="q"><summary>What do the side mirrors add, and why are their images digitally flipped?</summary><div>They give the single camera extra viewpoints, which carry depth information (“implicit stereo”). Raw mirror images are reversed, so motion in them contradicts the main view; flipping them and swapping sides makes them consistent, lifting the cup task from 17/20 to 20/20.</div></details>
+      <details class="q"><summary>What two problems does adding the IMU to SLAM solve?</summary><div>Metric scale — a single camera cannot tell big-and-far from small-and-near, an accelerometer can — and tracking through fast motion, when frames blur and visual features are lost.</div></details>
+      <details class="q"><summary>The demos have zero latency. Why is that a problem?</summary><div>Because the robot does not. Its camera, state readings, inference and motors all add delay. Unless these are measured and compensated, the policy receives misaligned inputs it never saw in training and its actions arrive late. Tossing dropped from 87.5% to 57.5% without compensation.</div></details>
+      <details class="q"><summary>Absolute, delta, or relative trajectory — what is the difference?</summary><div>Absolute targets are in a fixed frame and need calibration to the robot (25%). Delta targets are each measured from the previous one, so errors accumulate (80%). Relative-trajectory targets are all measured from the current pose, with no global frame and no chaining (100%).</div></details>
+      <details class="q"><summary>How does a two-armed policy know where its other hand is?</summary><div>Both grippers are localised in the same SLAM map, so their relative pose is known in the demos and is fed to the policy as inter-gripper proprioception. Removing it cut sweater folding from 70% to 30%.</div></details>
+      <details class="q"><summary>What single result best supports the paper’s title?</summary><div>The in-the-wild cup experiment: trained on 1400 demos from 30 locations, the policy succeeded 71.7% of the time in two unseen places, while the policy trained on lab data alone never even reached for the cup there.</div></details>
+
+      <h3>Glossary</h3>
+      <dl class="gloss">
+        <dt>In-the-wild</dt><dd>Outside a prepared lab: ordinary, uncontrolled places.</dd>
+        <dt>Embodiment gap</dt><dd>The difference between the body that demonstrated (a human hand) and the body that must act (a robot gripper).</dd>
+        <dt>Teleoperation</dt><dd>A person remotely driving the real robot to record demonstrations.</dd>
+        <dt>Fisheye lens</dt><dd>A very wide-angle lens that keeps a huge field of view by letting straight lines curve.</dd>
+        <dt>Implicit stereo</dt><dd>Depth information obtained from extra viewpoints inside one image — here, from mirrors — without a second camera.</dd>
+        <dt>IMU</dt><dd>Inertial measurement unit: an accelerometer and gyroscope measuring acceleration and rotation rate.</dd>
+        <dt>SLAM</dt><dd>Simultaneous localisation and mapping: recovering a camera’s path and a map of the scene from its footage.</dd>
+        <dt>Metric scale</dt><dd>Distances in real units (millimetres), not just correct up to an unknown multiplier.</dd>
+        <dt>6-DoF pose / SE(3)</dt><dd>Position in three axes plus orientation about three axes; SE(3) is the mathematical space of such poses.</dd>
+        <dt>Fiducial marker</dt><dd>A printed pattern a camera can detect and measure precisely.</dd>
+        <dt>Proprioception</dt><dd>The robot’s sense of its own pose and gripper opening.</dd>
+        <dt>Latency</dt><dd>Delay between something happening and the system registering it, or between a command and its effect.</dd>
+        <dt>Relative trajectory</dt><dd>A sequence of target poses all expressed relative to the current pose.</dd>
+        <dt>Kinematic feasibility</dt><dd>Whether a given robot’s joints can physically reach and follow a motion.</dd>
+        <dt>Zero-shot</dt><dd>Working in a new setting with no data or tuning from that setting.</dd>
+      </dl>
+      <nav class="pager" aria-label="Chapter navigation">
+        <a href="../diffusion-policy-2303.04137/"><small>Prerequisite</small>Diffusion Policy explainer</a>
+        <a class="next" href="https://arxiv.org/pdf/2402.10329"><small>Next</small>Read the original paper</a>
+      </nav>
+    <div class="folio"><span>Recap &amp; Quiz</span><span>12</span></div>
+</section>
+  </main>
+</div>
+
+<script src="../folio.js"></script>
+<script>
+/* Latency-matching toy: a target sweeps side to side; the gripper aims at where
+   it believes the target is. Unmatched: it acts on an observation that is oLat old
+   and its command lands aLat later, so it trails by oLat + aLat. Matched: both
+   delays are known and compensated, so it lands on the target. */
+(() => {
+  const root = document.getElementById('latDemo'); if (!root) return;
+  const cv = root.querySelector('canvas'), ctx = cv.getContext('2d');
+  const oIn = document.getElementById('oLat'), aIn = document.getElementById('aLat');
+  const oOut = document.getElementById('oOut'), aOut = document.getElementById('aOut'), errEl = document.getElementById('latErr');
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const C = { ink: css('--ink-soft') || '#5b5246', ox: css('--oxblood') || '#8E2F2A', sage: css('--sage') || '#5f7a5a', rule: css('--rule') || '#ddd', gold: css('--gold') || '#b08a3c' };
+  let matched = false, errSum = 0, errN = 0;
+  const W = 600, H = 300, PERIOD = 2.6;
+  const target = t => W / 2 + 210 * Math.sin(2 * Math.PI * t / PERIOD) * (0.75 + 0.25 * Math.sin(2 * Math.PI * t / 7.1));
+  const reset = () => { errSum = 0; errN = 0; };
+  root.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+    matched = b.dataset.m === '1';
+    root.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    reset();
+  }));
+  const sync = () => { oOut.textContent = oIn.value + ' ms'; aOut.textContent = aIn.value + ' ms'; reset(); };
+  oIn.addEventListener('input', sync); aIn.addEventListener('input', sync);
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function draw(ms) {
+    const t = still ? 0.9 : ms / 1000;
+    const lag = matched ? 0 : (+oIn.value + +aIn.value) / 1000;
+    const tx = target(t), gx = target(t - lag);
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = C.rule; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(40, 228); ctx.lineTo(W - 40, 228); ctx.stroke();
+    /* target */
+    ctx.fillStyle = C.gold; ctx.beginPath(); ctx.arc(tx, 208, 20, 0, 7); ctx.fill();
+    /* miss bracket */
+    if (Math.abs(tx - gx) > 2) { ctx.strokeStyle = C.ox; ctx.setLineDash([5, 5]); ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(gx, 150); ctx.lineTo(tx, 150); ctx.stroke(); ctx.setLineDash([]); }
+    /* gripper */
+    const col = matched ? C.sage : C.ox;
+    ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 6; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(gx, 30); ctx.lineTo(gx, 96); ctx.stroke();
+    ctx.fillRect(gx - 34, 92, 68, 12);
+    ctx.beginPath(); ctx.moveTo(gx - 28, 104); ctx.lineTo(gx - 28, 172); ctx.moveTo(gx + 28, 104); ctx.lineTo(gx + 28, 172); ctx.stroke();
+    ctx.fillStyle = C.ink; ctx.font = '500 17px Inter, system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('gripper', gx, 22); ctx.fillText('target', tx, 256);
+    errSum += Math.abs(tx - gx); errN++;
+    if (errN % 12 === 0 || still) errEl.textContent = (errSum / errN / 6).toFixed(1) + ' cm' + (matched ? ' — on target' : '');
+    if (!still) requestAnimationFrame(draw);
+  }
+  sync(); requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
