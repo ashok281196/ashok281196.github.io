@@ -16,179 +16,199 @@
   <div class="chapter-num">11</div>
   <div class="chapter-kicker">Part III · Common Structures</div>
   <h1>Monads</h1>
-  <p class="chapter-sub">Since Chapter 3 we've written unit, map, map2, flatMap and sequence over and over. Here we write them once. First Functor (things you can map), then Monad (things you can flatMap), their laws, and what a monad means once you've seen enough of them.</p>
+  <p class="chapter-sub">Since Chapter 3 we've written unit, map, map2, flat_map and sequence again and again for every type. Here we write them once. That needs something C++ doesn't directly have, abstraction over a type constructor, so we build it with tag types and trait specialisations, then meet the monad laws and what a monad really is.</p>
 </header>
 
 <h2><span class="sec-no">11.1</span>The Duplication Problem</h2>
 <p>Here's <code>map2</code> for four types we've written:</p>
-<pre><code class="language-scala">// Option
-def map2[A, B, C](fa: Option[A], fb: Option[B])(f: (A, B) =&gt; C) = fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))
+<pre><code class="language-cpp">// optional
+a.and_then([&amp;](A x) { return b.transform([&amp;](B y) { return f(x, y); }); });
 // State
-def map2[A, B, C](fa: State[S, A], fb: State[S, B])(f: (A, B) =&gt; C) = fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))
+sa.flat_map([=](A x) { return sb.map([=](B y) { return f(x, y); }); });
 // Gen
-def map2[A, B, C](fa: Gen[A], fb: Gen[B])(f: (A, B) =&gt; C) = fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))
+ga.flat_map([=](A x) { return gb.map([=](B y) { return f(x, y); }); });
 // Parser
-def map2[A, B, C](fa: Parser[A], fb: Parser[B])(f: (A, B) =&gt; C) = fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))</code></pre>
-<p>The bodies are character-for-character identical. Only the type constructor differs. In C++ you'd reach for a template over the container template. In Scala we abstract over the type constructor <code>F[_]</code>, as we did with <code>Parsers</code> and <code>Foldable</code>.</p>
+flat_map(pa, [=](A x) { return map(pb, [=](B y) { return f(x, y); }); });</code></pre>
+<p>Identical logic. Only the <strong>type constructor</strong> differs: <code>optional&lt;_&gt;</code>, <code>State&lt;S, _&gt;</code>, <code>Gen&lt;_&gt;</code>, <code>Parser&lt;_&gt;</code>. To write <code>map2</code> once, we need to be generic over "some template <code>F</code> applied to <code>A</code>".</p>
 
-<h2><span class="sec-no">11.2</span>Functor: Things You Can Map</h2>
-<p>Start with the smallest piece: <code>map</code>.</p>
-<pre><code class="language-scala">trait Functor[F[_]]:
-  extension [A](fa: F[A])
-    def map[B](f: A =&gt; B): F[B]
+<h2><span class="sec-no">11.2</span>Abstracting Over F&lt;_&gt; in C++</h2>
+<p>A template template parameter (<code>template &lt;template &lt;typename&gt; class F&gt;</code>) almost works, but breaks on templates with extra parameters like <code>std::vector&lt;T, Alloc&gt;</code> or <code>State&lt;S, A&gt;</code>. The robust trick is a <strong>tag type</strong> with a nested alias template, one per type constructor:</p>
+<pre><code class="language-cpp">struct OptionalK { template &lt;typename A&gt; using F = std::optional&lt;A&gt;; };
+struct VectorK   { template &lt;typename A&gt; using F = std::vector&lt;A&gt;; };
 
-given Functor[List] with
-  extension [A](as: List[A])
-    def map[B](f: A =&gt; B): List[B] = as.map(f)</code></pre>
-<p>A <strong>functor</strong> is a type constructor with a <code>map</code> that obeys two laws:</p>
-<pre><code class="language-text">fa.map(identity)    == fa                    // identity
-fa.map(f).map(g)    == fa.map(f.andThen(g))  // composition</code></pre>
-<p>The first is the law from Chapter 7: <code>map</code> preserves structure. It can't drop list elements, swap <code>Some</code> to <code>None</code>, or change how many items there are. It only transforms values.</p>
-<p>With just <code>map</code> we can already write generic functions:</p>
-<pre><code class="language-scala">  extension [A, B](fab: F[(A, B)])
-    def distribute: (F[A], F[B]) = (fab.map(_(0)), fab.map(_(1)))   // "unzip" for any functor</code></pre>
+template &lt;typename S&gt;
+struct StateK    { template &lt;typename A&gt; using F = State&lt;S, A&gt;; };   // fix S, leave A open</code></pre>
+<p><code>StateK&lt;int&gt;</code> is "<code>State&lt;int, _&gt;</code>": a two-parameter template with one parameter fixed. Now a <strong>type class</strong> is a primary template with one specialisation per tag:</p>
+<pre><code class="language-cpp">template &lt;typename K&gt; struct Monad;     // must provide unit(a) and flat_map(fa, f)
 
-<h2><span class="sec-no">11.3</span>Monad: Things You Can flatMap</h2>
-<p>We've seen many times that <code>unit</code> and <code>flatMap</code> are enough to derive <code>map</code>, <code>map2</code>, <code>sequence</code> and <code>traverse</code>. So make them the primitives:</p>
-<pre><code class="language-scala">trait Monad[F[_]] extends Functor[F]:
-  def unit[A](a: =&gt; A): F[A]
+template &lt;&gt; struct Monad&lt;OptionalK&gt; {
+    template &lt;typename A&gt; static std::optional&lt;A&gt; unit(A a) { return a; }
+    template &lt;typename A, typename Fn&gt;
+    static auto flat_map(const std::optional&lt;A&gt;&amp; fa, Fn f) { return fa.and_then(f); }
+};
 
-  extension [A](fa: F[A])
-    def flatMap[B](f: A =&gt; F[B]): F[B]
+template &lt;&gt; struct Monad&lt;VectorK&gt; {
+    template &lt;typename A&gt; static std::vector&lt;A&gt; unit(A a) { return {a}; }
+    template &lt;typename A, typename Fn&gt;
+    static auto flat_map(const std::vector&lt;A&gt;&amp; fa, Fn f) {
+        std::invoke_result_t&lt;Fn, const A&amp;&gt; out;
+        for (const auto&amp; a : fa) { auto bs = f(a); out.insert(out.end(), bs.begin(), bs.end()); }
+        return out;
+    }
+};
 
-    def map[B](f: A =&gt; B): F[B] =
-      fa.flatMap(a =&gt; unit(f(a)))
+template &lt;typename S&gt; struct Monad&lt;StateK&lt;S&gt;&gt; {
+    template &lt;typename A&gt; static State&lt;S, A&gt; unit(A a) {
+        return {[a](S s) { return std::pair{a, s}; }};
+    }
+    template &lt;typename A, typename Fn&gt; static auto flat_map(const State&lt;S, A&gt;&amp; fa, Fn f) {
+        using SB = std::invoke_result_t&lt;Fn, A&gt;;
+        return SB{[fa, f](S s) { auto [a, s1] = fa.run(s); return f(a).run(s1); }};
+    }
+};</code></pre>
+<p>Each type supplies two functions. That's the whole cost of membership.</p>
+<div class="bridge">
+<p>The book writes <code>trait Monad[F[_]] { def unit[A](a: =&gt; A): F[A]; extension [A](fa: F[A]) def flatMap[B](f: A =&gt; F[B]): F[B] }</code>, with <code>F[_]</code> a <em>higher-kinded</em> type parameter, and <code>given</code> instances like <code>Monad[Option]</code>. For State it writes a type lambda, <code>[x] =&gt;&gt; State[S, x]</code>, which is exactly what our <code>StateK&lt;S&gt;::F</code> is. Our tag + specialisation pattern is how C++ libraries (and papers on C++ FP) encode the same thing.</p>
+</div>
 
-    def map2[B, C](fb: F[B])(f: (A, B) =&gt; C): F[C] =
-      fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))
+<h2><span class="sec-no">11.3</span>Write the Derived Functions Once</h2>
+<p>Now everything we derived by hand in Part I is written a single time, generic over the tag <code>K</code>:</p>
+<pre><code class="language-cpp">template &lt;typename K, typename FA, typename Fn&gt;
+auto map(const FA&amp; fa, Fn f) {
+    using A = typename FA::value_type;
+    using B = std::invoke_result_t&lt;Fn, const A&amp;&gt;;
+    return Monad&lt;K&gt;::flat_map(fa, [f](const A&amp; a) { return Monad&lt;K&gt;::template unit&lt;B&gt;(f(a)); });
+}
 
-  def sequence[A](fas: List[F[A]]): F[List[A]] =
-    traverse(fas)(identity)
+template &lt;typename K, typename FA, typename FB, typename Fn&gt;
+auto map2(const FA&amp; fa, const FB&amp; fb, Fn f) {
+    using A = typename FA::value_type;
+    using B = typename FB::value_type;
+    return Monad&lt;K&gt;::flat_map(fa, [fb, f](const A&amp; a) {
+        return map&lt;K&gt;(fb, [a, f](const B&amp; b) { return f(a, b); });
+    });
+}
 
-  def traverse[A, B](as: List[A])(f: A =&gt; F[B]): F[List[B]] =
-    as.foldRight(unit(List.empty[B]))((a, acc) =&gt; f(a).map2(acc)(_ :: _))
+template &lt;typename K, typename A, typename Fn&gt;
+auto traverse(const std::vector&lt;A&gt;&amp; as, Fn f) {
+    using B = typename std::invoke_result_t&lt;Fn, const A&amp;&gt;::value_type;
+    typename K::template F&lt;std::vector&lt;B&gt;&gt; acc = Monad&lt;K&gt;::template unit&lt;std::vector&lt;B&gt;&gt;({});
+    for (auto it = as.rbegin(); it != as.rend(); ++it)
+        acc = map2&lt;K&gt;(f(*it), acc, [](const B&amp; b, std::vector&lt;B&gt; v) { v.insert(v.begin(), b); return v; });
+    return acc;
+}
 
-  def replicateM[A](n: Int, fa: F[A]): F[List[A]] =
-    sequence(List.fill(n)(fa))</code></pre>
-<p>Now each type needs just two functions, and gets all the rest:</p>
-<pre><code class="language-scala">given optionMonad: Monad[Option] with
-  def unit[A](a: =&gt; A) = Some(a)
-  extension [A](fa: Option[A])
-    override def flatMap[B](f: A =&gt; Option[B]) = fa.flatMap(f)
+template &lt;typename K, typename FA&gt;
+auto sequence(const std::vector&lt;FA&gt;&amp; fas) { return traverse&lt;K&gt;(fas, [](const FA&amp; fa) { return fa; }); }
 
-given listMonad: Monad[List] with
-  def unit[A](a: =&gt; A) = List(a)
-  extension [A](fa: List[A])
-    override def flatMap[B](f: A =&gt; List[B]) = fa.flatMap(f)
+template &lt;typename K, typename FA&gt;
+auto replicate_m(int n, const FA&amp; fa) { return sequence&lt;K&gt;(std::vector&lt;FA&gt;(n, fa)); }</code></pre>
+<p>(We read the element type from <code>FA::value_type</code>, which <code>optional</code>, <code>vector</code> and our own types all provide; C++ can't deduce <code>A</code> from <code>K::F&lt;A&gt;</code> directly.) Now look at <code>replicate_m</code> across monads:</p>
+<pre><code class="language-cpp">replicate_m&lt;OptionalK&gt;(3, std::optional{1});   // optional{vector{1,1,1}}: n copies, or nothing
+replicate_m&lt;VectorK&gt;(2, std::vector{0, 1});    // {{0,0},{0,1},{1,0},{1,1}}: every combination
 
-summon[Monad[Option]].sequence(List(Some(1), Some(2)))   // Some(List(1, 2))
-summon[Monad[List]].replicateM(2, List(0, 1))            // List(List(0,0), List(0,1), List(1,0), List(1,1))</code></pre>
-<p>Look at <code>replicateM</code>. For <code>Option</code> it means "n copies, or None". For <code>List</code> it means "every combination of n choices". For <code>Gen</code> it means "a list of n random values" (that's <code>listOfN</code>). For <code>Parser</code> it means "parse exactly n times" (also <code>listOfN</code>). One generic function, a different meaningful behaviour for each monad.</p>
-
-<h3>State needs a type lambda</h3>
-<p><code>State[S, A]</code> has two type parameters, but <code>Monad</code> wants a type constructor with one. Fix <code>S</code> and leave <code>A</code> open:</p>
-<pre><code class="language-scala">given stateMonad[S]: Monad[[x] =&gt;&gt; State[S, x]] with
-  def unit[A](a: =&gt; A): State[S, A] = State.unit(a)
-  extension [A](st: State[S, A])
-    override def flatMap[B](f: A =&gt; State[S, B]): State[S, B] =
-      State.flatMap(st)(f)</code></pre>
-<p><code>[x] =&gt;&gt; State[S, x]</code> is a <strong>type lambda</strong>: a type-level function from <code>x</code> to <code>State[S, x]</code>. It's how you partially apply a type constructor.</p>
+State&lt;int, int&gt; tick{[](int s) { return std::pair{s, s + 1}; }};
+replicate_m&lt;StateK&lt;int&gt;&gt;(3, tick).run(10);   // ({10, 11, 12}, 13): run it three times</code></pre>
+<p>For <code>Gen</code> it would mean "a list of n random values" (<code>list_of_n</code>); for <code>Parser</code>, "parse exactly n times" (also <code>list_of_n</code>). One generic function, a different meaningful behaviour for each monad.</p>
 
 <h2><span class="sec-no">11.4</span>The Monad Laws</h2>
-<p>As with monoids, the laws define the abstraction. To state them neatly, use <strong>Kleisli composition</strong>: composing two "monadic functions" <code>A =&gt; F[B]</code> and <code>B =&gt; F[C]</code>:</p>
-<pre><code class="language-scala">def compose[A, B, C](f: A =&gt; F[B], g: B =&gt; F[C]): A =&gt; F[C] =
-  a =&gt; f(a).flatMap(g)</code></pre>
-<p>Then the laws are:</p>
-<pre><code class="language-text">compose(compose(f, g), h) == compose(f, compose(g, h))   // associativity
-compose(f, unit)          == f                           // right identity
-compose(unit, f)          == f                           // left identity</code></pre>
-<p>Those are exactly the monoid laws, with <code>compose</code> as the combine and <code>unit</code> as the identity. Written with <code>flatMap</code> they're less pretty but say the same thing:</p>
-<pre><code class="language-text">x.flatMap(f).flatMap(g) == x.flatMap(a =&gt; f(a).flatMap(g))
-x.flatMap(unit)         == x
-unit(y).flatMap(f)      == f(y)</code></pre>
-<div class="keypoint">The associativity law is why for-comprehensions work. It guarantees that nesting a sequence of <code>&lt;-</code> steps one way or another gives the same program, so you can extract any group of steps into a helper function without changing behaviour.</div>
+<p>As with monoids, laws define the abstraction. They're neatest stated with <strong>Kleisli composition</strong>, which composes two "monadic functions" <code>A → F&lt;B&gt;</code> and <code>B → F&lt;C&gt;</code>:</p>
+<pre><code class="language-cpp">template &lt;typename K, typename F1, typename F2&gt;
+auto compose(F1 f, F2 g) {
+    return [f, g](const auto&amp; a) { return Monad&lt;K&gt;::flat_map(f(a), g); };
+}</code></pre>
+<p>The laws:</p>
+<pre><code class="language-text">compose(compose(f, g), h) == compose(f, compose(g, h))    associativity
+compose(f, unit)          == f                            right identity
+compose(unit, f)          == f                            left identity</code></pre>
+<p>Those are exactly the monoid laws, with <code>compose</code> as combine and <code>unit</code> as the identity. A monad is a monoid one level up, over functions <code>A → F&lt;B&gt;</code>. The full listing checks all three for <code>optional</code> on several inputs.</p>
+<div class="keypoint">Associativity is what makes chains of <code>and_then</code> safe to refactor: you can pull any run of consecutive steps out into a helper function, or inline one back, without changing behaviour.</div>
 
-<div class="exercise" data-n="Exercise 11.1 · flatMap via compose">
-<p>Write <code>flatMap</code> in terms of <code>compose</code> and <code>unit</code>. This shows <code>compose</code> + <code>unit</code> is another valid set of primitives.</p>
+<div class="exercise" data-n="Exercise 11.1 · join">
+<p>Write <code>join(F&lt;F&lt;A&gt;&gt;) → F&lt;A&gt;</code> generically with <code>flat_map</code>. What does it do for <code>vector</code>, and for <code>optional</code>?</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def flatMapViaCompose[A, B](fa: F[A])(f: A =&gt; F[B]): F[B] =
-  compose((_: Unit) =&gt; fa, f)(())</code></pre>
-<p>Make a function that ignores its <code>Unit</code> argument and returns <code>fa</code>, compose it with <code>f</code>, and call it with <code>()</code>. There are three equivalent minimal sets: <code>unit</code> + <code>flatMap</code>, <code>unit</code> + <code>compose</code>, and <code>unit</code> + <code>map</code> + <code>join</code> (from Chapter 7).</p>
+<pre><code class="language-cpp">template &lt;typename K, typename FFA&gt;
+auto join(const FFA&amp; ffa) {
+    using FA = typename FFA::value_type;
+    return Monad&lt;K&gt;::flat_map(ffa, [](const FA&amp; fa) { return fa; });
+}
+
+join&lt;VectorK&gt;(std::vector&lt;std::vector&lt;int&gt;&gt;{{1}, {2, 3}});    // {1, 2, 3}: flatten
+join&lt;OptionalK&gt;(std::optional&lt;std::optional&lt;int&gt;&gt;(std::optional&lt;int&gt;(7)));   // optional{7}</code></pre>
+<p>Careful in C++: <code>std::optional{std::optional{7}}</code> deduces <code>optional&lt;int&gt;</code> (a copy), not a nested optional. Spell out the type. There are three equivalent minimal sets of monad operations: <code>unit</code> + <code>flat_map</code>, <code>unit</code> + <code>compose</code>, and <code>unit</code> + <code>map</code> + <code>join</code>.</p>
 </div></details>
 
 <h2><span class="sec-no">11.5</span>So What Is a Monad?</h2>
-<p>Look at the simplest possible monad, one that does nothing:</p>
-<pre><code class="language-scala">case class Id[A](value: A):
-  def map[B](f: A =&gt; B): Id[B] = Id(f(value))
-  def flatMap[B](f: A =&gt; Id[B]): Id[B] = f(value)
-
-for
-  a &lt;- Id("Hello, ")
-  b &lt;- Id("monad!")
-yield a + b       // Id("Hello, monad!")</code></pre>
-<p>With <code>Id</code>, a for-comprehension is just variable binding: <code>val a = ...; val b = ...; a + b</code>. Every other monad is "variable binding, plus something extra happens between the lines":</p>
+<p>Look at the simplest possible monad, one that does nothing extra:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; struct Id { A value; using value_type = A; };
+struct IdK { template &lt;typename A&gt; using F = Id&lt;A&gt;; };
+template &lt;&gt; struct Monad&lt;IdK&gt; {
+    template &lt;typename A&gt; static Id&lt;A&gt; unit(A a) { return {a}; }
+    template &lt;typename A, typename Fn&gt; static auto flat_map(const Id&lt;A&gt;&amp; fa, Fn f) { return f(fa.value); }
+};</code></pre>
+<p>With <code>Id</code>, <code>flat_map(Id{x}, a ↦ ...)</code> is just "let <code>a = x</code> in ...": plain variable binding. Every other monad is "variable binding, plus something extra happens between the steps":</p>
 <table>
   <tr><th>Monad</th><th>What happens between steps</th></tr>
   <tr><td><code>Id</code></td><td>nothing; plain sequencing</td></tr>
-  <tr><td><code>Option</code></td><td>may stop early with no result</td></tr>
-  <tr><td><code>Either[E, _]</code></td><td>may stop early with an error</td></tr>
-  <tr><td><code>List</code></td><td>may branch into many results (nondeterminism)</td></tr>
-  <tr><td><code>State[S, _]</code></td><td>a state is threaded along</td></tr>
+  <tr><td><code>optional</code></td><td>may stop early with no result</td></tr>
+  <tr><td><code>expected&lt;_, E&gt;</code></td><td>may stop early with an error</td></tr>
+  <tr><td><code>vector</code></td><td>may branch into many results (try every combination)</td></tr>
+  <tr><td><code>State&lt;S, _&gt;</code></td><td>a state is threaded along</td></tr>
   <tr><td><code>Gen</code></td><td>randomness is threaded along</td></tr>
   <tr><td><code>Parser</code></td><td>input position is threaded; may fail or backtrack</td></tr>
   <tr><td><code>Par</code></td><td>steps may run on other threads</td></tr>
 </table>
-<div class="analogy">A monad is a programmable semicolon. In an ordinary language, <code>;</code> means "do the next thing". A monad's <code>flatMap</code> lets you define what "next" means: stop if empty, try every branch, pass the state along, wait for a thread. The for-comprehension is the code; the monad is the rule for how the lines connect.</div>
-<p>So a monad isn't a container, and it isn't specifically about side effects. It's a minimal interface (<code>unit</code> and an associative <code>flatMap</code>) for <strong>sequencing computations where each step can depend on the previous result</strong>. Different monads give that sequencing different extra behaviour.</p>
+<div class="analogy">A monad is a programmable semicolon. In C++, <code>;</code> means "do the next statement". A monad's <code>flat_map</code> lets you define what "next" means: stop if empty, try every branch, pass the state along, continue on another thread. The chain of steps is the program; the monad is the rule for how the steps connect.</div>
+<p>So a monad isn't a container, and it isn't specifically about side effects. It's a minimal interface (<code>unit</code> and an associative <code>flat_map</code>) for <strong>sequencing computations where each step can depend on the previous result</strong>. Different monads give that sequencing different extra behaviour.</p>
+<div class="bridge">
+<p>The book shows these chains as for-comprehensions, which read like ordinary sequential code. C++ lacks that sugar, so long monadic chains nest lambdas. C++20 coroutines can provide it: a coroutine whose <code>co_await</code> calls <code>and_then</code> gives "do-notation" for <code>optional</code> or <code>expected</code>, and that's essentially what <code>std::execution</code> and async frameworks do for futures.</p>
+</div>
 
 <h2><span class="sec-no">11.6</span>Reader: One More Useful Monad</h2>
 <p>Many functions need the same configuration passed in. The <strong>Reader</strong> monad represents "a computation that needs an <code>R</code>":</p>
-<pre><code class="language-scala">opaque type Reader[R, A] = R =&gt; A
+<pre><code class="language-cpp">template &lt;typename R, typename A&gt;
+struct Reader { using value_type = A; std::function&lt;A(const R&amp;)&gt; run; };
+template &lt;typename R&gt; struct ReaderK { template &lt;typename A&gt; using F = Reader&lt;R, A&gt;; };
 
-object Reader:
-  def apply[R, A](f: R =&gt; A): Reader[R, A] = f
-  def ask[R]: Reader[R, R] = r =&gt; r            // read the environment
-  extension [R, A](ra: Reader[R, A]) def run(r: R): A = ra(r)
+template &lt;typename R&gt; struct Monad&lt;ReaderK&lt;R&gt;&gt; {
+    template &lt;typename A&gt; static Reader&lt;R, A&gt; unit(A a) { return {[a](const R&amp;) { return a; }}; }
+    template &lt;typename A, typename Fn&gt; static auto flat_map(const Reader&lt;R, A&gt;&amp; fa, Fn f) {
+        using RB = std::invoke_result_t&lt;Fn, A&gt;;
+        return RB{[fa, f](const R&amp; r) { return f(fa.run(r)).run(r); }};   // same r to every step
+    }
+};
 
-  given readerMonad[R]: Monad[[x] =&gt;&gt; Reader[R, x]] with
-    def unit[A](a: =&gt; A): Reader[R, A] = _ =&gt; a
-    extension [A](fa: Reader[R, A])
-      override def flatMap[B](f: A =&gt; Reader[R, B]): Reader[R, B] =
-        r =&gt; f(fa(r))(r)              // same r goes to every step
+struct Config { std::string base_url; int retries; };
+Reader&lt;Config, Config&gt; ask() { return {[](const Config&amp; c) { return c; }}; }
 
-case class Config(baseUrl: String, retries: Int)
-
-val endpoint: Reader[Config, String] =
-  for
-    cfg &lt;- Reader.ask[Config]
-  yield s"${cfg.baseUrl}/v1/data?retries=${cfg.retries}"
-
-endpoint.run(Config("https://api.example.com", 3))</code></pre>
-<p>It's dependency injection with no framework: functions describe what they need, and you supply it once at the top.</p>
-<div class="bridge">
-<p>If you've written C++ functions that all take a <code>const Context&amp;</code> as their first parameter and pass it to every callee, Reader is that pattern with the passing done for you by <code>flatMap</code>.</p>
-</div>
+auto endpoint = map&lt;ReaderK&lt;Config&gt;&gt;(ask(), [](const Config&amp; c) {
+    return c.base_url + "/v1/data?retries=" + std::to_string(c.retries);
+});
+endpoint.run(Config{"https://api.example.com", 3});</code></pre>
+<p>It's dependency injection with no framework. If you've written C++ code where every function takes a <code>const Context&amp;</code> first and passes it to every callee, Reader is that pattern, with <code>flat_map</code> doing the passing.</p>
 
 <div class="warfield">
-<p><strong>Monads don't compose in general.</strong> <code>Option</code> is a monad and <code>State</code> is a monad, but there's no generic way to make <code>State[S, Option[A]]</code> a monad from those two alone. Real code needs specific <em>monad transformers</em> (<code>OptionT</code>, <code>EitherT</code>, <code>StateT</code> in cats) or an effect type that bundles common capabilities (like cats-effect's <code>IO</code> or ZIO). Functors and the abstraction in the next chapter <em>do</em> compose.</p>
+<p><strong>Monads don't compose in general.</strong> <code>optional</code> is a monad and <code>State</code> is a monad, but there's no generic way to combine them into a monad for "<code>State</code> that may fail". Real libraries use specific <em>monad transformers</em> or a single effect type that bundles the common capabilities. The abstraction in the next chapter <em>does</em> compose.</p>
 </div>
 
 <dl class="jargon">
-  <dt>Functor</dt><dd>A type constructor with a structure-preserving <code>map</code>.</dd>
-  <dt>Monad</dt><dd>A functor with <code>unit</code> and an associative <code>flatMap</code> that obeys identity laws.</dd>
-  <dt>Kleisli arrow</dt><dd>A function <code>A =&gt; F[B]</code>; Kleisli composition chains them with <code>flatMap</code>.</dd>
-  <dt>Type lambda</dt><dd><code>[x] =&gt;&gt; T[S, x]</code>: a type constructor made by fixing some parameters of another.</dd>
+  <dt>Type constructor</dt><dd>A template that takes a type and gives a type: <code>optional&lt;_&gt;</code>, <code>vector&lt;_&gt;</code>, <code>State&lt;S, _&gt;</code>.</dd>
+  <dt>Higher-kinded abstraction</dt><dd>Code generic over a type constructor. In C++: tag types with nested alias templates.</dd>
+  <dt>Monad</dt><dd>A type constructor with <code>unit</code> and an associative <code>flat_map</code> that obey the identity laws.</dd>
+  <dt>Kleisli composition</dt><dd>Composing <code>A → F&lt;B&gt;</code> with <code>B → F&lt;C&gt;</code> using <code>flat_map</code>.</dd>
   <dt>Reader</dt><dd>The monad of computations that read a shared, read-only environment.</dd>
 </dl>
 
 <div class="recap"><ul>
-  <li>Abstract over the type constructor <code>F[_]</code> to write <code>map2</code>, <code>sequence</code>, <code>traverse</code> once.</li>
-  <li>Functor: <code>map</code> plus identity and composition laws.</li>
-  <li>Monad: <code>unit</code> + <code>flatMap</code>, plus associativity and identity laws (the monoid laws for Kleisli composition).</li>
+  <li>Abstract over the type constructor to write <code>map2</code>, <code>traverse</code>, <code>replicate_m</code> once.</li>
+  <li>C++ encoding: a tag per type constructor, a <code>Monad&lt;Tag&gt;</code> specialisation per type.</li>
+  <li>Monad = <code>unit</code> + <code>flat_map</code> with associativity and identity laws (the monoid laws for Kleisli composition).</li>
   <li>A monad defines what "do this, then that" means for a type.</li>
   <li>Monads don't compose generically, which motivates the next chapter.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch11.cpp"><span class="l-k">Full runnable listing</span>code/ch11.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

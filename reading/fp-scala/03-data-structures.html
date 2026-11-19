@@ -16,223 +16,276 @@
   <div class="chapter-num">03</div>
   <div class="chapter-kicker">Part I · Foundations</div>
   <h1>Functional Data Structures</h1>
-  <p class="chapter-sub">If nothing can be mutated, how do you "add" to a list? We build an immutable singly linked list from scratch, see why sharing makes it cheap, and find the one function, fold, that most list operations are built from.</p>
+  <p class="chapter-sub">If nothing can be mutated, how do you "add" to a list? We build a persistent singly linked list in C++ on shared_ptr, see why sharing makes it cheap, find the one function (fold) that most list operations are built from, and model trees as std::variant.</p>
 </header>
 
 <h2><span class="sec-no">3.1</span>Immutable by Construction</h2>
-<p>A <strong>functional data structure</strong> is operated on only by pure functions. You never change it in place. "Adding" an element returns a <em>new</em> structure, and the old one is still there, unchanged.</p>
-<p>That sounds expensive. It isn't, because of <strong>structural sharing</strong>: the new structure reuses the parts of the old one it didn't change. Since nothing can be mutated, sharing is always safe.</p>
+<p>A <strong>functional data structure</strong> is only operated on by pure functions. You never change it in place. "Adding" an element returns a <em>new</em> structure; the old one still exists, unchanged.</p>
+<p>That sounds expensive, but it isn't, because of <strong>structural sharing</strong>: the new structure reuses every part of the old one it didn't change. Since nothing is ever mutated, sharing is always safe, even across threads. Such structures are also called <strong>persistent</strong>.</p>
+<p>The standard library has no persistent containers (<code>std::vector</code> and <code>std::list</code> are mutable and deep-copy on copy), so we build one.</p>
 
 <h2><span class="sec-no">3.2</span>Defining a List</h2>
-<p>A list is either empty, or an element followed by another list. That "either/or" maps directly to an <code>enum</code>, which is Scala's <strong>algebraic data type</strong> (ADT):</p>
-<pre><code class="language-scala">enum List[+A]:
-  case Nil
-  case Cons(head: A, tail: List[A])
+<p>A list is either empty, or an element followed by another list. Each node is immutable once built, and several lists can point to the same node, so <code>std::shared_ptr</code> manages lifetimes:</p>
+<pre><code class="language-cpp">template &lt;typename T&gt;
+class List {
+    struct Node {
+        T head;
+        std::shared_ptr&lt;Node&gt; tail;
+    };
+    std::shared_ptr&lt;Node&gt; node_;            // null means the empty list (Nil)
+    explicit List(std::shared_ptr&lt;Node&gt; n) : node_(std::move(n)) {}
 
-object List:
-  def apply[A](as: A*): List[A] =       // variadic: List(1, 2, 3)
-    if as.isEmpty then Nil
-    else Cons(as.head, apply(as.tail*))
+public:
+    List() = default;                       // Nil
+    static List cons(T h, List t) {         // Cons(h, t): O(1), shares t
+        return List(std::make_shared&lt;Node&gt;(Node{std::move(h), std::move(t.node_)}));
+    }
+    bool empty() const        { return !node_; }
+    const T&amp; head() const     { return node_-&gt;head; }
+    List tail() const         { return List(node_-&gt;tail); }
+};
 
-import List.*</code></pre>
-<p><code>List(1, 2, 3)</code> is <code>Cons(1, Cons(2, Cons(3, Nil)))</code>. Draw it as boxes: each <code>Cons</code> holds a value and an arrow to the rest.</p>
-
-<h3>What does <code>+A</code> mean?</h3>
-<p>The <code>+</code> makes <code>List</code> <strong>covariant</strong>: if <code>Dog</code> is a subtype of <code>Animal</code>, then <code>List[Dog]</code> is a subtype of <code>List[Animal]</code>. This also lets one <code>Nil</code> serve every list: <code>Nil</code> is a <code>List[Nothing]</code>, and <code>Nothing</code> is a subtype of every type, so <code>Nil</code> fits anywhere a <code>List[Int]</code> or <code>List[String]</code> is expected.</p>
+template &lt;typename T&gt;
+List&lt;T&gt; cons(T h, List&lt;T&gt; t) { return List&lt;T&gt;::cons(std::move(h), std::move(t)); }</code></pre>
+<p>The full listing adds an <code>initializer_list</code> constructor so you can write <code>List&lt;int&gt;{1, 2, 3}</code>, meaning <code>cons(1, cons(2, cons(3, List&lt;int&gt;{})))</code>. Draw it as boxes: each node holds a value and an arrow to the rest.</p>
+<p>There are no setters. Once built, a <code>List</code> can only be read, taken apart, or used to build new lists.</p>
 <div class="bridge">
-<p>In C++, <code>std::vector&lt;Dog*&gt;</code> is unrelated to <code>std::vector&lt;Animal*&gt;</code>. That's correct for a mutable container: if it converted, you could push a <code>Cat*</code> into a vector of dogs. An immutable list has no "push into this list" operation, so covariance is safe. Immutability is what makes variance work.</p>
+<p>The book writes <code>enum List[+A] { case Nil; case Cons(head: A, tail: List[A]) }</code> and takes it apart with <code>match</code>. Scala's garbage collector handles sharing; here <code>shared_ptr</code> does. The <code>+A</code> (covariance) lets a <code>List[Dog]</code> be used as a <code>List[Animal]</code>; C++ templates are invariant, so we don't get that.</p>
 </div>
 
-<h2><span class="sec-no">3.3</span>Pattern Matching</h2>
-<p>We take lists apart with <code>match</code>. Each case is a shape to compare against, and it binds names to the parts:</p>
-<pre><code class="language-scala">def sum(ints: List[Int]): Int = ints match
-  case Nil              =&gt; 0
-  case Cons(x, xs)      =&gt; x + sum(xs)
+<h2><span class="sec-no">3.3</span>Functions Follow the Data</h2>
+<pre><code class="language-cpp">int sum(const List&lt;int&gt;&amp; xs) {
+    return xs.empty() ? 0 : xs.head() + sum(xs.tail());
+}
 
-def product(ds: List[Double]): Double = ds match
-  case Nil              =&gt; 1.0
-  case Cons(0.0, _)     =&gt; 0.0        // match a literal; _ ignores the rest
-  case Cons(x, xs)      =&gt; x * product(xs)</code></pre>
-<p>Notice the definitions follow the data. The list has two cases, so the function has two cases. The tail is a list, so the function recurses on it. Most functions over ADTs write themselves this way.</p>
+double product(const List&lt;double&gt;&amp; xs) {
+    if (xs.empty()) return 1.0;
+    if (xs.head() == 0.0) return 0.0;      // short-circuit
+    return xs.head() * product(xs.tail());
+}</code></pre>
+<p>The list has two cases (empty or not), so the function has two cases. The tail is a list, so the function recurses on it. Most functions over recursive data write themselves this way.</p>
 
-<div class="exercise" data-n="Exercise 3.1 · tail and setHead">
-<p>Implement <code>tail</code> (everything but the first element) and <code>setHead</code> (replace the first element). Both should take constant time. What should <code>tail(Nil)</code> do?</p>
-</div>
-<details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def tail[A](as: List[A]): List[A] = as match
-  case Nil         =&gt; sys.error("tail of empty list")
-  case Cons(_, t)  =&gt; t
-
-def setHead[A](as: List[A], h: A): List[A] = as match
-  case Nil         =&gt; sys.error("setHead on empty list")
-  case Cons(_, t)  =&gt; Cons(h, t)</code></pre>
-<p>Both are O(1) because they <em>share</em> <code>t</code>: no copying. For <code>Nil</code> we have three choices: throw, return <code>Nil</code>, or return an <code>Option</code>. Throwing is honest for now. Chapter 4 gives us the better answer.</p>
-</div></details>
-
-<div class="exercise" data-n="Exercise 3.2 · drop and dropWhile">
-<p>Implement <code>drop[A](as: List[A], n: Int): List[A]</code> and <code>dropWhile[A](as: List[A], f: A =&gt; Boolean): List[A]</code>, which removes elements from the front while they match the predicate.</p>
+<div class="exercise" data-n="Exercise 3.1 · tail and set_head">
+<p>Write <code>tail</code> (everything but the first element) and <code>set_head</code> (replace the first element). Both must be O(1). What should they do on an empty list?</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">@tailrec
-def drop[A](as: List[A], n: Int): List[A] =
-  if n &lt;= 0 then as
-  else as match
-    case Nil        =&gt; Nil
-    case Cons(_, t) =&gt; drop(t, n - 1)
-
-@tailrec
-def dropWhile[A](as: List[A], f: A =&gt; Boolean): List[A] = as match
-  case Cons(h, t) if f(h) =&gt; dropWhile(t, f)     // a guard
-  case _                  =&gt; as</code></pre>
+<pre><code class="language-cpp">template &lt;typename T&gt; List&lt;T&gt; tail(const List&lt;T&gt;&amp; xs) {
+    if (xs.empty()) throw std::logic_error("tail of empty list");
+    return xs.tail();
+}
+template &lt;typename T&gt; List&lt;T&gt; set_head(const List&lt;T&gt;&amp; xs, T h) {
+    if (xs.empty()) throw std::logic_error("set_head on empty list");
+    return cons(std::move(h), xs.tail());
+}</code></pre>
+<p>Both are O(1) because they share the tail. For the empty case we can throw, return empty, or return <code>std::optional</code>. Throwing is honest for now; Chapter 4 gives the better answer.</p>
 </div></details>
 
-<h2><span class="sec-no">3.4</span>What Sharing Can't Do</h2>
-<pre><code class="language-scala">def append[A](a1: List[A], a2: List[A]): List[A] = a1 match
-  case Nil        =&gt; a2
-  case Cons(h, t) =&gt; Cons(h, append(t, a2))</code></pre>
-<p><code>append</code> copies <code>a1</code> but shares all of <code>a2</code>. Its cost depends only on the length of the first list.</p>
-<p>Now try <code>init</code>: all elements except the <em>last</em>.</p>
-<pre><code class="language-scala">def init[A](as: List[A]): List[A] = as match
-  case Nil          =&gt; sys.error("init of empty list")
-  case Cons(_, Nil) =&gt; Nil
-  case Cons(h, t)   =&gt; Cons(h, init(t))</code></pre>
-<p>This copies every node, O(n), because every <code>Cons</code> on the way to the end points to something that changes. A singly linked list is cheap at the front and expensive at the back. Choose structures to match how you'll use them: Scala's standard <code>Vector</code> is a wide immutable tree with effectively constant-time access at both ends.</p>
-<div class="analogy">A singly linked list is a chain of train cars, each coupled to the one behind it. You can add a new engine at the front without touching the train. To remove the last car, you'd have to rebuild every coupling from the front, because each car "contains" the rest of the train.</div>
+<div class="exercise" data-n="Exercise 3.2 · drop and drop_while">
+<p>Write <code>drop(xs, n)</code> and <code>drop_while(xs, p)</code>, which removes elements from the front while they satisfy <code>p</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-cpp">template &lt;typename T&gt; List&lt;T&gt; drop(List&lt;T&gt; xs, int n) {
+    while (n-- &gt; 0 &amp;&amp; !xs.empty()) xs = xs.tail();
+    return xs;
+}
+template &lt;typename T, typename P&gt; List&lt;T&gt; drop_while(List&lt;T&gt; xs, P p) {
+    while (!xs.empty() &amp;&amp; p(xs.head())) xs = xs.tail();
+    return xs;
+}</code></pre>
+<p>A loop that reassigns a <em>local</em> handle. The lists themselves are never modified, so the function is pure.</p>
+</div></details>
+
+<h2><span class="sec-no">3.4</span>What Sharing Can and Can't Do</h2>
+<pre><code class="language-cpp">template &lt;typename T&gt;
+List&lt;T&gt; append(const List&lt;T&gt;&amp; a, const List&lt;T&gt;&amp; b) {
+    return a.empty() ? b : cons(a.head(), append(a.tail(), b));
+}</code></pre>
+<p><code>append</code> copies the nodes of <code>a</code> and shares all of <code>b</code>. Its cost depends only on the first list.</p>
+<p>Now <code>init</code>, all elements except the <em>last</em>:</p>
+<pre><code class="language-cpp">template &lt;typename T&gt;
+List&lt;T&gt; init(const List&lt;T&gt;&amp; xs) {
+    if (xs.empty()) throw std::logic_error("init of empty list");
+    if (xs.tail().empty()) return {};
+    return cons(xs.head(), init(xs.tail()));
+}</code></pre>
+<p>This copies every node, O(n), because every node on the way to the end points at something that changes. A singly linked list is cheap at the front and expensive at the back. Pick structures to match how you use them; production persistent libraries (like <code>immer</code> for C++) use wide trees that are cheap at both ends.</p>
+<div class="analogy">A singly linked list is a chain of train cars, each coupled to the one behind. You can add a new engine at the front without touching the train. Removing the last car means rebuilding every coupling from the front, because each car "contains" the rest of the train.</div>
+
+<div class="warfield">
+<p><strong>The destructor can overflow the stack.</strong> A list of a million nodes is a chain of a million <code>shared_ptr</code>s. Destroying the head destroys the next node, which destroys the next, recursively. The full listing gives <code>List</code> a destructor that unlinks the chain in a loop while it's the sole owner. Garbage-collected languages don't have this trap; any recursive <code>unique_ptr</code> or <code>shared_ptr</code> structure in C++ does.</p>
+</div>
 
 <h2><span class="sec-no">3.5</span>Finding Fold</h2>
 <p>Look at <code>sum</code> and <code>product</code> side by side:</p>
-<pre><code class="language-scala">case Nil         =&gt; 0              |   case Nil         =&gt; 1.0
-case Cons(x, xs) =&gt; x + sum(xs)    |   case Cons(x, xs) =&gt; x * product(xs)</code></pre>
-<p>They differ in two places: the value for <code>Nil</code> and the operator that combines the head with the result for the tail. Make both parameters:</p>
-<pre><code class="language-scala">def foldRight[A, B](as: List[A], acc: B, f: (A, B) =&gt; B): B = as match
-  case Nil         =&gt; acc
-  case Cons(x, xs) =&gt; f(x, foldRight(xs, acc, f))
+<pre><code class="language-text">empty → 0               |  empty → 1.0
+head + sum(tail)        |  head * product(tail)</code></pre>
+<p>They differ in two places: the value for the empty list, and how the head combines with the result for the tail. Make both parameters:</p>
+<pre><code class="language-cpp">template &lt;typename T, typename B, typename F&gt;
+B fold_right(const List&lt;T&gt;&amp; xs, B acc, F f) {
+    return xs.empty() ? acc : f(xs.head(), fold_right(xs.tail(), std::move(acc), f));
+}
 
-def sum(ns: List[Int])         = foldRight(ns, 0, _ + _)
-def product(ns: List[Double])  = foldRight(ns, 1.0, _ * _)</code></pre>
-<p>A useful picture: <code>foldRight</code> <strong>replaces the constructors</strong>. Every <code>Cons</code> becomes <code>f</code> and the <code>Nil</code> becomes <code>acc</code>.</p>
-<pre><code class="language-text">Cons(1, Cons(2, Cons(3, Nil)))
+int sum(const List&lt;int&gt;&amp; xs) { return fold_right(xs, 0, std::plus{}); }</code></pre>
+<p>A useful picture: <code>fold_right</code> <strong>replaces the constructors</strong>. Every <code>cons</code> becomes <code>f</code>, and the empty list becomes <code>acc</code>:</p>
+<pre><code class="language-text">cons(1, cons(2, cons(3, Nil)))
    f(1,    f(2,    f(3, acc)))</code></pre>
-<p>Try it with <code>Cons</code> and <code>Nil</code> themselves: <code>foldRight(xs, Nil, Cons(_, _))</code> gives back the same list. That's a quick check that fold captures the full structure of a list.</p>
 
-<h3>foldLeft: the stack-safe one</h3>
-<p><code>foldRight</code> isn't tail-recursive: it calls itself and then still has to apply <code>f</code>. A long list will overflow the stack. <code>foldLeft</code> combines from the left with an accumulator, and is a loop:</p>
-<pre><code class="language-scala">@tailrec
-def foldLeft[A, B](as: List[A], acc: B, f: (B, A) =&gt; B): B = as match
-  case Nil         =&gt; acc
-  case Cons(x, xs) =&gt; foldLeft(xs, f(acc, x), f)</code></pre>
-<pre><code class="language-text">foldLeft:   f(f(f(acc, 1), 2), 3)
-foldRight:  f(1, f(2, f(3, acc)))</code></pre>
-<p>For an associative operator like <code>+</code> both give the same result. For others, like subtraction or building a list, the order matters.</p>
+<h3>fold_left: the loop</h3>
+<p><code>fold_right</code> recurses and then still has to apply <code>f</code>, so a long list overflows the stack. <code>fold_left</code> combines from the left with an accumulator, which in C++ we write as the loop it is:</p>
+<pre><code class="language-cpp">template &lt;typename T, typename B, typename F&gt;
+B fold_left(List&lt;T&gt; xs, B acc, F f) {
+    while (!xs.empty()) { acc = f(std::move(acc), xs.head()); xs = xs.tail(); }
+    return acc;
+}</code></pre>
+<pre><code class="language-text">fold_left:   f(f(f(acc, 1), 2), 3)
+fold_right:  f(1, f(2, f(3, acc)))</code></pre>
+<p>For an associative operation like <code>+</code> both give the same result. For subtraction, or building a list, order matters.</p>
+<div class="bridge">
+<p>The book writes <code>foldLeft</code> as tail recursion with <code>@tailrec</code>. In C++, <code>fold_left</code> is <code>std::accumulate</code> or C++23's <code>std::ranges::fold_left</code>, and <code>fold_right</code> is <code>std::ranges::fold_right</code>, which iterates backwards instead of recursing.</p>
+</div>
 
-<div class="exercise" data-n="Exercise 3.3 · via foldLeft">
-<p>Write <code>length</code> and <code>reverse</code> using <code>foldLeft</code>.</p>
+<div class="exercise" data-n="Exercise 3.3 · via fold_left">
+<p>Write <code>length</code> and <code>reverse</code> with <code>fold_left</code>.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def length[A](as: List[A]): Int =
-  foldLeft(as, 0, (n, _) =&gt; n + 1)
-
-def reverse[A](as: List[A]): List[A] =
-  foldLeft(as, Nil: List[A], (acc, a) =&gt; Cons(a, acc))</code></pre>
-<p>The type ascription <code>Nil: List[A]</code> helps inference. Without it, Scala infers <code>B</code> from the bare <code>Nil</code> as <code>List[Nothing]</code>, and then rejects <code>Cons(a, acc)</code> because a <code>List[A]</code> isn't a <code>List[Nothing]</code>.</p>
+<pre><code class="language-cpp">template &lt;typename T&gt; int length(const List&lt;T&gt;&amp; xs) {
+    return fold_left(xs, 0, [](int n, const T&amp;) { return n + 1; });
+}
+template &lt;typename T&gt; List&lt;T&gt; reverse(const List&lt;T&gt;&amp; xs) {
+    return fold_left(xs, List&lt;T&gt;{},
+                     [](List&lt;T&gt; acc, const T&amp; a) { return cons(a, std::move(acc)); });
+}</code></pre>
 </div></details>
 
-<div class="exercise" data-n="Exercise 3.4 · stack-safe foldRight">
-<p>Write <code>foldRight</code> in terms of <code>foldLeft</code>, so it no longer overflows the stack.</p>
+<div class="exercise" data-n="Exercise 3.4 · stack-safe fold_right">
+<p>Write <code>fold_right_safe</code> using <code>fold_left</code>, so it no longer recurses.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def foldRightSafe[A, B](as: List[A], acc: B, f: (A, B) =&gt; B): B =
-  foldLeft(reverse(as), acc, (b, a) =&gt; f(a, b))</code></pre>
-<p>Reverse first, then fold from the left with the arguments swapped. It costs an extra pass and an extra list, but it's stack-safe. This is what you'd use in practice.</p>
+<pre><code class="language-cpp">template &lt;typename T, typename B, typename F&gt;
+B fold_right_safe(const List&lt;T&gt;&amp; xs, B acc, F f) {
+    return fold_left(reverse(xs), std::move(acc),
+                     [&amp;f](B b, const T&amp; a) { return f(a, std::move(b)); });
+}</code></pre>
+<p>Reverse, then fold from the left with the arguments swapped. One extra pass and an extra list, but stack-safe. That's what you'd use in practice.</p>
 </div></details>
 
-<h2><span class="sec-no">3.6</span>The Big Three: map, filter, flatMap</h2>
-<p>Most list processing combines three operations. All of them are folds.</p>
-<pre><code class="language-scala">def map[A, B](as: List[A])(f: A =&gt; B): List[B] =
-  foldRightSafe(as, Nil: List[B], (a, acc) =&gt; Cons(f(a), acc))
+<h2><span class="sec-no">3.6</span>The Big Three: map, filter, flat_map</h2>
+<p>Most list processing combines three operations, and all three are folds:</p>
+<pre><code class="language-cpp">template &lt;typename T, typename F&gt;
+auto map(const List&lt;T&gt;&amp; xs, F f) {
+    using U = std::invoke_result_t&lt;F, const T&amp;&gt;;
+    return fold_right_safe(xs, List&lt;U&gt;{},
+        [&amp;f](const T&amp; a, List&lt;U&gt; acc) { return cons(f(a), std::move(acc)); });
+}
 
-def filter[A](as: List[A])(p: A =&gt; Boolean): List[A] =
-  foldRightSafe(as, Nil: List[A], (a, acc) =&gt; if p(a) then Cons(a, acc) else acc)
+template &lt;typename T, typename P&gt;
+List&lt;T&gt; filter(const List&lt;T&gt;&amp; xs, P p) {
+    return fold_right_safe(xs, List&lt;T&gt;{},
+        [&amp;p](const T&amp; a, List&lt;T&gt; acc) { return p(a) ? cons(a, std::move(acc)) : acc; });
+}
 
-def concat[A](ls: List[List[A]]): List[A] =
-  foldRightSafe(ls, Nil: List[A], append)
+template &lt;typename T&gt;
+List&lt;T&gt; concat(const List&lt;List&lt;T&gt;&gt;&amp; ls) {
+    return fold_right_safe(ls, List&lt;T&gt;{},
+        [](const List&lt;T&gt;&amp; l, List&lt;T&gt; acc) { return append(l, acc); });
+}
 
-def flatMap[A, B](as: List[A])(f: A =&gt; List[B]): List[B] =
-  concat(map(as)(f))</code></pre>
-<p>Note the separate parameter list <code>(f: A =&gt; B)</code>. Scala infers types left to right across parameter lists, so by the time it reaches <code>f</code> it already knows <code>A</code>, and you can write <code>map(xs)(_ + 1)</code> without type annotations.</p>
-<p><code>flatMap</code> deserves attention: each element produces a <em>list</em> of results, and they're flattened. <code>flatMap(List(1,2,3))(i =&gt; List(i, i))</code> is <code>List(1,1,2,2,3,3)</code>. You'll see <code>flatMap</code> in almost every chapter from here on.</p>
+template &lt;typename T, typename F&gt;
+auto flat_map(const List&lt;T&gt;&amp; xs, F f) { return concat(map(xs, f)); }</code></pre>
+<p><code>std::invoke_result_t</code> computes the result type of <code>f</code>, so <code>map</code> can change the element type, say from <code>List&lt;int&gt;</code> to <code>List&lt;std::string&gt;</code>.</p>
+<p><code>flat_map</code> deserves attention: each element produces a <em>list</em>, and the lists are flattened. <code>flat_map({1,2,3}, x ↦ {x, x})</code> is <code>{1,1,2,2,3,3}</code>. With ranges it's <code>views::transform(f) | views::join</code>. You'll see <code>flat_map</code> in almost every chapter from here on.</p>
 
-<div class="exercise" data-n="Exercise 3.5 · filter via flatMap">
-<p>Implement <code>filter</code> using only <code>flatMap</code>.</p>
+<div class="exercise" data-n="Exercise 3.5 · filter via flat_map">
+<p>Implement <code>filter</code> using only <code>flat_map</code>.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def filterViaFlatMap[A](as: List[A])(p: A =&gt; Boolean): List[A] =
-  flatMap(as)(a =&gt; if p(a) then List(a) else Nil)</code></pre>
-<p>Keep an element by returning a one-element list; drop it by returning an empty one. <code>flatMap</code> is more powerful than <code>map</code> or <code>filter</code>: both can be written with it.</p>
+<pre><code class="language-cpp">template &lt;typename T, typename P&gt;
+List&lt;T&gt; filter_via_flat_map(const List&lt;T&gt;&amp; xs, P p) {
+    return flat_map(xs, [&amp;p](const T&amp; a) { return p(a) ? List&lt;T&gt;{a} : List&lt;T&gt;{}; });
+}</code></pre>
+<p>Keep an element by returning a one-element list, drop it with an empty one. <code>flat_map</code> is more powerful than <code>map</code> or <code>filter</code>: both can be written with it.</p>
 </div></details>
 
-<div class="exercise" data-n="Exercise 3.6 · zipWith">
-<p>Write <code>zipWith[A, B, C](as: List[A], bs: List[B])(f: (A, B) =&gt; C): List[C]</code>, combining elements pairwise and stopping at the shorter list.</p>
+<div class="exercise" data-n="Exercise 3.6 · zip_with">
+<p>Write <code>zip_with(as, bs, f)</code>, combining elements pairwise and stopping at the shorter list.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def zipWith[A, B, C](as: List[A], bs: List[B])(f: (A, B) =&gt; C): List[C] =
-  (as, bs) match
-    case (Cons(a, at), Cons(b, bt)) =&gt; Cons(f(a, b), zipWith(at, bt)(f))
-    case _                          =&gt; Nil</code></pre>
-<p>Matching on a tuple lets you take two structures apart at once. (Not tail-recursive; make it so with an accumulator plus a final <code>reverse</code> as practice.)</p>
+<pre><code class="language-cpp">template &lt;typename A, typename B, typename F&gt;
+auto zip_with(const List&lt;A&gt;&amp; as, const List&lt;B&gt;&amp; bs, F f) {
+    using C = std::invoke_result_t&lt;F, const A&amp;, const B&amp;&gt;;
+    if (as.empty() || bs.empty()) return List&lt;C&gt;{};
+    return cons(f(as.head(), bs.head()), zip_with(as.tail(), bs.tail(), f));
+}</code></pre>
 </div></details>
 
-<h2><span class="sec-no">3.7</span>Trees</h2>
-<p>Same technique, different shape. A binary tree is either a leaf holding a value or a branch with two subtrees:</p>
-<pre><code class="language-scala">enum Tree[+A]:
-  case Leaf(value: A)
-  case Branch(left: Tree[A], right: Tree[A])
+<h2><span class="sec-no">3.7</span>Trees, With std::variant</h2>
+<p>Same technique, different shape. A binary tree is a leaf holding a value, or a branch with two subtrees. "One of these cases" is a <strong>sum type</strong>, which in C++ is <code>std::variant</code>:</p>
+<pre><code class="language-cpp">template &lt;typename T&gt;
+struct Tree {
+    struct Leaf   { T value; };
+    struct Branch { std::shared_ptr&lt;const Tree&gt; left, right; };
+    std::variant&lt;Leaf, Branch&gt; v;
+};
 
-  def size: Int = this match
-    case Leaf(_)      =&gt; 1
-    case Branch(l, r) =&gt; 1 + l.size + r.size
+template &lt;typename... Fs&gt; struct overloaded : Fs... { using Fs::operator()...; };
 
-  def depth: Int = this match
-    case Leaf(_)      =&gt; 0
-    case Branch(l, r) =&gt; 1 + (l.depth max r.depth)
+template &lt;typename T&gt; int size(const Tree&lt;T&gt;&amp; t) {
+    return std::visit(overloaded{
+        [](const typename Tree&lt;T&gt;::Leaf&amp;)     { return 1; },
+        [](const typename Tree&lt;T&gt;::Branch&amp; b) { return 1 + size(*b.left) + size(*b.right); },
+    }, t.v);
+}
 
-  def map[B](f: A =&gt; B): Tree[B] = this match
-    case Leaf(a)      =&gt; Leaf(f(a))
-    case Branch(l, r) =&gt; Branch(l.map(f), r.map(f))</code></pre>
-<p>The pattern repeats: one case per constructor, and recursion wherever the type refers to itself. And again, these functions share a skeleton, which we can extract as a fold.</p>
+template &lt;typename T&gt; int depth(const Tree&lt;T&gt;&amp; t) {
+    return std::visit(overloaded{
+        [](const typename Tree&lt;T&gt;::Leaf&amp;)     { return 0; },
+        [](const typename Tree&lt;T&gt;::Branch&amp; b) { return 1 + std::max(depth(*b.left), depth(*b.right)); },
+    }, t.v);
+}</code></pre>
+<p><code>std::visit</code> with an overload set is C++'s pattern matching: one lambda per case. Forget a case and it doesn't compile, which is the exhaustiveness check you want from sum types. The pattern repeats: one case per alternative, recursion wherever the type refers to itself. And again, these functions share a skeleton.</p>
 
 <div class="exercise" data-n="Exercise 3.7 · fold for trees">
-<p>Write <code>fold[B](f: A =&gt; B, g: (B, B) =&gt; B): B</code> on <code>Tree</code>, then rewrite <code>size</code>, <code>depth</code> and <code>map</code> using it.</p>
+<p>Write <code>fold(t, f, g)</code> for trees: <code>f</code> handles a leaf's value, <code>g</code> combines the results of two subtrees. Then rewrite <code>size</code>, <code>depth</code> and a <code>map_tree</code> with it.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">  def fold[B](f: A =&gt; B, g: (B, B) =&gt; B): B = this match
-    case Leaf(a)      =&gt; f(a)
-    case Branch(l, r) =&gt; g(l.fold(f, g), r.fold(f, g))
+<pre><code class="language-cpp">template &lt;typename T, typename F, typename G&gt;
+auto fold(const Tree&lt;T&gt;&amp; t, F f, G g) -&gt; std::invoke_result_t&lt;F, const T&amp;&gt; {
+    return std::visit(overloaded{
+        [&amp;](const typename Tree&lt;T&gt;::Leaf&amp; l)   { return f(l.value); },
+        [&amp;](const typename Tree&lt;T&gt;::Branch&amp; b) { return g(fold(*b.left, f, g), fold(*b.right, f, g)); },
+    }, t.v);
+}
 
-  def sizeViaFold: Int  = fold(_ =&gt; 1, 1 + _ + _)
-  def depthViaFold: Int = fold(_ =&gt; 0, (dl, dr) =&gt; 1 + (dl max dr))
-  def mapViaFold[B](f: A =&gt; B): Tree[B] =
-    fold(a =&gt; Leaf(f(a)): Tree[B], Branch(_, _))</code></pre>
-<p>Just like <code>foldRight</code> for lists: <code>fold</code> replaces <code>Leaf</code> with <code>f</code> and <code>Branch</code> with <code>g</code>. Every ADT has such a fold, and once you have it, most other functions are one-liners.</p>
+template &lt;typename T&gt; int size_via_fold(const Tree&lt;T&gt;&amp; t) {
+    return fold(t, [](const T&amp;) { return 1; }, [](int l, int r) { return 1 + l + r; });
+}
+template &lt;typename T&gt; int depth_via_fold(const Tree&lt;T&gt;&amp; t) {
+    return fold(t, [](const T&amp;) { return 0; }, [](int l, int r) { return 1 + std::max(l, r); });
+}
+template &lt;typename T, typename F&gt; auto map_tree(const Tree&lt;T&gt;&amp; t, F f) {
+    using U = std::invoke_result_t&lt;F, const T&amp;&gt;;
+    return fold(t, [&amp;](const T&amp; a) { return leaf&lt;U&gt;(f(a)); },
+                   [](Tree&lt;U&gt; l, Tree&lt;U&gt; r) { return branch(std::move(l), std::move(r)); });
+}</code></pre>
+<p>Just like <code>fold_right</code> for lists, <code>fold</code> replaces <code>Leaf</code> with <code>f</code> and <code>Branch</code> with <code>g</code>. Every recursive sum type has such a fold, and once you have it, most other functions are one-liners.</p>
 </div></details>
 
-<div class="warfield">
-<p><strong>Pattern matching on an <code>enum</code> is checked for exhaustiveness.</strong> If you forget a case, the compiler warns you. Treat that warning as an error. It's one of the biggest practical wins of ADTs over class hierarchies with virtual methods.</p>
-</div>
-
 <dl class="jargon">
-  <dt>Algebraic data type (ADT)</dt><dd>A type defined as a choice between cases (sum), each holding some fields (product). In Scala 3, an <code>enum</code>.</dd>
-  <dt>Structural sharing</dt><dd>New immutable structures reusing unchanged parts of old ones.</dd>
-  <dt>Covariance (<code>+A</code>)</dt><dd><code>F[Sub]</code> is a subtype of <code>F[Super]</code>. Safe for immutable containers.</dd>
-  <dt>Fold</dt><dd>A function that replaces each constructor of a data structure with a function, reducing it to a single value.</dd>
+  <dt>Persistent data structure</dt><dd>An immutable structure whose "updates" return new versions that share unchanged parts with old ones.</dd>
+  <dt>Algebraic data type</dt><dd>A type built from sums (one of several cases: <code>std::variant</code>) and products (several fields: a <code>struct</code>).</dd>
+  <dt>Structural sharing</dt><dd>New immutable structures reusing nodes of old ones, here through <code>shared_ptr</code>.</dd>
+  <dt>Fold</dt><dd>A function that replaces each constructor of a data structure with a function, reducing it to one value.</dd>
 </dl>
 
 <div class="recap"><ul>
-  <li>Immutable structures return new versions and share what didn't change.</li>
-  <li>An ADT plus pattern matching: functions follow the shape of the data.</li>
-  <li><code>foldRight</code> replaces constructors. <code>foldLeft</code> is a stack-safe loop.</li>
-  <li><code>map</code>, <code>filter</code> and <code>flatMap</code> are all folds, and <code>flatMap</code> can express the other two.</li>
+  <li>Persistent structures return new versions and share what didn't change.</li>
+  <li>In C++, build them from <code>shared_ptr</code> to immutable nodes, and destroy long chains iteratively.</li>
+  <li><code>fold_right</code> replaces constructors; <code>fold_left</code> is the loop.</li>
+  <li><code>map</code>, <code>filter</code> and <code>flat_map</code> are all folds, and <code>flat_map</code> can express the other two.</li>
+  <li>Sum types are <code>std::variant</code>; pattern matching is <code>std::visit</code> with an overload set.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch03.cpp"><span class="l-k">Full runnable listing</span>code/ch03.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

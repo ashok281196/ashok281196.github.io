@@ -16,186 +16,173 @@
   <div class="chapter-num">08</div>
   <div class="chapter-kicker">Part II · Functional Design</div>
   <h1>Property-Based Testing</h1>
-  <p class="chapter-sub">Instead of writing test cases, write laws and let a library try them on hundreds of random inputs. We design a small ScalaCheck-style library, reusing the State type from Chapter 6, and see the design process from Chapter 7 again.</p>
+  <p class="chapter-sub">Instead of writing test cases, write laws and let a library try them on hundreds of random inputs. We design a small QuickCheck-style library in C++, reusing the State idea from Chapter 6, and watch it find a bug from a counterexample.</p>
 </header>
 
 <h2><span class="sec-no">8.1</span>The Idea</h2>
-<p>An example-based test checks one input: <code>assert(reverse(List(1,2,3)) == List(3,2,1))</code>. A <strong>property</strong> states something true for <em>all</em> inputs, and a test library generates many inputs to try it on:</p>
-<pre><code class="language-scala">// with the real ScalaCheck library
-val intList = Gen.listOf(Gen.choose(0, 100))
+<p>An example-based test checks one input: <code>EXPECT_EQ(reverse({1,2,3}), (vector{3,2,1}))</code>. A <strong>property</strong> states something true for <em>all</em> inputs, and a library generates many inputs to try it on:</p>
+<pre><code class="language-cpp">auto int_list = list_of_random_length(choose(-10, 10));
 
-val prop =
-  forAll(intList)(ns =&gt; ns.reverse.reverse == ns) &amp;&amp;
-  forAll(intList)(ns =&gt; ns.headOption == ns.reverse.lastOption)
+auto prop =
+    for_all(int_list, [](std::vector&lt;int&gt; ns) { return reversed(reversed(ns)) == ns; }) &amp;&amp;
+    for_all(int_list, [](std::vector&lt;int&gt; ns) { return ns.empty() || ns.front() == reversed(ns).back(); });
 
-prop.check()   // + OK, passed 100 tests.</code></pre>
-<p>When a property fails, a good library also <strong>shrinks</strong> the failing input to the smallest case that still fails, so instead of a 73-element list you see <code>List(0, -1)</code>.</p>
-<p>Laws from Chapter 7, like <code>y.map(id) == y</code>, become properties directly. That's one reason pure code and laws go together: they can be tested automatically.</p>
-<div class="analogy">Example tests are spot checks: an inspector picks three bolts and measures them. Property tests are a rule ("every bolt is within 0.1 mm") plus a machine that measures thousands of random bolts and, when it finds a bad one, also finds the simplest description of what makes it bad.</div>
+prop.check();   // + OK, passed 100 tests.</code></pre>
+<p>When a property fails, a good library also <strong>shrinks</strong> the failing input to the smallest case that still fails, so instead of an 18-element vector you see <code>[0, -1]</code>.</p>
+<p>The laws from Chapter 7, like <code>map(y, id) == y</code>, become properties directly. That's one reason pure code and laws go together: they can be tested automatically.</p>
+<div class="analogy">Example tests are spot checks: an inspector measures three bolts. Property tests are a rule ("every bolt is within 0.1 mm") plus a machine that measures thousands of random bolts and, when it finds a bad one, also finds the simplest description of what makes it bad.</div>
 
 <h2><span class="sec-no">8.2</span>Choosing What to Test</h2>
 <p>Coming up with properties is a skill. Good sources:</p>
 <ul>
-  <li><strong>Round trips:</strong> <code>decode(encode(x)) == x</code>, <code>xs.reverse.reverse == xs</code>.</li>
-  <li><strong>Invariants:</strong> <code>xs.sorted</code> has the same length and elements as <code>xs</code>, and each element is ≤ the next.</li>
-  <li><strong>Comparison with a simple model:</strong> your fast <code>LRUCache</code> behaves like a slow, obviously correct version on any sequence of operations.</li>
+  <li><strong>Round trips:</strong> <code>decode(encode(x)) == x</code>, serialise then parse a message, reverse twice.</li>
+  <li><strong>Invariants:</strong> after sorting, the vector has the same elements and each is ≤ the next.</li>
+  <li><strong>Comparison with a simple model:</strong> your lock-free queue behaves like a <code>std::deque</code> under any sequence of operations; your SIMD routine matches the scalar one.</li>
   <li><strong>Algebraic laws:</strong> associativity, identity, <code>fork(x) == x</code>.</li>
 </ul>
 
 <div class="exercise" data-n="Exercise 8.1 · properties of max">
-<p>List properties that specify <code>def max(xs: List[Int]): Int</code> for non-empty lists.</p>
+<p>List properties that fully specify <code>int max(const std::vector&lt;int&gt;&amp;)</code> for non-empty input.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<p>(1) The result is ≥ every element. (2) The result is <em>one of</em> the elements. Together these pin it down exactly. Property (1) alone would accept <code>Int.MaxValue</code> for every list; checking that your properties can't be satisfied by a wrong implementation is part of writing them.</p>
+<p>(1) The result is ≥ every element. (2) The result is one of the elements. Together they pin it down exactly. Property (1) alone would accept a function that always returns <code>INT_MAX</code>. The full listing tests both a correct <code>max</code> and that broken one: the properties pass the first and catch the second on the first try.</p>
 </div></details>
 
 <h2><span class="sec-no">8.3</span>Generators</h2>
-<p>A generator produces random values of some type. To produce a random value we need an <code>RNG</code> and must return the new one. We have a type for exactly that:</p>
-<pre><code class="language-scala">opaque type Gen[+A] = State[RNG, A]
+<p>A generator produces random values of some type. To produce one we need an <code>RNG</code> and must return the new one. We already have a type for exactly that: a State action over <code>RNG</code>.</p>
+<pre><code class="language-cpp">template &lt;typename A&gt;
+class Gen {
+    std::function&lt;std::pair&lt;A, RNG&gt;(RNG)&gt; run_;
+public:
+    using value_type = A;
+    explicit Gen(std::function&lt;std::pair&lt;A, RNG&gt;(RNG)&gt; f) : run_(std::move(f)) {}
+    std::pair&lt;A, RNG&gt; run(RNG r) const { return run_(r); }
 
-object Gen:
-  def unit[A](a: =&gt; A): Gen[A] = State.unit(a)
+    static Gen unit(A a);
+    template &lt;typename F&gt; auto flat_map(F f) const;   // exactly State::flat_map
+    template &lt;typename F&gt; auto map(F f) const;        // exactly State::map
+    Gen&lt;std::vector&lt;A&gt;&gt; list_of_n(int n) const;      // exactly sequence / traverse
+};
 
-  def choose(start: Int, stopExclusive: Int): Gen[Int] =
-    State(nonNegativeInt).map(n =&gt; start + n % (stopExclusive - start))
+Gen&lt;int&gt; choose(int start, int stop_exclusive) {
+    return Gen&lt;int&gt;(non_negative_int).map([=](int n) { return start + n % (stop_exclusive - start); });
+}
+Gen&lt;bool&gt; boolean() {
+    return Gen&lt;int&gt;(non_negative_int).map([](int n) { return n % 2 == 0; });
+}</code></pre>
+<p>The method bodies are copied from <code>State</code> in Chapter 6 (the full listing has them). Random generation <em>is</em> state over <code>RNG</code>, so everything carries over unchanged.</p>
+<p>With <code>flat_map</code>, a generator can depend on an earlier generated value. That's how you generate a vector of random length, or a pair where the second element depends on the first:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt;
+Gen&lt;std::vector&lt;A&gt;&gt; list_of_random_length(Gen&lt;A&gt; g, int max_len = 20) {
+    return choose(0, max_len + 1).flat_map([g](int n) { return g.list_of_n(n); });
+}
 
-  def boolean: Gen[Boolean] =
-    State(nonNegativeInt).map(_ % 2 == 0)
+auto ordered_pair = choose(0, 100).flat_map([](int a) {
+    return choose(a, 101).map([a](int b) { return std::pair{a, b}; });
+});</code></pre>
 
-  extension [A](self: Gen[A])
-    def map[B](f: A =&gt; B): Gen[B] = State.map(self)(f)
-    def flatMap[B](f: A =&gt; Gen[B]): Gen[B] = State.flatMap(self)(f)
-
-    def listOfN(n: Int): Gen[List[A]] =
-      State.traverse(List.fill(n)(self))(g =&gt; g)
-
-    def run(rng: RNG): (A, RNG) = State.run(self)(rng)</code></pre>
-<p>(<code>State.map(self)(f)</code> calls Chapter 6's <code>State</code> extension method directly, by name. Writing <code>self.map(f)</code> here would call <code>Gen</code>'s own <code>map</code> and loop forever, because inside this object <code>Gen</code> and <code>State</code> are the same type.) We didn't write any new machinery: random generation is State over <code>RNG</code>, and everything from Chapter 6 applies.</p>
-<p>With <code>flatMap</code>, a generator can depend on a previously generated value. That's how you generate a list of random length, or a pair where the second element depends on the first:</p>
-<pre><code class="language-scala">def listOfRandomLength[A](g: Gen[A]): Gen[List[A]] =
-  Gen.choose(0, 20).flatMap(n =&gt; g.listOfN(n))
-
-val orderedPair: Gen[(Int, Int)] =
-  for
-    a &lt;- Gen.choose(0, 100)
-    b &lt;- Gen.choose(a, 101)
-  yield (a, b)</code></pre>
-
-<div class="exercise" data-n="Exercise 8.2 · union and weighted">
-<p>Write <code>union[A](g1: Gen[A], g2: Gen[A]): Gen[A]</code>, which picks from either with equal probability, and <code>weighted[A](g1: (Gen[A], Double), g2: (Gen[A], Double)): Gen[A]</code>.</p>
+<div class="exercise" data-n="Exercise 8.2 · union_ and weighted">
+<p>Write <code>union_(g1, g2)</code>, picking from either with equal probability, and <code>weighted({g1, w1}, {g2, w2})</code>.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def union[A](g1: Gen[A], g2: Gen[A]): Gen[A] =
-  boolean.flatMap(b =&gt; if b then g1 else g2)
+<pre><code class="language-cpp">template &lt;typename A&gt; Gen&lt;A&gt; union_(Gen&lt;A&gt; g1, Gen&lt;A&gt; g2) {
+    return boolean().flat_map([g1, g2](bool b) { return b ? g1 : g2; });
+}
 
-val double01: Gen[Double] = State(double)    // from Chapter 6
-
-def weighted[A](g1: (Gen[A], Double), g2: (Gen[A], Double)): Gen[A] =
-  val threshold = g1(1).abs / (g1(1).abs + g2(1).abs)
-  double01.flatMap(d =&gt; if d &lt; threshold then g1(0) else g2(0))</code></pre>
-<p>Both are "generate a value, use it to choose a generator": <code>flatMap</code>.</p>
+template &lt;typename A&gt;
+Gen&lt;A&gt; weighted(std::pair&lt;Gen&lt;A&gt;, double&gt; g1, std::pair&lt;Gen&lt;A&gt;, double&gt; g2) {
+    double threshold = std::abs(g1.second) / (std::abs(g1.second) + std::abs(g2.second));
+    return double01().flat_map([=](double d) { return d &lt; threshold ? g1.first : g2.first; });
+}</code></pre>
+<p>Both are "generate a value, use it to choose a generator": <code>flat_map</code>.</p>
 </div></details>
 
 <h2><span class="sec-no">8.4</span>Properties as Values</h2>
-<p>What should a property be? Following Chapter 7: start from how we'd use it. We want to run it, see pass or fail, and on failure see the input and how many tests passed first. We also want to choose how many cases to run and to combine properties with <code>&amp;&amp;</code>.</p>
-<pre><code class="language-scala">type TestCases = Int
-type FailedCase = String
-type SuccessCount = Int
+<p>What should a property be? Following Chapter 7, start from use. We want to run it, see pass or fail, and on failure see the input and how many tests passed first. We want to choose how many cases to run and to combine properties with <code>&amp;&amp;</code>.</p>
+<pre><code class="language-cpp">struct Passed {};
+struct Falsified { std::string failure; int successes; };
+using Result = std::variant&lt;Passed, Falsified&gt;;
 
-enum Result:
-  case Passed
-  case Falsified(failure: FailedCase, successes: SuccessCount)
+class Prop {
+    std::function&lt;Result(int, RNG)&gt; run_;      // (number of cases, generator state) -&gt; result
+public:
+    explicit Prop(std::function&lt;Result(int, RNG)&gt; f) : run_(std::move(f)) {}
+    Result run(int n, RNG r) const { return run_(n, r); }
 
-  def isFalsified: Boolean = this match
-    case Passed          =&gt; false
-    case Falsified(_, _) =&gt; true
-
-opaque type Prop = (TestCases, RNG) =&gt; Result</code></pre>
-<p>A property is a function: given a number of cases and a generator state, it produces a result. Running and describing are separate again.</p>
-<pre><code class="language-scala">object Prop:
-  def forAll[A](as: Gen[A])(f: A =&gt; Boolean): Prop =
-    (n, rng) =&gt;
-      randomLazyList(as)(rng)
-        .zip(LazyList.from(0))
-        .take(n)
-        .map { (a, i) =&gt;
-          try
-            if f(a) then Result.Passed
-            else Result.Falsified(a.toString, i)
-          catch case e: Exception =&gt;
-            Result.Falsified(s"$a threw: ${e.getMessage}", i)
+    Prop operator&amp;&amp;(const Prop&amp; that) const {
+        auto self = *this;
+        return Prop([self, that](int n, RNG r) {
+            auto res = self.run(n, r);
+            return std::holds_alternative&lt;Falsified&gt;(res) ? res : that.run(n, r);
+        });
+    }
+};</code></pre>
+<p>A property is a function from (test count, RNG) to a result. Describing it and running it are separate again. Now the central function:</p>
+<pre><code class="language-cpp">template &lt;typename A, typename F&gt;
+Prop for_all(Gen&lt;A&gt; gen, F f) {
+    return Prop([gen, f](int n, RNG rng) -&gt; Result {
+        for (int i = 0; i &lt; n; ++i) {
+            auto [a, next] = gen.run(rng);
+            rng = next;
+            try {
+                if (!f(a)) return Falsified{show(a), i};
+            } catch (const std::exception&amp; e) {
+                return Falsified{show(a) + " threw: " + e.what(), i};
+            }
         }
-        .find(_.isFalsified)
-        .getOrElse(Result.Passed)
-
-  // an infinite lazy list of generated values (Chapter 5's unfold)
-  def randomLazyList[A](g: Gen[A])(rng: RNG): LazyList[A] =
-    LazyList.unfold(rng)(r =&gt; Some(g.run(r)))
-
-  extension (self: Prop)
-    def &amp;&amp;(that: Prop): Prop =
-      (n, rng) =&gt; self(n, rng) match
-        case Result.Passed =&gt; that(n, rng)
-        case failed        =&gt; failed
-
-    def check(n: TestCases = 100, rng: RNG = SimpleRNG(System.currentTimeMillis)): Result =
-      self(n, rng)</code></pre>
-<p>Notice how much of Part I this reuses. Generation is <code>State</code>. The stream of test cases is a lazy list built with <code>unfold</code>. <code>find</code> stops at the first failure without generating the rest. And a thrown exception is caught at the boundary and turned into a value.</p>
+        return Passed{};
+    });
+}</code></pre>
+<p>Notice how much of Part I this reuses: generation is State, results are a sum type, and a thrown exception is caught at the boundary and turned into a value. Running a deliberately false property, "every vector has fewer than 15 elements", prints the counterexample:</p>
+<pre><code class="language-text">! Falsified after 0 passed tests: [-5, -10, 8, -4, -6, 3, 6, 7, 5, -9, 0, 9, 2, 0, 7, -8, 6, 1]</code></pre>
+<div class="bridge">
+<p>The book walks through generating test cases as a lazy stream (Chapter 5's <code>unfold</code>) and stopping at the first failure. Our loop does the same thing directly. The book's <code>Gen</code> is literally <code>State[RNG, A]</code>, as ours is in all but name.</p>
+</div>
 
 <h2><span class="sec-no">8.5</span>Sized Generation and Shrinking</h2>
-<p>Random lists of length 0 to 20 rarely hit edge cases like the empty list, and when a big list fails, the counterexample is hard to read. Two approaches:</p>
+<p>That counterexample is hard to read. Two remedies:</p>
 <ul>
-  <li><strong>Shrinking</strong>: after a failure, try smaller versions of the failing input (drop elements, halve numbers) and keep the smallest that still fails. ScalaCheck and Hypothesis do this.</li>
-  <li><strong>Sized generation</strong>: generate small inputs first and grow. If a property fails at size 3, you'll see the size-3 case before any size-50 case.</li>
+  <li><strong>Shrinking</strong>: after a failure, try smaller versions of the failing input (drop elements, move numbers toward zero) and keep the smallest that still fails. The 18-element vector above would shrink to a 15-element vector of zeros.</li>
+  <li><strong>Sized generation</strong>: generate small inputs first and grow. If a property fails at size 3, you see the size-3 case before any size-50 case.</li>
 </ul>
-<p>Sized generation is easy to add: a generator that depends on a size.</p>
-<pre><code class="language-scala">opaque type SGen[+A] = Int =&gt; Gen[A]
+<p>Sized generation is a generator that depends on a size: <code>using SGen&lt;A&gt; = std::function&lt;Gen&lt;A&gt;(int)&gt;</code>. A <code>for_all</code> taking an <code>SGen</code> runs at sizes 0, 1, 2, ... up to a maximum, splitting the test budget across sizes.</p>
 
-extension [A](g: Gen[A])
-  def list: SGen[List[A]] = n =&gt; g.listOfN(n)
-  def nonEmptyList: SGen[List[A]] = n =&gt; g.listOfN(n.max(1))</code></pre>
-<p>A <code>forAll</code> that takes an <code>SGen</code> runs the property at sizes 0, 1, 2, ... up to a maximum, splitting the test budget across sizes.</p>
-
-<div class="exercise" data-n="Exercise 8.3 · test sorted">
-<p>Write a property for <code>List.sorted</code> on <code>List[Int]</code> using <code>forAll</code>.</p>
+<div class="exercise" data-n="Exercise 8.3 · test std::sort">
+<p>Write a property for <code>std::sort</code> on <code>std::vector&lt;int&gt;</code>.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">val smallInt = Gen.choose(-10, 10)
-
-val sortedProp = Prop.forAll(listOfRandomLength(smallInt)): ns =&gt;
-  val s = ns.sorted
-  val ordered = s.isEmpty || s.zip(s.tail).forall((a, b) =&gt; a &lt;= b)
-  val samePerm = s.groupBy(identity).view.mapValues(_.size).toMap ==
-                 ns.groupBy(identity).view.mapValues(_.size).toMap
-  ordered &amp;&amp; samePerm</code></pre>
-<p>"Ordered" alone would accept a function that returns <code>Nil</code>. "Same elements with the same counts" closes that gap. Using a small range of ints makes duplicates likely, which tests the duplicate handling.</p>
+<pre><code class="language-cpp">auto sorted_prop = for_all(list_of_random_length(choose(-10, 10)), [](std::vector&lt;int&gt; ns) {
+    auto s = ns;
+    std::sort(s.begin(), s.end());
+    bool ordered = std::is_sorted(s.begin(), s.end());
+    std::map&lt;int, int&gt; c1, c2;                // same elements, same counts
+    for (int x : ns) ++c1[x];
+    for (int x : s)  ++c2[x];
+    return ordered &amp;&amp; c1 == c2;
+});</code></pre>
+<p>"Ordered" alone would accept a function that returns an empty vector. "Same elements with the same counts" closes that gap. A small range of values makes duplicates likely, which exercises the duplicate handling.</p>
 </div></details>
 
 <h2><span class="sec-no">8.6</span>Testing Laws</h2>
-<p>We can now test the parallelism laws from Chapter 7. Equality of two <code>Par</code>s means equality of their results when run:</p>
-<pre><code class="language-scala">def equal[A](p1: Par[A], p2: Par[A]): Par[Boolean] =
-  p1.map2(p2)(_ == _)
+<p>Laws turn directly into properties. Chapter 4's functor law for optionals, "transforming with the identity changes nothing":</p>
+<pre><code class="language-cpp">auto opt_gen = union_(choose(0, 100).map([](int x) { return std::optional&lt;int&gt;(x); }),
+                      Gen&lt;std::optional&lt;int&gt;&gt;::unit(std::nullopt));
 
-val es = java.util.concurrent.Executors.newCachedThreadPool
-
-val mapLaw = Prop.forAll(Gen.choose(0, 100)): n =&gt;
-  equal(Par.unit(n).map(identity), Par.unit(n)).run(es).get
-
-val forkLaw = Prop.forAll(Gen.choose(0, 100)): n =&gt;
-  equal(Par.fork(Par.unit(n)), Par.unit(n)).run(es).get</code></pre>
-<p>Run the fork law with a fixed pool of size 1 and the blocking implementation, and the test hangs, which reproduces the deadlock from Chapter 7.</p>
-
+auto map_identity = for_all(opt_gen, [](std::optional&lt;int&gt; o) {
+    return o.transform([](int x) { return x; }) == o;
+});</code></pre>
+<p>Chapter 7's laws work the same way: <code>run(pool, map(unit(n), id)) == n</code>, and <code>run(pool, fork(unit(n))) == n</code>. Run the fork law against the blocking implementation on a one-thread pool and the test hangs, reproducing the deadlock.</p>
 <div class="warfield">
-<p><strong>A passing property test isn't proof.</strong> It's evidence from N random cases. Generators that never produce the interesting inputs (empty lists, <code>Int.MinValue</code>, duplicates, unicode) will pass forever. Think about the distribution of your generators as carefully as about the property.</p>
+<p><strong>A passing property test isn't proof.</strong> It's evidence from N random cases. A generator that never produces the interesting inputs (empty vectors, <code>INT_MIN</code>, duplicates, NaN, non-ASCII strings) will pass forever. Think about your generators' distribution as hard as about the property.</p>
 </div>
 
-<h2><span class="sec-no">8.7</span>What We Learned About Design</h2>
-<p>We designed the library the same way as in Chapter 7: from usage, primitives first, representation last. And we found the same combinators on <code>Gen</code> that we had on <code>Option</code>, <code>State</code> and <code>Par</code>: <code>unit</code>, <code>map</code>, <code>flatMap</code>, <code>listOfN</code> (which is <code>sequence</code>). Three libraries in, with completely different purposes, and the same interface keeps appearing.</p>
-<div class="keypoint">In real projects, use ScalaCheck (or Hypothesis in Python, RapidCheck in C++). The point of this chapter isn't the library; it's that a test library falls out naturally once generators are State and properties are values.</div>
+<h2><span class="sec-no">8.7</span>In Practice</h2>
+<p>For real C++ projects, use <strong>RapidCheck</strong> (QuickCheck for C++, with shrinking and gtest/Catch2 integration) or the property support in libraries like <code>fuzztest</code>. The point of this chapter isn't the library; it's that a test library falls out naturally once generators are State and properties are values. And the same interface keeps showing up: <code>Gen</code> has <code>unit</code>, <code>map</code>, <code>flat_map</code> and <code>list_of_n</code> (which is <code>sequence</code>), just like <code>optional</code>, <code>State</code> and <code>Par</code>.</p>
+<div class="keypoint">Laws you write while designing (Chapter 7) become tests for free. Pure functions plus property tests give you far more coverage per line of test code than example tests do.</div>
 
 <dl class="jargon">
   <dt>Property</dt><dd>A statement that must hold for all inputs, checked on many generated inputs.</dd>
-  <dt>Generator</dt><dd>A description of how to produce random values of a type; here <code>State[RNG, A]</code>.</dd>
+  <dt>Generator</dt><dd>A description of how to produce random values; here a State action over <code>RNG</code>.</dd>
   <dt>Shrinking</dt><dd>Reducing a failing input to a minimal failing case.</dd>
   <dt>Sized generation</dt><dd>Generating inputs of increasing size, so small counterexamples appear first.</dd>
 </dl>
@@ -203,10 +190,12 @@ val forkLaw = Prop.forAll(Gen.choose(0, 100)): n =&gt;
 <div class="recap"><ul>
   <li>Property tests check laws against many random inputs.</li>
   <li>Good properties: round trips, invariants, comparison with a model, algebraic laws.</li>
-  <li>Generators are State over RNG; <code>flatMap</code> makes dependent generation easy.</li>
-  <li>A property is a function from (test count, RNG) to a result.</li>
-  <li>The Chapter 7 laws become executable tests.</li>
+  <li>Generators are State over RNG; <code>flat_map</code> makes dependent generation easy.</li>
+  <li>A property is a function from (test count, RNG) to a result, combinable with <code>&amp;&amp;</code>.</li>
+  <li>In real C++, use RapidCheck; the design ideas are the same.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch08.cpp"><span class="l-k">Full runnable listing</span>code/ch08.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

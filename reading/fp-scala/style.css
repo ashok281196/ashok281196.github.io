@@ -1,5 +1,5 @@
 /* ============================================================
-   Functional Programming in Scala: A Companion - book stylesheet
+   Functional Programming in Scala, in C++ - book stylesheet
    Aesthetic: warm-paper engineering textbook, ink + rust + teal
    (shared visual system with reading/slam/style.css)
    ============================================================ */
@@ -481,7 +481,7 @@ pre .tok-key { color: #9ec6c2; }
   border-radius: 0 8px 8px 0;
 }
 .bridge::before {
-  content: "⇄ Coming from C++";
+  content: "⇄ In the book (Scala)";
   display: block;
   font-family: var(--mono);
   font-size: 11px;
@@ -559,3 +559,18 @@ details.sol pre { margin: 12px 0; }
   details.sol { display: none; }
   pre { box-shadow: none; white-space: pre-wrap; }
 }
+
+.listing {
+  display: block;
+  margin: 40px 0 0;
+  padding: 18px 22px;
+  border: 1.5px solid var(--ink);
+  border-radius: 8px;
+  font-family: var(--mono);
+  font-size: 14px;
+  text-decoration: none;
+  color: var(--ink);
+  background: rgba(255,255,255,.45);
+}
+.listing .l-k { display:block; font-size: 11px; letter-spacing: .2em; text-transform: uppercase; color: var(--rust); margin-bottom: 4px; }
+.listing:hover { background: var(--ink); color: var(--paper); }

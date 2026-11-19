@@ -12,131 +12,115 @@
 <div class="page">
 
 <div class="topbar" id="booktop"></div>
-
 <header class="chapter-head">
   <div class="chapter-num">00</div>
   <div class="chapter-kicker">Start here</div>
   <h1>Orientation &amp; Setup</h1>
-  <p class="chapter-sub">What the red book is trying to teach, how to study a book made of exercises, and just enough Scala 3 to read every code block in this companion.</p>
+  <p class="chapter-sub">What the red book teaches, why we're learning it in C++, how to study a book made of exercises, and the C++20/23 features we'll use as our functional toolkit.</p>
 </header>
 
 <h2><span class="sec-no">0.1</span>Why This Book Has a Reputation</h2>
-<p>Most programming books show you finished tools and explain how to use them. The red book does the reverse. It gives you a constraint, <em>no side effects</em>, and then asks you to build the tools yourself, one exercise at a time. You write a linked list. Then an optional value. Then a random number generator that never mutates anything. Around chapter 6 you notice that the last three things you built have methods with exactly the same shape. Around chapter 11 the book names that shape: a monad.</p>
-<p>That's why people call it hard and also why they call it the best FP book. The difficulty isn't the syntax. You're asked to <strong>discover</strong> the abstractions rather than be told them, and discovering takes effort.</p>
+<p>Most programming books show you finished tools and explain how to use them. <em>Functional Programming in Scala</em> (the "red book") does the reverse. It gives you a constraint, <em>no side effects</em>, and then asks you to build the tools yourself, one exercise at a time. You write a linked list. Then an optional value. Then a random number generator that never mutates anything. Around chapter 6 you notice that the last three things you built have functions with exactly the same shape. Around chapter 11 the book names that shape: a monad.</p>
+<p>The difficulty isn't the syntax. You're asked to <strong>discover</strong> the abstractions rather than be told them, and discovering takes effort. That's also why it sticks.</p>
 <div class="analogy">Learning FP from a list of definitions ("a monad is a type with flatMap and unit satisfying three laws") is like learning chess from the rulebook. The red book makes you play hundreds of small games first, so when you finally read the rule, you've already used it.</div>
 
-<h2><span class="sec-no">0.2</span>How to Study It</h2>
+<h2><span class="sec-no">0.2</span>Why C++</h2>
+<p>The ideas in the book aren't about Scala. Pure functions, immutable data, errors as values, laziness, monoids and monads are design ideas, and modern C++ has picked up most of them: <code>std::optional</code> and <code>std::expected</code> with monadic operations, lazy ranges, lambdas, concepts, <code>std::variant</code>. This companion teaches every concept with C++ code, so the ideas land in the language you already think in.</p>
+<p>C++ also makes some things <em>harder</em>, and those spots are instructive. We'll meet each one where it comes up:</p>
+<table>
+  <tr><th>Missing in C++</th><th>What we do instead</th><th>Chapter</th></tr>
+  <tr><td>guaranteed tail calls</td><td>write the loop, or trampoline</td><td>2, 13</td></tr>
+  <tr><td>persistent collections in std</td><td>build one with <code>shared_ptr&lt;const Node&gt;</code></td><td>3</td></tr>
+  <tr><td>pattern matching</td><td><code>std::variant</code> + <code>std::visit</code> with an overload set</td><td>3</td></tr>
+  <tr><td><code>for</code>/<code>do</code>-notation</td><td>chains of <code>and_then</code></td><td>4, 6</td></tr>
+  <tr><td>abstracting over <code>F&lt;_&gt;</code></td><td>template template parameters + trait specialisations</td><td>10&ndash;12</td></tr>
+</table>
+<p>When you read the original book alongside this one, the <em>In the book (Scala)</em> boxes show how the Scala you'll see there maps to the C++ here.</p>
+
+<h2><span class="sec-no">0.3</span>How to Study It</h2>
 <ol>
-  <li><strong>Read the signature, then stop.</strong> Most exercises give you a type signature like <code>def map[A, B](as: List[A])(f: A =&gt; B): List[B]</code>. Before writing anything, ask: what values do I have, what do I need to produce, and what can I do with what I have? Often only one implementation compiles.</li>
-  <li><strong>Write it on paper or in a REPL, not in your head.</strong> The compiler is your teacher here. Type errors are hints.</li>
-  <li><strong>Get stuck for ten minutes, not two hours.</strong> If you can't see it after ten honest minutes, open the solution, understand it, close it, and write it again from memory the next day.</li>
-  <li><strong>Re-derive, don't memorise.</strong> The goal is to be able to <em>reconstruct</em> <code>foldRight</code> or <code>flatMap</code> for a new type, not to remember the one for <code>List</code>.</li>
+  <li><strong>Read the signature, then stop.</strong> Most exercises give you a type, like "a function from <code>List&lt;A&gt;</code> and <code>A → B</code> to <code>List&lt;B&gt;</code>". Before writing anything, ask: what values do I have, what do I need to produce, and what can I do with what I have? Often only one implementation compiles.</li>
+  <li><strong>Use the compiler as your teacher.</strong> Type errors are hints. Concepts make them readable.</li>
+  <li><strong>Get stuck for ten minutes, not two hours.</strong> Then open the solution, understand it, close it, and write it again from memory the next day.</li>
+  <li><strong>Re-derive, don't memorise.</strong> The goal is to be able to write <code>fold</code> or <code>flat_map</code> for a <em>new</em> type, not to remember the one for lists.</li>
 </ol>
 <div class="keypoint">When you're stuck on an FP exercise, follow the types. Write down every value you have in scope and its type. The answer is almost always "combine these in the only way that makes the types line up."</div>
 
-<h2><span class="sec-no">0.3</span>A Five-Minute Toolchain</h2>
-<p>You don't need sbt, an IDE project or a build file to follow this book. <strong>scala-cli</strong> runs single files and has a REPL.</p>
+<h2><span class="sec-no">0.4</span>Toolchain</h2>
 <div class="setup">
-<p>On macOS or Linux:</p>
-<pre><code class="language-bash"># install (macOS)
-brew install Virtuslab/scala-cli/scala-cli
-
-# or Linux
-curl -sSLf https://scala-cli.virtuslab.org/get | sh
-
-# a REPL
-scala-cli repl
-
-# run a file
-scala-cli run Hello.scala</code></pre>
-<p>On the iPad itself you can't install a JVM, but <a href="https://scastie.scala-lang.org">Scastie</a> runs Scala 3 in the browser. Set the target to Scala 3 in Build Settings and paste any code block from this book.</p>
+<p>Any compiler with C++23 support works. Every chapter ends with a link to a complete, compiled and tested <code>.cpp</code> file.</p>
+<pre><code class="language-bash"># GCC 13+ or Clang 17+
+g++ -std=c++23 -O2 -Wall ch03.cpp -o ch03 &amp;&amp; ./ch03</code></pre>
+<p>On the iPad, use <a href="https://godbolt.org">Compiler Explorer</a>: pick x86-64 GCC 13 or newer, add <code>-std=c++23</code> to the compiler options, tick <em>Execute the code</em> in the output pane, and paste a chapter file.</p>
 </div>
-<p>Your first file:</p>
-<pre><code class="language-scala">// Hello.scala
-@main def hello(): Unit =
-  val xs = List(1, 2, 3)
-  println(xs.map(_ * 10))   // List(10, 20, 30)</code></pre>
 
-<h2><span class="sec-no">0.4</span>Scala 3 in One Sitting</h2>
-<p>This is the subset of Scala that the rest of the companion uses. Skim it now and come back when a later code block looks unfamiliar.</p>
-
-<h3>Values and methods</h3>
-<pre><code class="language-scala">val x: Int = 42            // immutable binding (like `const auto` in C++)
-var y = 0                  // mutable; we'll almost never use this
-def square(n: Int): Int = n * n
-def add(a: Int, b: Int) = a + b      // return type inferred
-
-// Scala 3 allows indentation instead of braces
-def describe(n: Int): String =
-  if n &lt; 0 then "negative"
-  else if n == 0 then "zero"
-  else "positive"</code></pre>
-<p>Everything is an expression: <code>if</code> returns a value, a block returns its last line, and there's no need for <code>return</code>.</p>
+<h2><span class="sec-no">0.5</span>The Functional C++ Toolkit</h2>
+<p>This is the subset of C++ the rest of the book leans on. Skim it now; come back when a later block looks unfamiliar.</p>
 
 <h3>Functions as values</h3>
-<pre><code class="language-scala">val inc: Int =&gt; Int = n =&gt; n + 1     // a function value
-val twice = (f: Int =&gt; Int, x: Int) =&gt; f(f(x))
-twice(inc, 5)                         // 7
-List(1, 2, 3).map(_ + 1)              // `_ + 1` is shorthand for x =&gt; x + 1</code></pre>
+<pre><code class="language-cpp">auto inc = [](int n) { return n + 1; };             // a lambda: an unnamed function object
+auto twice = [](auto f, int x) { return f(f(x)); }; // generic lambda: takes any callable
+twice(inc, 5);                                      // 7
 
-<h3>Generics use square brackets</h3>
-<pre><code class="language-scala">def first[A](xs: List[A]): A = xs.head     // like template&lt;typename A&gt;</code></pre>
+std::function&lt;int(int)&gt; g = inc;   // type-erased: any callable with this signature
+                                   // costs an allocation and an indirect call; use when you must store it</code></pre>
 
-<h3>Enums and pattern matching</h3>
-<pre><code class="language-scala">enum Shape:
-  case Circle(r: Double)
-  case Rect(w: Double, h: Double)
+<h3>Generic functions, with concepts</h3>
+<pre><code class="language-cpp">template &lt;typename A, std::invocable&lt;A&gt; F&gt;
+auto apply_twice(F f, A a) { return f(f(a)); }</code></pre>
+<p>Concepts constrain what a template accepts, so errors point at the call site instead of 300 lines into the template.</p>
 
-import Shape.*
-def area(s: Shape): Double = s match
-  case Circle(r)  =&gt; math.Pi * r * r
-  case Rect(w, h) =&gt; w * h</code></pre>
+<h3>Sum types and "pattern matching"</h3>
+<pre><code class="language-cpp">struct Circle { double r; };
+struct Rect   { double w, h; };
+using Shape = std::variant&lt;Circle, Rect&gt;;     // one of these, never both
 
-<h3>Traits, case classes, objects</h3>
-<pre><code class="language-scala">trait Greeter:                 // like an abstract class / interface
-  def greet(name: String): String
+// the overload-set trick: build a visitor from several lambdas
+template &lt;typename... Fs&gt; struct overloaded : Fs... { using Fs::operator()...; };
 
-case class Point(x: Int, y: Int)    // immutable record with equals, copy, pattern matching
-val p = Point(1, 2)
-val q = p.copy(y = 5)               // Point(1, 5); p is unchanged
+double area(const Shape&amp; s) {
+    return std::visit(overloaded{
+        [](const Circle&amp; c) { return 3.14159 * c.r * c.r; },
+        [](const Rect&amp; r)   { return r.w * r.h; },
+    }, s);
+}</code></pre>
+<p>If you add a case to the variant and forget a lambda, <code>std::visit</code> fails to compile. That's the exhaustiveness check functional languages give you.</p>
 
-object MathUtil:                    // a singleton; home for "static" functions
-  def clamp(n: Int, lo: Int, hi: Int) = n.max(lo).min(hi)</code></pre>
+<h3>Values, not objects</h3>
+<pre><code class="language-cpp">struct Point { int x, y; bool operator==(const Point&amp;) const = default; };
 
-<h3>Extension methods</h3>
-<pre><code class="language-scala">extension (s: String)
-  def shout: String = s.toUpperCase + "!"
-
-"hi".shout   // "HI!"</code></pre>
-<p>We'll use extension methods a lot. They let us write <code>opt.map(f)</code> on a type we define ourselves, without putting every method inside the type.</p>
+const Point p{1, 2};
+const Point q{.x = p.x, .y = 5};   // "copy with a change": p is untouched
+auto [x, y] = q;                   // structured binding takes it apart</code></pre>
+<p>Structs with <code>= default</code> comparison, passed and returned by value, are FP's immutable records. Mark things <code>const</code> by default; reach for mutation only inside a function where no one can see it.</p>
 
 <div class="bridge">
-<p>Some quick mappings. <code>val</code> is <code>const</code>. A trait is an abstract base class that can also carry implementations. <code>[A]</code> is <code>template&lt;typename A&gt;</code>, but the generic code is checked once at the definition, not at each use. An <code>enum</code> with cases is a <code>std::variant</code> where pattern matching is a type-checked <code>std::visit</code>, and the compiler warns if you forget a case. <code>A =&gt; B</code> is <code>std::function&lt;B(A)&gt;</code>.</p>
+<p>For the original book: <code>val</code> ≈ <code>const auto</code>; <code>def f[A](...)</code> ≈ a function template; <code>A =&gt; B</code> ≈ a callable (lambda or <code>std::function&lt;B(A)&gt;</code>); <code>enum</code> with cases ≈ <code>std::variant</code>; <code>match</code> ≈ <code>std::visit</code>; <code>trait</code> ≈ an abstract base or a concept; <code>Option</code> ≈ <code>std::optional</code>; <code>Either</code> ≈ <code>std::expected</code>.</p>
 </div>
-
-<h2><span class="sec-no">0.5</span>A Word on Our Naming</h2>
-<p>Scala's standard library already has <code>List</code>, <code>Option</code>, <code>Either</code> and <code>LazyList</code>. In chapters 3&ndash;5 we build our own versions to understand them. To avoid clashes, put each chapter's code in its own file, or wrap it in an <code>object</code>, and hide the standard names when needed:</p>
-<pre><code class="language-scala">import scala.{Option as _, Some as _, None as _, Either as _, Left as _, Right as _}</code></pre>
 
 <div class="exercise" data-n="Exercise 0.1">
-<p>Install scala-cli (or open Scastie), and write a function <code>isSorted[A](as: List[A], gt: (A, A) =&gt; Boolean): Boolean</code> that returns true if no element is "greater than" the one after it. Use a <code>match</code>. Don't worry about elegance yet.</p>
+<p>Write <code>template &lt;typename A, typename Gt&gt; bool is_sorted(std::span&lt;const A&gt; as, Gt gt)</code> that returns true if no element is "greater than" the one after it. Use recursion on a subspan instead of a loop, just to practise.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def isSorted[A](as: List[A], gt: (A, A) =&gt; Boolean): Boolean = as match
-  case a :: b :: rest =&gt; !gt(a, b) &amp;&amp; isSorted(b :: rest, gt)
-  case _              =&gt; true      // empty or single element
+<pre><code class="language-cpp">template &lt;typename A, typename Gt&gt;
+bool is_sorted(std::span&lt;const A&gt; as, Gt gt) {
+    if (as.size() &lt; 2) return true;
+    return !gt(as[0], as[1]) &amp;&amp; is_sorted(as.subspan(1), gt);
+}
 
-isSorted(List(1, 2, 3), _ &gt; _)    // true
-isSorted(List(1, 3, 2), _ &gt; _)    // false</code></pre>
-<p><code>a :: b :: rest</code> matches a list with at least two elements. Note the function is generic: it doesn't know what <code>A</code> is, so it <em>must</em> use <code>gt</code> to compare. That's your first taste of types constraining an implementation.</p>
+std::vector v{1, 2, 3};
+is_sorted&lt;int&gt;(v, std::greater{});   // true</code></pre>
+<p>The function is generic: it doesn't know what <code>A</code> is, so it <em>must</em> use <code>gt</code> to compare. That's your first taste of types constraining an implementation.</p>
 </div></details>
 
 <div class="recap"><ul>
   <li>The book teaches by derivation. Do the exercises, because they <em>are</em> the content.</li>
-  <li>When stuck, list what's in scope and its type, then combine.</li>
-  <li>scala-cli or Scastie is all the tooling you need.</li>
-  <li>Scala 3 essentials: <code>val</code>, <code>def</code>, <code>enum</code>, <code>match</code>, <code>case class</code>, <code>trait</code>, extension methods.</li>
+  <li>We teach every concept in C++23, and note where C++ needs a workaround.</li>
+  <li>Toolkit: lambdas, templates with concepts, <code>std::variant</code> + <code>overloaded</code>, value structs.</li>
+  <li>On the iPad, run the chapter files in Compiler Explorer.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch00.cpp"><span class="l-k">Full runnable listing</span>code/ch00.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

@@ -16,186 +16,240 @@
   <div class="chapter-num">07</div>
   <div class="chapter-kicker">Part II · Functional Design</div>
   <h1>Designing a Library: Parallelism</h1>
-  <p class="chapter-sub">Part II is about the design process more than any particular library. We design a small parallel-computation API from scratch: start from how we'd like to use it, discover the primitives, choose a representation late, and use algebraic laws to find a real deadlock bug.</p>
+  <p class="chapter-sub">Part II is about the design process more than any particular library. We design a small parallel-computation API in C++ from scratch: start from how we'd like to use it, find the primitives, choose a representation late, and use an algebraic law to find a real deadlock, which we then demonstrate and fix.</p>
 </header>
 
 <h2><span class="sec-no">7.1</span>How Functional Design Works</h2>
-<p>In object-oriented design you usually start from the representation: what classes, what fields, what methods mutate them. Functional design inverts this:</p>
+<p>Object-oriented design usually starts from the representation: which classes, which fields, which methods mutate them. Functional design inverts that:</p>
 <ol>
   <li>Write example code using the API you <em>wish</em> you had.</li>
-  <li>Let the examples tell you what types and functions you need. Leave their implementations as <code>???</code>.</li>
+  <li>Let the examples tell you what types and functions you need. Leave their bodies empty.</li>
   <li>Find the smallest set of <strong>primitive</strong> functions; express everything else as <strong>derived</strong> combinators.</li>
   <li>Write down <strong>laws</strong>: equations the functions must satisfy.</li>
   <li>Only then pick a representation that satisfies the laws.</li>
 </ol>
-<p>A set of types, functions and laws, with the representation left abstract, is called an <strong>algebra</strong>. That's what "algebraic design" means.</p>
+<p>A set of types and functions plus the laws that relate them, with the representation left open, is called an <strong>algebra</strong>. That's what "algebraic design" means.</p>
 
 <h2><span class="sec-no">7.2</span>Starting From an Example</h2>
-<p>Summing a sequence by divide and conquer:</p>
-<pre><code class="language-scala">def sum(ints: IndexedSeq[Int]): Int =
-  if ints.size &lt;= 1 then ints.headOption.getOrElse(0)
-  else
-    val (l, r) = ints.splitAt(ints.size / 2)
-    sum(l) + sum(r)</code></pre>
-<p>The two halves are independent, so they could run in parallel. Invent a type for "a computation that may run in parallel and yields an <code>A</code>": <code>Par[A]</code>. We need a way to create one and a way to get the result:</p>
-<pre><code class="language-scala">def unit[A](a: =&gt; A): Par[A] = ???     // lift a computation, maybe evaluate it on another thread
-def get[A](a: Par[A]): A = ???         // wait for the result</code></pre>
-<pre><code class="language-scala">def sum(ints: IndexedSeq[Int]): Int =
-  if ints.size &lt;= 1 then ints.headOption.getOrElse(0)
-  else
-    val (l, r) = ints.splitAt(ints.size / 2)
-    val sumL: Par[Int] = unit(sum(l))
-    val sumR: Par[Int] = unit(sum(r))
-    get(sumL) + get(sumR)</code></pre>
-<p>Now substitute <code>sumL</code> and <code>sumR</code> into the last line: <code>get(unit(sum(l))) + get(unit(sum(r)))</code>. Scala evaluates left to right, so the left <code>get</code> <strong>blocks until the left half finishes</strong> before the right half even starts. Everything runs sequentially. The substitution model just exposed a design flaw: <code>get</code> is a side effect (waiting) that we called too early.</p>
+<p>Summing by divide and conquer:</p>
+<pre><code class="language-cpp">int sum(std::span&lt;const int&gt; ints) {
+    if (ints.size() &lt;= 1) return ints.empty() ? 0 : ints[0];
+    auto l = ints.first(ints.size() / 2), r = ints.subspan(ints.size() / 2);
+    return sum(l) + sum(r);
+}</code></pre>
+<p>The halves are independent, so they could run in parallel. Invent a type for "a computation that may run in parallel and yields an <code>A</code>": <code>Par&lt;A&gt;</code>. We need to create one and to get its result:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; Par&lt;A&gt; unit(A a);     // wrap a value
+template &lt;typename A&gt; A get(Par&lt;A&gt; p);      // wait for the result
 
-<h2><span class="sec-no">7.3</span>Combine Without Waiting: map2</h2>
+int sum(std::span&lt;const int&gt; ints) {
+    ...
+    Par&lt;int&gt; sum_l = unit(sum(l)), sum_r = unit(sum(r));
+    return get(sum_l) + get(sum_r);
+}</code></pre>
+<p>Substitute <code>sum_l</code> and <code>sum_r</code> into the last line: <code>get(unit(sum(l))) + get(unit(sum(r)))</code>. Whatever order the compiler evaluates the operands in, one <code>get</code> <strong>waits for its half to finish</strong> before the other half has even started. Everything runs sequentially. The substitution model just exposed a design flaw: <code>get</code> (waiting) is a side effect, and we called it too early.</p>
+<div class="bridge">
+<p>This is the classic <code>std::async</code> mistake: <code>std::async(f).get() + std::async(g).get()</code> serialises, because each future is waited on before the next one is created. And a temporary <code>std::future</code> from <code>std::async</code> blocks in its destructor, which can serialise code that looks parallel.</p>
+</div>
+
+<h2><span class="sec-no">7.3</span>Combine Without Waiting: map2 and fork</h2>
 <p>Instead of extracting values to add them, combine the <em>parallel computations</em>:</p>
-<pre><code class="language-scala">def map2[A, B, C](pa: Par[A], pb: Par[B])(f: (A, B) =&gt; C): Par[C] = ???
+<pre><code class="language-cpp">template &lt;typename A, typename B, typename F&gt;
+Par&lt;C&gt; map2(Par&lt;A&gt; pa, Par&lt;B&gt; pb, F f);     // C = result of f(A, B)
 
-def sum(ints: IndexedSeq[Int]): Par[Int] =
-  if ints.size &lt;= 1 then unit(ints.headOption.getOrElse(0))
-  else
-    val (l, r) = ints.splitAt(ints.size / 2)
-    map2(sum(l), sum(r))(_ + _)</code></pre>
-<p>The result is a <code>Par[Int]</code>, a description. No waiting happens inside <code>sum</code>.</p>
-<p>Should <code>map2</code> evaluate its arguments eagerly or lazily? And should <code>unit</code> start a thread? If <code>unit</code> always forks, then <code>unit(1)</code> wastes a thread on nothing. Better to make forking <strong>explicit</strong>:</p>
-<pre><code class="language-scala">def unit[A](a: A): Par[A] = ???                 // already-computed value; no thread
-def fork[A](a: =&gt; Par[A]): Par[A] = ???         // mark: run this on a separate logical thread
-def lazyUnit[A](a: =&gt; A): Par[A] = fork(unit(a)) // derived!
+Par&lt;int&gt; sum(std::span&lt;const int&gt; ints) {
+    if (ints.size() &lt;= 1) return unit(ints.empty() ? 0 : ints[0]);
+    auto l = ..., r = ...;
+    return map2(sum(l), sum(r), std::plus{});
+}</code></pre>
+<p>The result is a <code>Par&lt;int&gt;</code>, a description. No waiting happens inside <code>sum</code>.</p>
+<p>Should <code>unit</code> start a thread? If so, <code>unit(1)</code> wastes a thread on nothing. Better to make forking <strong>explicit</strong>:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; Par&lt;A&gt; unit(A a);                         // already computed; no thread
+template &lt;typename A&gt; Par&lt;A&gt; fork(std::function&lt;Par&lt;A&gt;()&gt; pa); // run on a separate logical thread
+template &lt;typename A&gt; Par&lt;A&gt; lazy_unit(std::function&lt;A()&gt; a) { // derived!
+    return fork&lt;A&gt;([a] { return unit(a()); });
+}
 
-def sum(ints: IndexedSeq[Int]): Par[Int] =
-  if ints.size &lt;= 1 then unit(ints.headOption.getOrElse(0))
-  else
-    val (l, r) = ints.splitAt(ints.size / 2)
-    map2(fork(sum(l)), fork(sum(r)))(_ + _)</code></pre>
-<p>Now the programmer decides where parallelism happens, and <code>lazyUnit</code> fell out as a combination of two primitives. That's the design process working.</p>
+Par&lt;int&gt; sum(std::span&lt;const int&gt; ints) {
+    if (ints.size() &lt;= 1) return unit(ints.empty() ? 0 : ints[0]);
+    auto l = ints.first(ints.size() / 2), r = ints.subspan(ints.size() / 2);
+    return map2(fork&lt;int&gt;([l] { return sum(l); }),
+                fork&lt;int&gt;([r] { return sum(r); }), std::plus{});
+}</code></pre>
+<p>Now the programmer decides where parallelism happens, and <code>lazy_unit</code> fell out as a combination of two primitives. <code>fork</code> takes a thunk so that even <em>building</em> the forked computation is deferred.</p>
 
 <h2><span class="sec-no">7.4</span>Separating Description From Running</h2>
-<p>Where does the thread pool come from? If <code>fork</code> grabbed a global pool, the library would be hard to test and configure. Instead: <code>Par</code> values are pure descriptions, and a separate <code>run</code> function executes them with a pool you provide. <em>Description vs evaluation</em> again.</p>
-<p>Now, finally, choose a representation. A <code>Par</code> needs a thread pool to run, and running gives a result we can wait on. Java's <code>ExecutorService</code> and <code>Future</code> fit:</p>
-<pre><code class="language-scala">import java.util.concurrent.{ExecutorService, Future, TimeUnit, Callable}
+<p>Where do the threads come from? If <code>fork</code> grabbed a global pool, the library would be hard to test and configure. Instead, <code>Par</code> values are pure descriptions, and running takes a pool you provide: description vs evaluation, again.</p>
+<p>Now, finally, choose a representation. A <code>Par</code> needs a pool to run, and running gives a result we can wait on:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt;
+using Par = std::function&lt;std::shared_future&lt;A&gt;(ThreadPool&amp;)&gt;;
 
-opaque type Par[A] = ExecutorService =&gt; Future[A]
+template &lt;typename A&gt; Par&lt;A&gt; unit(A a) {
+    return [a](ThreadPool&amp;) { std::promise&lt;A&gt; p; p.set_value(a); return p.get_future().share(); };
+}
 
-object Par:
-  extension [A](pa: Par[A]) def run(es: ExecutorService): Future[A] = pa(es)
+template &lt;typename A&gt; Par&lt;A&gt; fork(std::function&lt;Par&lt;A&gt;()&gt; pa) {
+    return [pa](ThreadPool&amp; pool) {
+        auto p = std::make_shared&lt;std::promise&lt;A&gt;&gt;();
+        auto fut = p-&gt;get_future().share();
+        pool.submit([pa, p, &amp;pool] { p-&gt;set_value(pa()(pool).get()); });   // waits inside the pool
+        return fut;
+    };
+}
 
-  def unit[A](a: A): Par[A] = es =&gt; UnitFuture(a)
+template &lt;typename A, typename B, typename F&gt;
+auto map2(Par&lt;A&gt; pa, Par&lt;B&gt; pb, F f) -&gt; Par&lt;std::invoke_result_t&lt;F, A, B&gt;&gt; {
+    using C = std::invoke_result_t&lt;F, A, B&gt;;
+    return [pa, pb, f](ThreadPool&amp; pool) {
+        auto fa = pa(pool);           // start both BEFORE waiting on either
+        auto fb = pb(pool);
+        return std::async(std::launch::deferred,
+                          [fa, fb, f]() -&gt; C { return f(fa.get(), fb.get()); }).share();
+    };
+}</code></pre>
+<p><code>ThreadPool</code> is a 40-line fixed-size pool in the full listing. Note that <code>map2</code> starts both computations before waiting on either, which is exactly what the naive version got wrong. With a big enough pool, <code>sum</code> of 1..64 returns 2080.</p>
 
-  private case class UnitFuture[A](get: A) extends Future[A]:
-    def isDone = true
-    def get(timeout: Long, units: TimeUnit) = get
-    def isCancelled = false
-    def cancel(evenIfRunning: Boolean): Boolean = false
-
-  extension [A](pa: Par[A])
-    def map2[B, C](pb: Par[B])(f: (A, B) =&gt; C): Par[C] =
-      es =&gt;
-        val fa = pa(es)
-        val fb = pb(es)
-        UnitFuture(f(fa.get, fb.get))   // simple version; ignores timeouts
-
-  def fork[A](a: =&gt; Par[A]): Par[A] =
-    es =&gt; es.submit(new Callable[A] { def call = a(es).get })</code></pre>
-<p>Note that <code>map2</code> starts both computations <em>before</em> waiting on either, which is exactly what the naive version in 7.2 got wrong.</p>
-<div class="bridge">
-<p>This is <code>std::async</code> with explicit launch policy, but with the executor injected. <code>fork</code> is <code>std::launch::async</code>, <code>unit</code> is <code>std::launch::deferred</code> of an already-computed value, and <code>run</code> is where you finally call <code>.get()</code>. The difference is that a <code>Par</code> is a value you can build, pass around and combine before anything starts.</p>
-</div>
-
-<div class="exercise" data-n="Exercise 7.1 · asyncF and parMap">
-<p>Write <code>asyncF[A, B](f: A =&gt; B): A =&gt; Par[B]</code>, which evaluates <code>f</code>'s result asynchronously. Then write <code>parMap[A, B](ps: List[A])(f: A =&gt; B): Par[List[B]]</code>, mapping over a list in parallel. You'll need a <code>sequence</code> for <code>Par</code>.</p>
+<div class="exercise" data-n="Exercise 7.1 · async_f and par_map">
+<p>Write <code>async_f(f)</code>, turning <code>A → B</code> into <code>A → Par&lt;B&gt;</code>. Then <code>sequence</code> for <code>Par</code>, and <code>par_map(vector&lt;A&gt;, f)</code> that maps in parallel.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def asyncF[A, B](f: A =&gt; B): A =&gt; Par[B] =
-  a =&gt; lazyUnit(f(a))
+<pre><code class="language-cpp">template &lt;typename A, typename F&gt; auto async_f(F f) {
+    using B = std::invoke_result_t&lt;F, A&gt;;
+    return [f](A a) { return lazy_unit&lt;B&gt;([f, a] { return f(a); }); };
+}
 
-def sequence[A](ps: List[Par[A]]): Par[List[A]] =
-  ps.foldRight(unit(List.empty[A]))((pa, acc) =&gt; pa.map2(acc)(_ :: _))
+template &lt;typename A&gt; Par&lt;std::vector&lt;A&gt;&gt; sequence(std::vector&lt;Par&lt;A&gt;&gt; ps) {
+    Par&lt;std::vector&lt;A&gt;&gt; acc = unit(std::vector&lt;A&gt;{});
+    for (auto it = ps.rbegin(); it != ps.rend(); ++it)
+        acc = map2(*it, acc, [](A a, std::vector&lt;A&gt; v) { v.insert(v.begin(), a); return v; });
+    return acc;
+}
 
-def parMap[A, B](ps: List[A])(f: A =&gt; B): Par[List[B]] =
-  fork(sequence(ps.map(asyncF(f))))</code></pre>
-<p>Once again, <code>sequence</code> is the same fold with <code>map2</code> and <code>unit</code>. The outer <code>fork</code> makes <code>parMap</code> return immediately, even for a long list.</p>
+template &lt;typename A, typename F&gt; auto par_map(std::vector&lt;A&gt; as, F f) {
+    using B = std::invoke_result_t&lt;F, A&gt;;
+    std::vector&lt;Par&lt;B&gt;&gt; ps;
+    for (auto&amp; a : as) ps.push_back(async_f&lt;A&gt;(f)(a));
+    return fork&lt;std::vector&lt;B&gt;&gt;([ps] { return sequence(ps); });
+}</code></pre>
+<p>Once again <code>sequence</code> is a fold with <code>map2</code>, starting from <code>unit</code> of an empty collection. The outer <code>fork</code> makes <code>par_map</code> return immediately even for a long input.</p>
 </div></details>
 
 <h2><span class="sec-no">7.5</span>Laws</h2>
-<p>A law is an equation that must hold for every input. Laws make "correct" precise, they guide implementation, and (next chapter) they become tests.</p>
+<p>A law is an equation that must hold for every input. Laws make "correct" precise, guide the implementation, and (next chapter) become tests.</p>
 <h3>The map law</h3>
-<p>Define <code>map</code> via <code>map2</code>: <code>pa.map(f) = pa.map2(unit(()))((a, _) =&gt; f(a))</code>. A natural law:</p>
-<pre><code class="language-text">unit(x).map(f) == unit(f(x))</code></pre>
-<p>Simplify it, as you would in algebra. Set <code>f = identity</code>: <code>unit(x).map(id) == unit(x)</code>. Then generalise <code>unit(x)</code> to any <code>y</code>:</p>
-<pre><code class="language-text">y.map(id) == y</code></pre>
-<p>This says: <code>map</code> can't change the structure, only the values. And because <code>map</code> is parametrically polymorphic (it can't inspect <code>A</code>), the original law follows from this simpler one for free. Laws like that, which hold just because of the types, are called <strong>free theorems</strong>.</p>
+<p>Define <code>map(pa, f)</code> as <code>map2(pa, unit(nothing), (a, _) ↦ f(a))</code>. A natural law:</p>
+<pre><code class="language-text">map(unit(x), f) == unit(f(x))</code></pre>
+<p>Simplify it, as in algebra. Let <code>f</code> be the identity function: <code>map(unit(x), id) == unit(x)</code>. Then generalise <code>unit(x)</code> to any <code>y</code>:</p>
+<pre><code class="language-text">map(y, id) == y</code></pre>
+<p>This says <code>map</code> can't change the structure, only the values. And if <code>map</code> is properly generic (it can't inspect <code>A</code>), the original law follows from this simpler one for free. Laws that hold just because of a function's generic type are called <strong>free theorems</strong>.</p>
 
 <h3>The fork law, and a deadlock</h3>
 <p><code>fork</code> should only change <em>where</em> something runs, not the result:</p>
 <pre><code class="language-text">fork(x) == x</code></pre>
-<p>Try to break it. Run with a fixed thread pool of size 1:</p>
-<pre><code class="language-scala">val es = java.util.concurrent.Executors.newFixedThreadPool(1)
-fork(fork(unit(42))).run(es).get   // DEADLOCK</code></pre>
-<p>Trace it. The outer <code>fork</code> submits a task, and that task takes the pool's only thread. Inside it, <code>a(es)</code> evaluates the inner <code>fork</code>, which submits a second task to the queue, and then the outer task calls <code>.get</code> on it and waits. The second task needs a thread to run. The only thread is the one waiting for it. Neither can proceed. (<code>fork(unit(42))</code> alone is fine, because <code>unit</code> doesn't submit anything.)</p>
-<p>With any fixed pool of size N, enough nested forks deadlock. The law <code>fork(x) == x</code> doesn't hold for our implementation. Writing the law down is what led us to the bug.</p>
+<p>Try to break it. Run <code>fork(fork(unit(42)))</code> on a pool with one thread.</p>
+<p>The outer <code>fork</code> submits a task, which takes the pool's only thread. Inside it, evaluating the inner <code>fork</code> submits a second task to the queue, then the outer task calls <code>.get()</code> on it and waits. The second task needs a thread. The only thread is the one waiting for it. Neither can proceed. (<code>fork(unit(42))</code> alone is fine, because <code>unit</code> doesn't submit anything.)</p>
+<pre><code class="language-cpp">auto* pool = new ThreadPool(1);   // leaked on purpose: its thread will be stuck forever
+auto fut = fork(fork(unit(42)))(*pool);
+fut.wait_for(300ms) == std::future_status::ready;   // false: deadlocked</code></pre>
+<p>The full listing runs exactly this and asserts that it deadlocks. With any fixed pool of N threads, enough nested forks deadlock. So the law <code>fork(x) == x</code> doesn't hold for this implementation, and writing the law down is what led us to the bug.</p>
 <div class="warfield">
-<p><strong>Blocking inside a pool task is the root problem.</strong> Any implementation where a task calls <code>.get</code> on another task in the same bounded pool can deadlock. This is the same bug you'd hit with nested <code>std::async</code> on a fixed thread pool, or with <code>futures.wait()</code> inside a Python <code>ThreadPoolExecutor</code> worker.</p>
+<p><strong>Blocking inside a pool task is the root problem.</strong> Any design where a task calls <code>.get()</code> on another task in the same bounded pool can deadlock. You'll find this bug in real code built on nested <code>std::async</code> with a custom executor, on <code>boost::asio::thread_pool</code>, and on Python's <code>ThreadPoolExecutor</code>.</p>
 </div>
 
 <h2><span class="sec-no">7.6</span>Fixing It: Never Block</h2>
-<p>The fix is to change the representation so nothing ever calls <code>get</code> inside the pool. Instead of returning a Java <code>Future</code> you wait on, a <code>Par</code> takes a <strong>callback</strong> to invoke when the result is ready:</p>
-<pre><code class="language-scala">// a result you can register a callback on, instead of blocking
-trait Future[+A]:
-  private[par] def apply(k: A =&gt; Unit): Unit
+<p>Change the representation so nothing ever waits inside the pool. Instead of returning a future you wait on, a <code>Par</code> takes a <strong>callback</strong> to invoke when the result is ready:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; using Callback = std::function&lt;void(A)&gt;;
+template &lt;typename A&gt; using Par = std::function&lt;void(ThreadPool&amp;, Callback&lt;A&gt;)&gt;;
 
-opaque type Par[+A] = ExecutorService =&gt; Future[A]
+template &lt;typename A&gt; Par&lt;A&gt; unit(A a) {
+    return [a](ThreadPool&amp;, Callback&lt;A&gt; cb) { cb(a); };
+}
 
-def unit[A](a: A): Par[A] =
-  es =&gt; new Future[A] { def apply(cb: A =&gt; Unit): Unit = cb(a) }
+template &lt;typename A&gt; Par&lt;A&gt; fork(std::function&lt;Par&lt;A&gt;()&gt; pa) {
+    return [pa](ThreadPool&amp; pool, Callback&lt;A&gt; cb) {
+        pool.submit([pa, cb, &amp;pool] { pa()(pool, cb); });     // no waiting
+    };
+}</code></pre>
+<p><code>map2</code> is the interesting one: it must wait for <em>two</em> callbacks without blocking. Keep a little shared state, and let whichever result arrives second fire the final callback:</p>
+<pre><code class="language-cpp">template &lt;typename A, typename B, typename F&gt;
+auto map2(Par&lt;A&gt; pa, Par&lt;B&gt; pb, F f) -&gt; Par&lt;std::invoke_result_t&lt;F, A, B&gt;&gt; {
+    using C = std::invoke_result_t&lt;F, A, B&gt;;
+    return [pa, pb, f](ThreadPool&amp; pool, Callback&lt;C&gt; cb) {
+        struct Pending { std::mutex m; std::optional&lt;A&gt; a; std::optional&lt;B&gt; b; };
+        auto st = std::make_shared&lt;Pending&gt;();
+        pa(pool, [st, f, cb](A a) {
+            std::unique_lock lk(st-&gt;m);
+            if (st-&gt;b) { auto b = *st-&gt;b; lk.unlock(); cb(f(a, b)); }   // second to arrive fires
+            else st-&gt;a = a;
+        });
+        pb(pool, [st, f, cb](B b) {
+            std::unique_lock lk(st-&gt;m);
+            if (st-&gt;a) { auto a = *st-&gt;a; lk.unlock(); cb(f(a, b)); }
+            else st-&gt;b = b;
+        });
+    };
+}
 
-def fork[A](a: =&gt; Par[A]): Par[A] =
-  es =&gt; new Future[A]:
-    def apply(cb: A =&gt; Unit): Unit =
-      es.submit(new Callable[Unit] { def call = a(es)(cb) })   // no waiting</code></pre>
-<p><code>map2</code> is the interesting part: it must wait for <em>two</em> callbacks without blocking. The usual approach keeps a small piece of state (has A arrived? has B?) behind a lock or an actor, and calls <code>f</code> when the second arrives. Only the top-level <code>run</code> blocks, once, outside the pool, on a <code>CountDownLatch</code>.</p>
-<p>The important part: <strong>the API didn't change</strong>. <code>unit</code>, <code>fork</code>, <code>map2</code>, <code>sequence</code> and <code>parMap</code> have the same signatures. Every program written against the algebra keeps working. That's the payoff of designing the algebra before the representation.</p>
+template &lt;typename A&gt; A run(ThreadPool&amp; pool, Par&lt;A&gt; p) {   // blocks once, OUTSIDE the pool
+    std::promise&lt;A&gt; result;
+    auto fut = result.get_future();
+    p(pool, [&amp;result](A a) { result.set_value(a); });
+    return fut.get();
+}</code></pre>
+<p>Now <code>run(pool, fork(fork(unit(42))))</code> returns 42 on a single-thread pool, and so does the parallel <code>sum</code> of 10,000 numbers. The listing checks all of this, and ThreadSanitizer reports no data races.</p>
+<p>The important part: <strong>the API didn't change</strong>. <code>unit</code>, <code>fork</code>, <code>map2</code>, <code>sequence</code>, <code>par_map</code> and <code>sum</code> are written exactly the same way. Every program built on the algebra keeps working. That's the payoff of designing the algebra before the representation.</p>
+<div class="bridge">
+<p>The book's two representations are the same as ours: first <code>ExecutorService =&gt; java.util.concurrent.Future[A]</code>, then a callback-based <code>Future</code> run through an actor. In C++ the callback style is what <code>std::execution</code> (senders/receivers, C++26) standardises: a sender describes work, and a receiver is the callback it completes into.</p>
+</div>
 
 <h2><span class="sec-no">7.7</span>Choosing Between Computations</h2>
-<p>Say we want to run one of two parallel computations, depending on the result of a first:</p>
-<pre><code class="language-scala">def choice[A](cond: Par[Boolean])(t: Par[A], f: Par[A]): Par[A]</code></pre>
-<p>Then one of N, chosen by an <code>Int</code>. Then one from a <code>Map[K, Par[A]]</code>. Each time the shape is the same: get a value, use it to <em>choose</em> the next <code>Par</code>. Generalise:</p>
-<pre><code class="language-scala">def flatMap[A, B](pa: Par[A])(f: A =&gt; Par[B]): Par[B]
+<p>Run one of two parallel computations depending on the result of a first:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; Par&lt;A&gt; choice(Par&lt;bool&gt; cond, Par&lt;A&gt; t, Par&lt;A&gt; e);</code></pre>
+<p>Then one of N chosen by an <code>int</code>, then one from a <code>std::map</code>. Each time the shape is the same: get a value, use it to <em>choose</em> the next <code>Par</code>. Generalise:</p>
+<pre><code class="language-cpp">template &lt;typename A, typename F&gt;                  // F: A -&gt; Par&lt;B&gt;
+auto flat_map(Par&lt;A&gt; pa, F f) -&gt; std::invoke_result_t&lt;F, A&gt; {
+    using PB = std::invoke_result_t&lt;F, A&gt;;
+    return PB([pa, f](ThreadPool&amp; pool, auto cb) {
+        pa(pool, [f, cb, &amp;pool](A a) { f(a)(pool, cb); });
+    });
+}
 
-def choice[A](cond: Par[Boolean])(t: Par[A], f: Par[A]): Par[A] =
-  flatMap(cond)(b =&gt; if b then t else f)</code></pre>
-<p>We've found <code>flatMap</code> again, by a completely different route. And it can be split further into <code>join(ppa: Par[Par[A]]): Par[A]</code> plus <code>map</code>: <code>flatMap(pa)(f) = join(pa.map(f))</code>.</p>
+template &lt;typename A&gt; Par&lt;A&gt; choice(Par&lt;bool&gt; cond, Par&lt;A&gt; t, Par&lt;A&gt; e) {
+    return flat_map(cond, [t, e](bool b) { return b ? t : e; });
+}</code></pre>
+<p>We've found <code>flat_map</code> again, by a completely different route.</p>
 
-<div class="exercise" data-n="Exercise 7.2 · flatMap and join">
-<p>Show that <code>flatMap</code> and <code>join</code> can each be written in terms of the other (with <code>map</code>).</p>
+<div class="exercise" data-n="Exercise 7.2 · join">
+<p>Write <code>join(Par&lt;Par&lt;A&gt;&gt;) → Par&lt;A&gt;</code> using <code>flat_map</code>. Then explain how <code>flat_map</code> could be written using <code>join</code> and <code>map</code>.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def join[A](ppa: Par[Par[A]]): Par[A] =
-  flatMap(ppa)(pa =&gt; pa)        // "the value IS the next computation"
+<pre><code class="language-cpp">template &lt;typename A&gt; Par&lt;A&gt; join(Par&lt;Par&lt;A&gt;&gt; ppa) {
+    return flat_map(ppa, [](Par&lt;A&gt; pa) { return pa; });   // "the value IS the next computation"
+}
 
-def flatMap[A, B](pa: Par[A])(f: A =&gt; Par[B]): Par[B] =
-  join(pa.map(f))</code></pre>
-<p>Two equally good choices of primitive. This works for <code>List</code> (where <code>join</code> is <code>flatten</code>) and <code>Option</code> too.</p>
+// and the other way round:
+// flat_map(pa, f) == join(map(pa, f))</code></pre>
+<p>Two equally good choices of primitive. This works for lists (where <code>join</code> is "flatten") and optionals (where it turns <code>optional&lt;optional&lt;A&gt;&gt;</code> into <code>optional&lt;A&gt;</code>) too.</p>
 </div></details>
 
-<div class="keypoint">The process: example → wished-for API → primitives vs derived → laws → representation. Laws catch bugs before tests do, and a well-chosen algebra lets you swap the representation without breaking users.</div>
+<div class="keypoint">The process: examples → wished-for API → primitives vs derived → laws → representation. Laws catch bugs before tests do, and a well-chosen algebra lets you swap the representation without breaking any users.</div>
 
 <dl class="jargon">
   <dt>Algebra</dt><dd>A set of types and functions plus the laws relating them, independent of representation.</dd>
-  <dt>Primitive / derived combinator</dt><dd>Functions that depend on the representation vs functions written using other combinators only.</dd>
-  <dt>Law</dt><dd>An equation that must hold for all inputs, like <code>y.map(id) == y</code>.</dd>
-  <dt>Free theorem</dt><dd>A law that holds automatically because of a function's polymorphic type.</dd>
-  <dt>Continuation / callback</dt><dd>A function to call with the result, instead of returning it. The way to avoid blocking.</dd>
+  <dt>Primitive / derived combinator</dt><dd>Functions that depend on the representation vs functions written only with other combinators.</dd>
+  <dt>Law</dt><dd>An equation that must hold for all inputs, like <code>map(y, id) == y</code>.</dd>
+  <dt>Free theorem</dt><dd>A law that holds automatically because of a function's generic type.</dd>
+  <dt>Continuation / callback</dt><dd>A function to call with a result instead of returning it; the way to avoid blocking.</dd>
 </dl>
 
 <div class="recap"><ul>
-  <li>Design from usage examples, and choose the representation last.</li>
-  <li>Make side effects like waiting and forking explicit and separate from description.</li>
-  <li>State laws. The law <code>fork(x) == x</code> found a deadlock in the blocking implementation.</li>
-  <li>A non-blocking, callback-based representation fixes it without changing the API.</li>
-  <li>Choosing a computation based on a result leads, again, to <code>flatMap</code>.</li>
+  <li>Design from usage examples; choose the representation last.</li>
+  <li>Make waiting and forking explicit and separate from description.</li>
+  <li>State laws. <code>fork(x) == x</code> found a deadlock in the blocking version, and we reproduced it.</li>
+  <li>A callback-based representation fixes it without changing the API.</li>
+  <li>Choosing the next computation from a result leads, again, to <code>flat_map</code>.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch07.cpp"><span class="l-k">Full runnable listing</span>code/ch07.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

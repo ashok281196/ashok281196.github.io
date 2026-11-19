@@ -16,153 +16,184 @@
   <div class="chapter-num">13</div>
   <div class="chapter-kicker">Part IV · Effects and I/O</div>
   <h1>Effects, IO &amp; Local Mutation</h1>
-  <p class="chapter-sub">How a pure program talks to the world. We build an IO type that describes effects as values, hit a stack overflow, fix it by trampolining, and then use the type system to allow mutation that nobody outside can see.</p>
+  <p class="chapter-sub">How a pure program talks to the world. We build an IO type that describes effects as values, watch it overflow the stack, fix it with a trampolined run loop, and then use templates to allow mutation the compiler proves nobody outside can see.</p>
 </header>
 
 <h2><span class="sec-no">13.1</span>Factor the Effect Out</h2>
-<p>An impure function, mixing a decision with output:</p>
-<pre><code class="language-scala">case class Player(name: String, score: Int)
-
-def contest(p1: Player, p2: Player): Unit =
-  if p1.score &gt; p2.score then println(s"${p1.name} wins")
-  else if p2.score &gt; p1.score then println(s"${p2.name} wins")
-  else println("It's a draw")</code></pre>
+<p>An impure function that mixes a decision with output:</p>
+<pre><code class="language-cpp">void contest(const Player&amp; p1, const Player&amp; p2) {
+    if (p1.score &gt; p2.score)      std::cout &lt;&lt; p1.name &lt;&lt; " wins\n";
+    else if (p2.score &gt; p1.score) std::cout &lt;&lt; p2.name &lt;&lt; " wins\n";
+    else                          std::cout &lt;&lt; "It's a draw\n";
+}</code></pre>
 <p>Separate the pure logic from the effect, one layer at a time:</p>
-<pre><code class="language-scala">def winner(p1: Player, p2: Player): Option[Player] =             // pure: who won
-  if p1.score &gt; p2.score then Some(p1)
-  else if p2.score &gt; p1.score then Some(p2)
-  else None
-
-def winnerMsg(p: Option[Player]): String =                       // pure: what to say
-  p.map(w =&gt; s"${w.name} wins").getOrElse("It's a draw")
-
-def contest(p1: Player, p2: Player): Unit =                      // impure, but tiny
-  println(winnerMsg(winner(p1, p2)))</code></pre>
-<p>This is the general shape: <strong>any function with side effects can be split into a pure core and two thin impure layers</strong>, one that gathers input and one that performs output. "Functional core, imperative shell." The rest of the chapter asks: can we make the shell pure too?</p>
+<pre><code class="language-cpp">std::optional&lt;Player&gt; winner(const Player&amp; p1, const Player&amp; p2) {   // pure: who won
+    if (p1.score &gt; p2.score) return p1;
+    if (p2.score &gt; p1.score) return p2;
+    return std::nullopt;
+}
+std::string winner_msg(const std::optional&lt;Player&gt;&amp; p) {             // pure: what to say
+    return p ? p-&gt;name + " wins" : "It's a draw";
+}
+void contest(const Player&amp; p1, const Player&amp; p2) {                   // impure, but tiny
+    std::cout &lt;&lt; winner_msg(winner(p1, p2)) &lt;&lt; "\n";
+}</code></pre>
+<p>This is the general shape: <strong>any function with side effects can be split into a pure core and thin impure layers</strong> that gather input and perform output. "Functional core, imperative shell." In C++ this alone is the most valuable thing in the chapter: it's how you make firmware logic, controllers and planners unit-testable without hardware. The rest of the chapter asks: can we make the shell a value too?</p>
 
 <h2><span class="sec-no">13.2</span>A Simple IO Type</h2>
 <p>Make the effect a value, like <code>Charge</code> in Chapter 1:</p>
-<pre><code class="language-scala">trait IO[A]:
-  self =&gt;
-  def unsafeRun: A                                 // performing it is the only impure part
+<pre><code class="language-cpp">template &lt;typename A&gt;
+class IO {
+    std::function&lt;A()&gt; thunk_;
+public:
+    using value_type = A;
+    explicit IO(std::function&lt;A()&gt; f) : thunk_(std::move(f)) {}
+    A unsafe_run() const { return thunk_(); }               // the ONLY place effects happen
 
-  def map[B](f: A =&gt; B): IO[B] = new:
-    def unsafeRun = f(self.unsafeRun)
+    template &lt;typename F&gt; auto map(F f) const -&gt; IO&lt;std::invoke_result_t&lt;F, A&gt;&gt; {
+        auto self = *this;
+        return IO&lt;std::invoke_result_t&lt;F, A&gt;&gt;([self, f] { return f(self.unsafe_run()); });
+    }
+    template &lt;typename F&gt; auto flat_map(F f) const -&gt; std::invoke_result_t&lt;F, A&gt; {
+        auto self = *this;
+        return std::invoke_result_t&lt;F, A&gt;([self, f] { return f(self.unsafe_run()).unsafe_run(); });
+    }
+};
 
-  def flatMap[B](f: A =&gt; IO[B]): IO[B] = new:
-    def unsafeRun = f(self.unsafeRun).unsafeRun
+IO&lt;std::monostate&gt; print_line(std::string msg) {
+    return IO&lt;std::monostate&gt;([msg] { std::cout &lt;&lt; msg &lt;&lt; "\n"; return std::monostate{}; });
+}
+IO&lt;std::string&gt; read_line() {
+    return IO&lt;std::string&gt;([] { std::string s; std::getline(std::cin, s); return s; });
+}</code></pre>
+<p>A program is now a value of type <code>IO&lt;A&gt;</code>. Building it does nothing. Composing it is pure. Only <code>unsafe_run</code>, called once at the edge (in <code>main</code>), performs anything:</p>
+<pre><code class="language-cpp">IO&lt;std::monostate&gt; converter() {
+    return print_line("Enter a temperature in degrees Fahrenheit:")
+        .flat_map([](auto) { return read_line(); })
+        .map([](std::string s) { return std::stod(s); })
+        .flat_map([](double d) { return print_line(format_celsius(f_to_c(d))); });
+}
 
-object IO:
-  def apply[A](a: =&gt; A): IO[A] = new:          // suspend any side-effecting expression
-    def unsafeRun = a
-
-  given Monad[IO] with
-    def unit[A](a: =&gt; A) = IO(a)
-    extension [A](fa: IO[A])
-      override def flatMap[B](f: A =&gt; IO[B]) = fa.flatMap(f)
-
-def PrintLine(msg: String): IO[Unit] = IO(println(msg))
-val ReadLine: IO[String] = IO(scala.io.StdIn.readLine())</code></pre>
-<p>A program is now a value of type <code>IO[A]</code>. Building it does nothing. Composing it is pure. Only <code>unsafeRun</code>, called once at the very edge (in <code>main</code>), performs anything.</p>
-<pre><code class="language-scala">def fahrenheitToCelsius(f: Double): Double = (f - 32) * 5.0 / 9.0
-
-val converter: IO[Unit] =
-  for
-    _ &lt;- PrintLine("Enter a temperature in degrees Fahrenheit:")
-    d &lt;- ReadLine.map(_.toDouble)
-    _ &lt;- PrintLine(f"${fahrenheitToCelsius(d)}%.1f °C")
-  yield ()
-
-@main def run(): Unit = converter.unsafeRun</code></pre>
-<p>And since <code>IO</code> is a monad, the whole toolkit applies: <code>replicateM(10, ReadLine)</code> reads ten lines, <code>traverse</code> runs an action per element, and you can write your own loops as functions:</p>
-<pre><code class="language-scala">def forever[A, B](a: IO[A]): IO[B] =
-  a.flatMap(_ =&gt; forever(a))
-
-val echo: IO[Nothing] = forever(ReadLine.flatMap(PrintLine))</code></pre>
-<div class="keypoint">An <code>IO[A]</code> is a <em>recipe</em> for interacting with the world, not the interaction. Because recipes are values, you can combine, repeat, retry, time-limit or test them before anything runs. The program's main function is "build one big recipe, then run it once".</div>
+int main() {
+    auto program = converter();   // nothing printed yet
+    program.unsafe_run();         // now it runs
+}</code></pre>
+<p>The full listing points input and output at string streams and checks that building <code>program</code> prints nothing and running it prints exactly the expected text. Since <code>IO</code> is a monad, all of Chapter 11 applies: <code>replicate_m(10, read_line())</code> reads ten lines, <code>traverse</code> runs an action per element, and loops can be written as ordinary functions.</p>
+<div class="keypoint">An <code>IO&lt;A&gt;</code> is a <em>recipe</em> for interacting with the world, not the interaction. Because recipes are values, you can combine, repeat, retry, time-limit or test them before anything runs. <code>main</code> becomes "build one big recipe, then run it once".</div>
 
 <h2><span class="sec-no">13.3</span>The Stack Overflow</h2>
-<p>Run <code>forever(PrintLine("hi")).unsafeRun</code> and it prints a few thousand times, then throws <code>StackOverflowError</code>. Look at <code>flatMap</code>'s <code>unsafeRun</code>: it calls <code>self.unsafeRun</code>, then <code>f(...).unsafeRun</code>, which calls the next <code>flatMap</code>'s <code>unsafeRun</code>, and so on. Every step adds a stack frame, and nothing ever returns. <code>@tailrec</code> can't help: these are calls through different objects.</p>
+<p>Write a loop as recursion through <code>flat_map</code>:</p>
+<pre><code class="language-cpp">IO&lt;int&gt; count_down(int n) {
+    if (n == 0) return IO&lt;int&gt;([] { return 0; });
+    return IO&lt;int&gt;([] { return 1; }).flat_map([n](int) { return count_down(n - 1); });
+}
+
+count_down(1000).unsafe_run();        // fine
+count_down(1'000'000).unsafe_run();   // segmentation fault: stack overflow</code></pre>
+<p>Look at <code>flat_map</code>'s thunk: it calls <code>self.unsafe_run()</code>, then <code>f(...).unsafe_run()</code>, which calls the next <code>flat_map</code>'s thunk, and so on. Every step adds stack frames, and nothing returns until the very end. No compiler will turn calls through <code>std::function</code> objects into a loop.</p>
 
 <h3>Trampolining</h3>
-<p>The fix is to stop <em>calling</em> the next step and instead <em>return</em> a description of it. Then a single loop interprets the description, keeping its own explicit stack on the heap:</p>
-<pre><code class="language-scala">enum IO[A]:
-  case Return(a: A)                                  // done, here's the value
-  case Suspend(resume: () =&gt; A)                      // run this effect
-  case FlatMap[A, B](sub: IO[A], k: A =&gt; IO[B]) extends IO[B]   // do sub, then continue with k
+<p>Stop <em>calling</em> the next step; <em>return</em> a description of it instead, and let one loop run everything, keeping the pending continuations on an explicit stack on the heap. The IO becomes a small tree of nodes:</p>
+<pre><code class="language-cpp">struct Node;
+using NodePtr = std::shared_ptr&lt;const Node&gt;;
+struct Pure  { std::any value; };                                    // done: here's the value
+struct Delay { std::function&lt;std::any()&gt; thunk; };                   // perform this effect
+struct Bind  { NodePtr sub; std::function&lt;NodePtr(std::any)&gt; k; };   // run sub, then continue with k
+struct Node  { std::variant&lt;Pure, Delay, Bind&gt; v; };
 
-  def flatMap[B](f: A =&gt; IO[B]): IO[B] = FlatMap(this, f)
-  def map[B](f: A =&gt; B): IO[B] = flatMap(a =&gt; Return(f(a)))
-
-  @annotation.tailrec
-  final def unsafeRun(): A = this match
-    case Return(a)  =&gt; a
-    case Suspend(r) =&gt; r()
-    case FlatMap(x, f) =&gt; x match
-      case Return(a)     =&gt; f(a).unsafeRun()
-      case Suspend(r)    =&gt; f(r()).unsafeRun()
-      case FlatMap(y, g) =&gt; y.flatMap(a =&gt; g(a).flatMap(f)).unsafeRun()   // reassociate</code></pre>
-<p>Every recursive call to <code>unsafeRun</code> is now a tail call, so it compiles to a loop. The last case uses the <strong>monad associativity law</strong> to rewrite <code>(y flatMap g) flatMap f</code> into <code>y flatMap (a =&gt; g(a) flatMap f)</code>, rotating left-nested chains to the right so the loop always makes progress. A law from Chapter 11 is what makes the interpreter correct.</p>
-<div class="analogy">On a trampoline you don't climb a ladder of stack frames. Each bounce returns you to the same spot (the loop), with a note saying what to do next. However long the program, you never get higher than one bounce.</div>
-<div class="bridge">
-<p>This is the same technique as turning a recursive tree walk into a loop with an explicit <code>std::stack</code>, or how a coroutine scheduler resumes continuations from a run loop instead of letting them call each other. The <code>FlatMap</code> nodes are the explicit continuation stack.</p>
+std::any run_loop(NodePtr io) {
+    std::vector&lt;std::function&lt;NodePtr(std::any)&gt;&gt; stack;      // continuations, on the heap
+    for (;;) {
+        if (auto* b = std::get_if&lt;Bind&gt;(&amp;io-&gt;v)) {             // remember what to do after sub
+            stack.push_back(b-&gt;k);
+            io = b-&gt;sub;
+            continue;
+        }
+        std::any value = std::holds_alternative&lt;Pure&gt;(io-&gt;v) ? std::get&lt;Pure&gt;(io-&gt;v).value
+                                                              : std::get&lt;Delay&gt;(io-&gt;v).thunk();
+        if (stack.empty()) return value;
+        auto k = std::move(stack.back());
+        stack.pop_back();
+        io = k(std::move(value));                              // bounce back to the top of the loop
+    }
+}</code></pre>
+<p>A typed <code>IO&lt;A&gt;</code> wrapper puts a type-safe <code>pure</code>, <code>delay</code>, <code>map</code> and <code>flat_map</code> on top (inside, values travel as <code>std::any</code>, because one loop has to run steps of every type). Now <code>count_down(1'000'000)</code> runs in constant stack, and so does a million <em>left-nested</em> <code>flat_map</code>s, <code>((x &gt;&gt;= f) &gt;&gt;= f) &gt;&gt;= …</code>, because the loop simply pushes each continuation as it descends.</p>
+<div class="analogy">On a trampoline you don't climb a ladder of stack frames. Each bounce lands you back on the same spot (the loop) with a note saying what to do next. However long the program, you never get higher than one bounce.</div>
+<div class="warfield">
+<p><strong>The same chain must also be destroyed without recursion.</strong> A million-deep chain of <code>Bind</code> nodes held by <code>shared_ptr</code> is destroyed recursively by default, and the first version of the listing crashed there, after the program had already run successfully. <code>Node</code> needs a destructor that unlinks the chain in a loop, the same fix as for <code>List</code> in Chapter 3. Garbage-collected runtimes never hit this.</p>
 </div>
-<p>The same structure generalises: replace <code>Suspend(() =&gt; A)</code> with any type of "instruction" <code>F[A]</code> and you get the <strong>free monad</strong>, a program written in some instruction set, plus separate interpreters (one that performs real I/O, one that runs against an in-memory fake for tests). That's how you test effectful code without mocks.</p>
+<div class="bridge">
+<p>The book's trampolined IO has the same three cases (<code>Return</code>, <code>Suspend</code>, <code>FlatMap</code>). Its interpreter is a <code>@tailrec</code> function that handles a left-nested <code>FlatMap</code> by <em>reassociating</em> it, using the monad associativity law to rewrite <code>(y flatMap g) flatMap f</code> as <code>y flatMap (a =&gt; g(a) flatMap f)</code>. Our explicit continuation stack achieves the same thing. Generalising <code>Delay</code> to any "instruction set" gives the book's <strong>free monad</strong>: a program as data, run by interchangeable interpreters, for example a real one and an in-memory fake for tests.</p>
+</div>
 
 <h2><span class="sec-no">13.4</span>What IO Doesn't Give You</h2>
-<p>Be honest about the limits. <code>IO</code> doesn't make a program correct. Inside an <code>IO</code>, code can still have race conditions or ignore errors. What it gives you is: effects are visible in types (<code>IO[Int]</code> vs <code>Int</code>), programs are values you can compose and transform, and the pure parts stay pure. Real effect systems add a lot more on top: async and non-blocking I/O, cancellation, resource safety, structured concurrency, error handling. That's what cats-effect and ZIO are.</p>
+<p><code>IO</code> doesn't make a program correct. Inside an effect, code can still race or ignore errors. What it gives you is that effects are visible in types (<code>IO&lt;int&gt;</code> vs <code>int</code>), programs are values you can compose and transform, and the pure parts stay pure. Production effect systems add async I/O, cancellation, resource safety and structured concurrency on top. In C++ that role is played by coroutine-based frameworks and <code>std::execution</code>, where a <em>sender</em> is a description of asynchronous work that does nothing until it's connected and started.</p>
 
 <h2><span class="sec-no">13.5</span>Local Effects: Mutation Nobody Can See</h2>
-<p>Recall Exercise 1.3: a function that mutates local variables is still pure if no caller can observe the mutation. Quicksort on an array is fast precisely because it mutates in place. Can we write that inside a pure program, and have the <em>compiler</em> verify the mutation can't leak?</p>
-<p>Yes, with a type called <code>ST</code> (state thread). Here's a sketch of the idea, where <code>ST(a)</code> wraps a value without touching the state and <code>ST.lift</code> wraps a state function:</p>
-<pre><code class="language-scala">opaque type ST[S, A] = S =&gt; (A, S)       // like State, tagged with a phantom type S
+<p>Recall Exercise 1.3: a function that mutates local variables is still pure if no caller can observe the mutation. In-place quicksort is fast precisely because it mutates. So:</p>
+<pre><code class="language-cpp">std::vector&lt;int&gt; quicksort(std::vector&lt;int&gt; xs) {   // by value: a private copy
+    // ... sort xs in place, Hoare partition ...
+    return xs;
+}</code></pre>
+<p>This is pure, and in C++ it's the everyday way to write fast pure functions: take by value, mutate the copy, return it. The book asks for more: can the <em>compiler</em> guarantee that a mutable reference created inside never escapes? The book's answer is a type called <code>ST</code>; here's the same guarantee in C++ templates.</p>
+<pre><code class="language-cpp">template &lt;typename S, typename T&gt;
+class STRef {                                       // a mutable cell tagged with its scope type S
+    std::shared_ptr&lt;T&gt; cell_;
+    explicit STRef(T v);                            // private: only a scope can create one
+    friend class STScope&lt;S&gt;;
+public:
+    const T&amp; read() const;
+    void write(T v) const;
+};
 
-final class STRef[S, A] private (private var cell: A):
-  def read: ST[S, A] = ST(cell)
-  def write(a: =&gt; A): ST[S, Unit] = ST.lift(s =&gt; { cell = a; ((), s) })
+template &lt;typename S&gt; class STScope {
+public:
+    template &lt;typename T&gt; STRef&lt;S, T&gt; new_ref(T v) const;
+};
 
-object STRef:
-  def apply[S, A](a: A): ST[S, STRef[S, A]] = ST(new STRef[S, A](a))</code></pre>
-<p>Every mutable reference is tagged with the same type <code>S</code> as the computation that created it. To run an <code>ST</code> computation, you must provide one that works for <strong>every</strong> <code>S</code>:</p>
-<pre><code class="language-scala">// a computation polymorphic in S
-type RunnableST[A] = [s] =&gt; () =&gt; ST[s, A]
+template &lt;typename F&gt; auto run_st(F f) {
+    // instantiate f with two DIFFERENT scope tags
+    using R1 = decltype(f(std::declval&lt;const STScope&lt;Tag1&gt;&amp;&gt;()));
+    using R2 = decltype(f(std::declval&lt;const STScope&lt;Tag2&gt;&amp;&gt;()));
+    static_assert(std::is_same_v&lt;R1, R2&gt;, "an STRef escaped its scope");
+    return f(STScope&lt;Tag1&gt;{});
+}</code></pre>
+<pre><code class="language-cpp">int r = run_st([](const auto&amp; scope) {
+    auto r1 = scope.new_ref(1);
+    auto r2 = scope.new_ref(2);
+    int x = r1.read(), y = r2.read();
+    r1.write(y + 1);
+    r2.write(x + 1);
+    return r1.read() * 10 + r2.read();         // 32
+});
 
-def runST[A](st: RunnableST[A]): A = ...    // picks an S internally and runs it
-
-val p: RunnableST[(Int, Int)] = [s] =&gt; () =&gt;
-  for
-    r1 &lt;- STRef[s, Int](1)
-    r2 &lt;- STRef[s, Int](2)
-    x  &lt;- r1.read
-    y  &lt;- r2.read
-    _  &lt;- r1.write(y + 1)
-    _  &lt;- r2.write(x + 1)
-    a  &lt;- r1.read
-    b  &lt;- r2.read
-  yield (a, b)
-
-runST(p)   // (3, 2)</code></pre>
-<p>Why is this safe? Try to return the reference itself: the result type would be <code>STRef[s, Int]</code>, which mentions <code>s</code>. But <code>RunnableST[A]</code> requires <code>A</code> not to depend on <code>s</code>, so it doesn't type-check. A mutable reference can't escape the computation that created it. Mutation happens; the type system proves nobody else can see it.</p>
-<p>With an <code>STArray</code> built the same way, you can write an in-place quicksort whose signature is just <code>def quicksort(xs: List[Int]): List[Int]</code>, pure from outside, mutating inside, and safe by construction.</p>
+run_st([](const auto&amp; scope) { return scope.new_ref(1); });
+// error: static assertion failed: an STRef escaped its scope</code></pre>
+<p>Why does it work? The lambda is generic over the scope type. If it returns a plain value, the result type is the same whatever the scope tag. If it tries to return an <code>STRef</code>, the result type <em>mentions</em> the tag (<code>STRef&lt;Tag1, int&gt;</code> vs <code>STRef&lt;Tag2, int&gt;</code>), and the <code>static_assert</code> fires. A reference can't leave the computation that created it. (The listing compiles a test file with exactly that escape and confirms the error.)</p>
+<div class="bridge">
+<p>The book's <code>runST</code> requires a computation that works "for all <code>S</code>" (a rank-2 type), so a reference typed with <code>S</code> can't appear in the result. Our two-tag check is a C++ approximation of that idea. Rust's borrow checker enforces a stronger version of the same guarantee for every reference in the language.</p>
+</div>
 <div class="warfield">
-<p><strong>Purity depends on what you choose to observe.</strong> Allocating memory is an effect if you watch the heap. Returning a fresh object is an effect if you compare with reference equality (<code>eq</code>). FP treats these as unobservable by convention. The useful question is always "what can callers of this function observe?"</p>
+<p><strong>Purity depends on what you choose to observe.</strong> Allocating memory is an effect if you watch the heap; returning a fresh object is one if you compare addresses. FP treats these as unobservable by convention. The useful question is always "what can callers of this function observe?"</p>
 </div>
 
 <dl class="jargon">
-  <dt>Functional core, imperative shell</dt><dd>Design with pure logic in the middle and a thin layer of effects around it.</dd>
+  <dt>Functional core, imperative shell</dt><dd>Pure logic in the middle, a thin layer of effects around it.</dd>
   <dt>IO</dt><dd>A type whose values describe effectful programs; running them is separate.</dd>
-  <dt>Trampolining</dt><dd>Returning descriptions of the next step to a loop instead of calling it, avoiding stack growth.</dd>
-  <dt>Free monad</dt><dd>A monad built from any instruction set, interpreted later by a separate function.</dd>
-  <dt>ST / phantom type</dt><dd>A type parameter used only to tag values at compile time, here to stop mutable references escaping.</dd>
+  <dt>Trampolining</dt><dd>Returning descriptions of the next step to a loop instead of calling it, so the stack doesn't grow.</dd>
+  <dt>Free monad</dt><dd>A monad built from an instruction set, interpreted later by a separate function.</dd>
+  <dt>ST / phantom type</dt><dd>A type parameter used only as a compile-time tag, here to stop mutable references escaping.</dd>
 </dl>
 
 <div class="recap"><ul>
   <li>Any effectful function splits into a pure core and a thin effectful shell.</li>
-  <li>An IO type makes effects into composable values; <code>unsafeRun</code> happens once at the edge.</li>
-  <li>The naive IO overflows the stack; trampolining plus the associativity law fixes it.</li>
-  <li><code>ST</code> lets you mutate locally with a compile-time guarantee that it can't leak.</li>
-  <li>Real-world effect systems (cats-effect, ZIO) build on these ideas.</li>
+  <li>An IO type makes effects composable values; <code>unsafe_run</code> happens once at the edge.</li>
+  <li>The naive IO overflows the stack; a run loop with an explicit continuation stack fixes it.</li>
+  <li>In C++, also destroy long node chains iteratively.</li>
+  <li>Local mutation is pure if it can't be observed; templates can even prove references don't escape.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch13.cpp"><span class="l-k">Full runnable listing</span>code/ch13.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

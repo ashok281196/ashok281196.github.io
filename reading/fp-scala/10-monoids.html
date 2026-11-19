@@ -16,193 +16,192 @@
   <div class="chapter-num">10</div>
   <div class="chapter-kicker">Part III · Common Structures</div>
   <h1>Monoids</h1>
-  <p class="chapter-sub">Our first abstraction defined purely by its laws. A monoid is a type with an associative combine and an identity. That's all, and it's enough to fold any collection, split work across cores, and build complex aggregations out of simple ones.</p>
+  <p class="chapter-sub">Our first abstraction defined purely by its laws. A monoid is a type with an associative combine and an identity. That's all, and it's enough to fold any range, split work across cores, and build complex aggregations from simple ones. In C++ it's a concept plus "instance" structs, the same way std::plus works.</p>
 </header>
 
 <h2><span class="sec-no">10.1</span>Spot the Pattern</h2>
-<pre><code class="language-text">"foo" + "bar"      // string concatenation, identity ""
-3 + 4              // integer addition,       identity 0
-3 * 4              // integer multiplication, identity 1
-true &amp;&amp; false      // boolean and,            identity true
-List(1) ++ List(2) // list append,            identity Nil</code></pre>
-<p>Each has a binary operation and a special "do-nothing" value. And each satisfies two laws:</p>
+<pre><code class="language-text">"foo" + "bar"          string concatenation,   identity ""
+3 + 4                  integer addition,       identity 0
+3 * 4                  integer multiplication, identity 1
+true || false          boolean or,             identity false
+concat(v1, v2)         vector append,          identity {}</code></pre>
+<p>Each has a binary operation and a "do-nothing" value, and each satisfies two laws:</p>
 <ul>
-  <li><strong>Associativity:</strong> <code>(x op y) op z == x op (y op z)</code>. Grouping doesn't matter.</li>
-  <li><strong>Identity:</strong> <code>x op empty == x</code> and <code>empty op x == x</code>.</li>
+  <li><strong>Associativity:</strong> <code>(x ⊕ y) ⊕ z == x ⊕ (y ⊕ z)</code>. Grouping doesn't matter.</li>
+  <li><strong>Identity:</strong> <code>x ⊕ empty == x</code> and <code>empty ⊕ x == x</code>.</li>
 </ul>
-<p>A type with such an operation and identity is a <strong>monoid</strong>. In code:</p>
-<pre><code class="language-scala">trait Monoid[A]:
-  def combine(a1: A, a2: A): A
-  def empty: A
+<p>A type with such an operation and identity is a <strong>monoid</strong>. Note that the same type can have several: <code>int</code> under <code>+</code> and under <code>*</code>. So in C++ a monoid isn't a property of a type; it's a separate little struct, an <em>instance</em>, that names the type and supplies the two operations:</p>
+<pre><code class="language-cpp">template &lt;typename M&gt;
+concept Monoid = requires(const typename M::type&amp; a, const typename M::type&amp; b) {
+    { M::empty() }        -&gt; std::convertible_to&lt;typename M::type&gt;;
+    { M::combine(a, b) }  -&gt; std::convertible_to&lt;typename M::type&gt;;
+};
 
-val stringMonoid: Monoid[String] = new:
-  def combine(a1: String, a2: String) = a1 + a2
-  val empty = ""
+struct StringConcat {
+    using type = std::string;
+    static type empty() { return ""; }
+    static type combine(const type&amp; a, const type&amp; b) { return a + b; }
+};
 
-def listMonoid[A]: Monoid[List[A]] = new:
-  def combine(a1: List[A], a2: List[A]) = a1 ++ a2
-  val empty = Nil</code></pre>
-<p>The trait alone says almost nothing. The <em>laws</em> are what make something a monoid. Note that the same type can have several monoids: <code>Int</code> under <code>+</code> and under <code>*</code>.</p>
-<div class="analogy">A monoid is like a box of identical Lego bricks: any two snap together into a bigger brick of the same kind, it doesn't matter which pairs you snap first, and there's a "nothing" brick that changes nothing when attached. That's enough to build anything out of any number of pieces, in any order of assembly.</div>
+struct IntAddition {
+    using type = int;
+    static type empty() { return 0; }
+    static type combine(int a, int b) { return a + b; }
+};</code></pre>
+<p>The concept checks the operations exist. It can't check the <em>laws</em>, and the laws are what make something a monoid. (Chapter 8's property tests can.)</p>
+<div class="analogy">A monoid is a box of identical Lego bricks: any two snap together into a bigger brick of the same kind, it doesn't matter which pairs you snap first, and there's a "nothing" brick that changes nothing. That's enough to build anything from any number of pieces, assembled in any grouping.</div>
+<div class="bridge">
+<p>The book writes <code>trait Monoid[A] { def combine(a1: A, a2: A): A; def empty: A }</code> and passes instances as values or <code>given</code>s found by the compiler. Our instance structs are the C++ equivalent, passed as template arguments, the way <code>std::plus&lt;&gt;</code> or a comparator is.</p>
+</div>
 
 <div class="exercise" data-n="Exercise 10.1 · a few monoids">
-<p>Give monoids for <code>Int</code> addition, <code>Boolean</code> or, <code>Option[A]</code> (keep the first <code>Some</code>), and <code>A =&gt; A</code> (endofunctions, under composition).</p>
+<p>Write monoids for <code>bool</code> under <code>||</code>, <code>std::optional&lt;T&gt;</code> (keep the first engaged one), and functions <code>T → T</code> under composition. What is each one's "dual"?</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">val intAddition: Monoid[Int] = new:
-  def combine(x: Int, y: Int) = x + y
-  val empty = 0
+<pre><code class="language-cpp">struct BoolOr {
+    using type = bool;
+    static type empty() { return false; }
+    static type combine(bool a, bool b) { return a || b; }
+};
 
-val booleanOr: Monoid[Boolean] = new:
-  def combine(x: Boolean, y: Boolean) = x || y
-  val empty = false
+template &lt;typename T&gt; struct FirstOptional {
+    using type = std::optional&lt;T&gt;;
+    static type empty() { return std::nullopt; }
+    static type combine(const type&amp; a, const type&amp; b) { return a ? a : b; }
+};
 
-def firstOption[A]: Monoid[Option[A]] = new:
-  def combine(x: Option[A], y: Option[A]) = x.orElse(y)
-  val empty = None
+template &lt;typename T&gt; struct Endo {
+    using type = std::function&lt;T(T)&gt;;
+    static type empty() { return [](T t) { return t; }; }
+    static type combine(type f, type g) { return [f, g](T t) { return g(f(t)); }; }  // f, then g
+};
 
-def endoMonoid[A]: Monoid[A =&gt; A] = new:
-  def combine(f: A =&gt; A, g: A =&gt; A) = f.andThen(g)
-  val empty = identity</code></pre>
-<p>Every one of these also has a "dual": combine with the arguments swapped. For <code>firstOption</code> the dual keeps the <em>last</em> <code>Some</code>; for endofunctions it composes the other way.</p>
+template &lt;Monoid M&gt; struct Dual {     // same monoid, arguments swapped
+    using type = typename M::type;
+    static type empty() { return M::empty(); }
+    static type combine(const type&amp; a, const type&amp; b) { return M::combine(b, a); }
+};</code></pre>
+<p><code>Dual&lt;FirstOptional&gt;</code> keeps the <em>last</em> engaged optional; <code>Dual&lt;Endo&gt;</code> composes the other way round. Every monoid has a dual.</p>
 </div></details>
 
 <h2><span class="sec-no">10.2</span>Folding With Monoids</h2>
-<p>Look at <code>foldLeft</code>'s type, and at the monoid:</p>
-<pre><code class="language-scala">def foldLeft[B](z: B)(op: (B, A) =&gt; B): B
-// with A = B, a monoid's empty fits z and combine fits op</code></pre>
-<pre><code class="language-scala">val words = List("Hic", "Est", "Index")
-words.foldLeft(stringMonoid.empty)(stringMonoid.combine)    // "HicEstIndex"
-words.foldRight(stringMonoid.empty)(stringMonoid.combine)   // same, by associativity</code></pre>
-<p>The laws guarantee <code>foldLeft</code> and <code>foldRight</code> give the same answer. That's what lets an implementation choose the most efficient order.</p>
-<p>What if the elements aren't already of the monoid type? Map them first:</p>
-<pre><code class="language-scala">def combineAll[A](as: List[A], m: Monoid[A]): A =
-  as.foldLeft(m.empty)(m.combine)
+<p>A monoid's <code>empty</code> is exactly the starting value a fold needs, and <code>combine</code> is exactly its step. And since we can map elements into the monoid first, we get the workhorse of this chapter:</p>
+<pre><code class="language-cpp">template &lt;Monoid M, std::ranges::input_range R, typename F&gt;
+typename M::type fold_map(const R&amp; xs, F f) {
+    auto acc = M::empty();
+    for (const auto&amp; x : xs) acc = M::combine(acc, f(x));
+    return acc;
+}
 
-def foldMap[A, B](as: List[A], m: Monoid[B])(f: A =&gt; B): B =
-  as.foldLeft(m.empty)((b, a) =&gt; m.combine(b, f(a)))
-
-foldMap(List("a", "bb", "ccc"), intAddition)(_.length)   // 6</code></pre>
-<p><code>foldMap</code> is so general that <code>foldLeft</code> and <code>foldRight</code> can themselves be written with it, using the endofunction monoid. (That's a classic puzzle; try it.)</p>
+fold_map&lt;IntAddition&gt;(std::vector&lt;std::string&gt;{"a", "bb", "ccc"},
+                       [](const std::string&amp; s) { return (int)s.size(); });   // 6</code></pre>
+<p>Associativity guarantees that folding from the left or the right gives the same answer, which lets the implementation choose the most efficient order.</p>
+<p>Note the <code>std::ranges::input_range</code> constraint: <code>fold_map</code> works for vectors, lists, sets, views, even our <code>LazyList</code> with an iterator. The book defines a <code>Foldable</code> type class for "things you can fold"; in C++ that's simply the range concepts.</p>
+<p><code>fold_map</code> is so general that <code>fold_right</code> can be written with it, using the endofunction monoid: map each element <code>a</code> to the function <code>b ↦ f(a, b)</code>, compose them all (with <code>Dual&lt;Endo&gt;</code> for the right order), and apply the result to the starting value. The full listing does exactly that.</p>
 
 <h2><span class="sec-no">10.3</span>Associativity Means Parallelism</h2>
 <p>Because grouping doesn't matter, these are equal:</p>
-<pre><code class="language-text">((a op b) op c) op d       // fold left: a chain, depth 3
-(a op b) op (c op d)       // balanced: a tree, depth 2</code></pre>
-<p>In the balanced form, <code>a op b</code> and <code>c op d</code> don't depend on each other: they can run in parallel. So:</p>
-<pre><code class="language-scala">def foldMapV[A, B](as: IndexedSeq[A], m: Monoid[B])(f: A =&gt; B): B =
-  if as.isEmpty then m.empty
-  else if as.length == 1 then f(as(0))
-  else
-    val (l, r) = as.splitAt(as.length / 2)
-    m.combine(foldMapV(l, m)(f), foldMapV(r, m)(f))</code></pre>
-<p>Swap the recursion for <code>Par</code> from Chapter 7 and it runs on all cores. Any monoid gives you a correct parallel reduction for free.</p>
+<pre><code class="language-text">((a ⊕ b) ⊕ c) ⊕ d       a chain: depth 3, strictly sequential
+(a ⊕ b) ⊕ (c ⊕ d)       a tree:  depth 2, the two halves are independent</code></pre>
+<p>In the balanced form, <code>a ⊕ b</code> and <code>c ⊕ d</code> don't depend on each other, so they can run on different cores:</p>
+<pre><code class="language-cpp">template &lt;Monoid M, typename A, typename F&gt;
+typename M::type fold_map_par(std::span&lt;const A&gt; as, F f, int depth = 3) {
+    if (depth == 0 || as.size() &lt; 2) return fold_map_balanced&lt;M&gt;(as, f);
+    auto l = as.first(as.size() / 2), r = as.subspan(as.size() / 2);
+    auto left = std::async(std::launch::async, [=] { return fold_map_par&lt;M&gt;(l, f, depth - 1); });
+    auto right = fold_map_par&lt;M&gt;(r, f, depth - 1);
+    return M::combine(left.get(), right);
+}</code></pre>
+<p>Any monoid gives you a correct parallel reduction for free. You don't have to think about the operation at all, only about whether it's a monoid.</p>
 <div class="bridge">
-<p>This is exactly the contract of <code>std::reduce</code> with an execution policy, as opposed to <code>std::accumulate</code>. <code>std::reduce(std::execution::par, ...)</code> requires the operation to be associative and commutative, because it regroups and reorders. A monoid states the associativity requirement in the type. It's also the contract of MapReduce's combiners and of Spark's <code>reduce</code>.</p>
+<p>This is precisely the contract of <code>std::reduce</code> (and <code>std::transform_reduce</code>, which is <code>fold_map</code>) with an execution policy, as opposed to <code>std::accumulate</code>. <code>std::reduce</code> requires the operation to be associative (and commutative) because it regroups and reorders, and the initial value should be an identity. It's also the contract of MPI_Reduce, CUDA's reductions and Spark's <code>reduce</code>.</p>
 </div>
 <div class="warfield">
-<p><strong>Floating-point addition isn't associative.</strong> <code>(1e20 + -1e20) + 1.0 == 1.0</code>, but <code>1e20 + (-1e20 + 1.0) == 0.0</code>. A parallel fold over doubles may give slightly different answers from a sequential one. It's "close enough" to a monoid for most uses, but don't be surprised when results change with the number of threads.</p>
+<p><strong>Floating-point addition isn't associative.</strong> <code>(1e20 + -1e20) + 1.0 == 1.0</code>, but <code>1e20 + (-1e20 + 1.0) == 0.0</code>. A parallel sum of doubles can differ from a sequential one, and change with the thread count. It's close enough to a monoid for most uses, but it explains "non-deterministic" results from <code>std::reduce</code> and GPU reductions.</p>
 </div>
 
 <h2><span class="sec-no">10.4</span>A Clever Monoid: Counting Words in Parallel</h2>
-<p>Split a big text into chunks and count words in parallel. The trouble is that a chunk boundary might fall in the middle of a word: <code>"lorem ipsum do" | "lor sit amet"</code>. We need a summary of each chunk that can be combined correctly. Design the type so it has a monoid:</p>
-<pre><code class="language-scala">enum WC:
-  case Stub(chars: String)                         // no whitespace seen: maybe part of a word
-  case Part(lStub: String, words: Int, rStub: String)
-  // lStub: partial word at the left edge; words: complete words; rStub: partial word at the right edge
+<p>Split a big text into chunks and count words in parallel. The trouble: a chunk boundary can fall mid-word, as in <code>"lorem ipsum do" | "lor sit amet"</code>. We need a summary of each chunk that can be combined correctly. Design the summary type so it has a monoid:</p>
+<pre><code class="language-cpp">struct Stub { std::string chars; };                                  // no whitespace seen: maybe part of a word
+struct Part { std::string l_stub; int words; std::string r_stub; };   // partial | complete words | partial
+using WC = std::variant&lt;Stub, Part&gt;;
 
-val wcMonoid: Monoid[WC] = new:
-  val empty = WC.Stub("")
-  def combine(a: WC, b: WC) = (a, b) match
-    case (WC.Stub(x), WC.Stub(y))             =&gt; WC.Stub(x + y)
-    case (WC.Stub(x), WC.Part(l, w, r))       =&gt; WC.Part(x + l, w, r)
-    case (WC.Part(l, w, r), WC.Stub(y))       =&gt; WC.Part(l, w, r + y)
-    case (WC.Part(l1, w1, r1), WC.Part(l2, w2, r2)) =&gt;
-      WC.Part(l1, w1 + (if (r1 + l2).isEmpty then 0 else 1) + w2, r2)</code></pre>
-<p>The key line is the last case: where two parts meet, the right stub of the first and the left stub of the second join into one word (if non-empty).</p>
-<pre><code class="language-scala">def countWords(s: String): Int =
-  def wc(c: Char): WC =
-    if c.isWhitespace then WC.Part("", 0, "")
-    else WC.Stub(c.toString)
-  def unstub(s: String) = if s.isEmpty then 0 else 1
-  foldMapV(s.toIndexedSeq, wcMonoid)(wc) match
-    case WC.Stub(s)       =&gt; unstub(s)
-    case WC.Part(l, w, r) =&gt; unstub(l) + w + unstub(r)</code></pre>
-<div class="keypoint">When a computation needs to be split up, ask: <em>what summary of a chunk can I combine associatively?</em> Designing that summary type with a monoid in mind is a general technique for parallel and incremental algorithms.</div>
+struct WCMonoid {
+    using type = WC;
+    static type empty() { return Stub{""}; }
+    static type combine(const WC&amp; a, const WC&amp; b) {
+        return std::visit(overloaded{
+            [](const Stub&amp; x, const Stub&amp; y) -&gt; WC { return Stub{x.chars + y.chars}; },
+            [](const Stub&amp; x, const Part&amp; p) -&gt; WC { return Part{x.chars + p.l_stub, p.words, p.r_stub}; },
+            [](const Part&amp; p, const Stub&amp; y) -&gt; WC { return Part{p.l_stub, p.words, p.r_stub + y.chars}; },
+            [](const Part&amp; p1, const Part&amp; p2) -&gt; WC {
+                int joined = (p1.r_stub + p2.l_stub).empty() ? 0 : 1;   // stubs meeting at the seam: one word
+                return Part{p1.l_stub, p1.words + joined + p2.words, p2.r_stub};
+            },
+        }, a, b);
+    }
+};</code></pre>
+<p><code>std::visit</code> over two variants at once gives a 2×2 pattern match. The key case is the last: where two parts meet, the right stub of the first and the left stub of the second join into one word, if non-empty. Each character maps to a <code>WC</code> (whitespace → empty <code>Part</code>, other → one-char <code>Stub</code>), and <code>fold_map_par</code> does the rest in parallel.</p>
+<div class="keypoint">To parallelise a computation, ask: <em>what summary of a chunk can I combine associatively?</em> Designing that summary type with a monoid in mind is a general technique for parallel, distributed and incremental algorithms.</div>
 
-<h2><span class="sec-no">10.5</span>Foldable: Folding Anything</h2>
-<p><code>foldMap</code> works on lists. Trees, lazy lists and options can also be folded. Abstract over the container:</p>
-<pre><code class="language-scala">trait Foldable[F[_]]:
-  extension [A](as: F[A])
-    def foldRight[B](acc: B)(f: (A, B) =&gt; B): B
-    def foldLeft[B](acc: B)(f: (B, A) =&gt; B): B
-    def foldMap[B](f: A =&gt; B)(using m: Monoid[B]): B =
-      as.foldLeft(m.empty)((b, a) =&gt; m.combine(b, f(a)))
-    def combineAll(using m: Monoid[A]): A =
-      as.foldLeft(m.empty)(m.combine)
-    def toList: List[A] =
-      as.foldRight(List.empty[A])(_ :: _)</code></pre>
-<p><code>F[_]</code> is a type constructor, as in Chapter 9. A <code>Foldable[Tree]</code> instance says "here's how to fold a <code>Tree</code> of anything".</p>
-<p>The <code>using</code> clause is new. It asks the compiler to find a <code>Monoid[B]</code> automatically from the <strong>given</strong> instances in scope:</p>
-<pre><code class="language-scala">given Foldable[List] with
-  extension [A](as: List[A])
-    def foldRight[B](acc: B)(f: (A, B) =&gt; B) = as.foldRight(acc)(f)   // List's own method
-    def foldLeft[B](acc: B)(f: (B, A) =&gt; B) = as.foldLeft(acc)(f)
+<h2><span class="sec-no">10.5</span>Composing Monoids</h2>
+<p>Monoids combine into bigger monoids. If <code>A</code> and <code>B</code> have monoids, so does the pair:</p>
+<pre><code class="language-cpp">template &lt;Monoid MA, Monoid MB&gt; struct ProductMonoid {
+    using type = std::pair&lt;typename MA::type, typename MB::type&gt;;
+    static type empty() { return {MA::empty(), MB::empty()}; }
+    static type combine(const type&amp; x, const type&amp; y) {
+        return {MA::combine(x.first, y.first), MB::combine(x.second, y.second)};
+    }
+};
 
-given intAdditionGiven: Monoid[Int] = intAddition
-given Monoid[String] = stringMonoid
+// count and sum in ONE pass, then the mean
+std::vector&lt;int&gt; data{4, 8, 15, 16, 23, 42};
+auto [count, total] = fold_map&lt;ProductMonoid&lt;IntAddition, IntAddition&gt;&gt;(
+    data, [](int x) { return std::pair{1, x}; });
+double mean = double(total) / count;   // 18.0</code></pre>
+<p>A <code>std::map</code> whose values form a monoid is a monoid (merge keys, combine values on collision). Functions returning a monoid form a monoid. Nest them for min, max, histograms and so on, all computed in one traversal, all parallelisable.</p>
 
-List(1, 2, 3).foldMap(_ * 10)      // uses the given Monoid[Int]: 60</code></pre>
-<p>These are <strong>type classes</strong>: a trait describing a capability (<code>Monoid</code>, <code>Foldable</code>), instances for specific types, and functions that request an instance with <code>using</code>. It's how Scala FP libraries attach abstractions to types without inheritance.</p>
-<div class="bridge">
-<p>Type classes are close to C++20 concepts plus explicit specialisation. <code>template&lt;typename T&gt; requires Monoid&lt;T&gt;</code> checks the operations exist; a Scala type class also <em>passes</em> the implementation, so <code>Int</code> can have two monoids and you choose one at the call site. A closer analogy is a traits class, like <code>std::char_traits&lt;C&gt;</code> or <code>std::hash&lt;T&gt;</code>, found automatically.</p>
-</div>
-
-<h2><span class="sec-no">10.6</span>Composing Monoids</h2>
-<p>Monoids combine into bigger monoids. If <code>A</code> and <code>B</code> are monoids, so is the pair <code>(A, B)</code>:</p>
-<pre><code class="language-scala">given productMonoid[A, B](using ma: Monoid[A], mb: Monoid[B]): Monoid[(A, B)] with
-  def combine(x: (A, B), y: (A, B)) = (ma.combine(x(0), y(0)), mb.combine(x(1), y(1)))
-  val empty = (ma.empty, mb.empty)</code></pre>
-<p>A <code>Map</code> whose values are a monoid is a monoid (merge keys, combine values on collision). A function whose result is a monoid is a monoid. That lets you compute several aggregates in <strong>one pass</strong>:</p>
-<pre><code class="language-scala">// count and sum in a single fold, then compute the mean
-val (count, total) = List(4, 8, 15, 16, 23, 42).foldMap(x =&gt; (1, x))
-val mean = total.toDouble / count     // 18.0</code></pre>
-<p>The pair monoid is found automatically from <code>Monoid[Int]</code> and <code>Monoid[Int]</code>. Nest it further for min, max, histograms (a <code>Map</code> monoid) and so on, all in one traversal, and all parallelisable.</p>
-
-<div class="exercise" data-n="Exercise 10.2 · mapMergeMonoid and a bag">
-<p>Write <code>mapMergeMonoid[K, V](using Monoid[V]): Monoid[Map[K, V]]</code>. Then use it with <code>foldMap</code> to write <code>bag[A](as: IndexedSeq[A]): Map[A, Int]</code>, which counts occurrences.</p>
+<div class="exercise" data-n="Exercise 10.2 · MapMerge and bag">
+<p>Write <code>MapMerge&lt;K, MV&gt;</code>, a monoid for <code>std::map&lt;K, V&gt;</code> given a monoid <code>MV</code> for the values. Use it to write <code>bag(vector&lt;A&gt;) → map&lt;A, int&gt;</code>, which counts occurrences.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">given mapMergeMonoid[K, V](using mv: Monoid[V]): Monoid[Map[K, V]] with
-  def combine(a: Map[K, V], b: Map[K, V]) =
-    (a.keySet ++ b.keySet).map { k =&gt;
-      k -&gt; mv.combine(a.getOrElse(k, mv.empty), b.getOrElse(k, mv.empty))
-    }.toMap
-  val empty = Map()
+<pre><code class="language-cpp">template &lt;typename K, Monoid MV&gt; struct MapMerge {
+    using type = std::map&lt;K, typename MV::type&gt;;
+    static type empty() { return {}; }
+    static type combine(type a, const type&amp; b) {
+        for (const auto&amp; [k, v] : b) {
+            auto it = a.find(k);
+            a[k] = MV::combine(it == a.end() ? MV::empty() : it-&gt;second, v);
+        }
+        return a;
+    }
+};
 
-def bag[A](as: IndexedSeq[A]): Map[A, Int] =
-  foldMapV(as, summon[Monoid[Map[A, Int]]])(a =&gt; Map(a -&gt; 1))
+template &lt;typename A&gt; std::map&lt;A, int&gt; bag(const std::vector&lt;A&gt;&amp; as) {
+    return fold_map&lt;MapMerge&lt;A, IntAddition&gt;&gt;(as, [](const A&amp; a) { return std::map&lt;A, int&gt;{{a, 1}}; });
+}
 
-bag(Vector("a", "rose", "is", "a", "rose"))
-// Map(a -&gt; 2, rose -&gt; 2, is -&gt; 1)</code></pre>
-<p><code>summon[T]</code> fetches the given instance of <code>T</code>.</p>
+bag(std::vector&lt;std::string&gt;{"a", "rose", "is", "a", "rose"});   // {a: 2, is: 1, rose: 2}</code></pre>
+<p>Taking <code>a</code> by value and modifying the local copy is fine: it's local mutation, invisible to callers.</p>
 </div></details>
 
 <dl class="jargon">
   <dt>Monoid</dt><dd>A type with an associative <code>combine</code> and an identity <code>empty</code>.</dd>
-  <dt>foldMap</dt><dd>Map each element into a monoid, then combine everything.</dd>
-  <dt>Foldable</dt><dd>A type class for containers that can be folded.</dd>
-  <dt>Type class / given / using</dt><dd>A capability trait, instances of it for specific types, and parameters the compiler fills in automatically.</dd>
-  <dt>Homomorphism</dt><dd>A function between monoids that preserves combine, like <code>length</code>: <code>(a ++ b).length == a.length + b.length</code>.</dd>
+  <dt>Instance struct</dt><dd>A struct naming a type and supplying its operations, passed as a template argument (like <code>std::plus</code>). C++'s version of a type-class instance.</dd>
+  <dt>fold_map</dt><dd>Map each element into a monoid, then combine everything. <code>std::transform_reduce</code>.</dd>
+  <dt>Dual monoid</dt><dd>The same monoid with the combine arguments swapped.</dd>
+  <dt>Homomorphism</dt><dd>A function between monoids that preserves combine: <code>size(a + b) == size(a) + size(b)</code>.</dd>
 </dl>
 
 <div class="recap"><ul>
-  <li>A monoid is a combine operation plus an identity, satisfying associativity and identity laws.</li>
-  <li>Associativity makes folds order-independent and parallelisable.</li>
-  <li>To parallelise a problem, design a chunk summary type with a monoid (like word count).</li>
-  <li>Foldable abstracts folding over containers. Type classes attach monoids to types.</li>
-  <li>Monoids compose: products, maps and functions of monoids are monoids, giving multi-aggregate single passes.</li>
+  <li>A monoid is a combine operation plus an identity, obeying associativity and identity laws.</li>
+  <li>In C++: a concept for the operations, instance structs for each monoid, laws checked by tests.</li>
+  <li>Associativity makes folds order-independent and parallel; it's the <code>std::reduce</code> contract.</li>
+  <li>To parallelise a problem, design a chunk summary type with a monoid (like the word count).</li>
+  <li>Monoids compose (pairs, maps, functions), giving many aggregates in one pass.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch10.cpp"><span class="l-k">Full runnable listing</span>code/ch10.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

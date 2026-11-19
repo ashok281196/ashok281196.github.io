@@ -16,158 +16,176 @@
   <div class="chapter-num">01</div>
   <div class="chapter-kicker">Part I · Foundations</div>
   <h1>What Functional Programming Actually Is</h1>
-  <p class="chapter-sub">One constraint, no side effects, and why taking it seriously makes code easier to test, reuse and reason about. We'll refactor one impure function into a pure one and watch new abilities appear.</p>
+  <p class="chapter-sub">One constraint, no side effects, and why taking it seriously makes code easier to test, reuse and reason about. We refactor one impure C++ function into a pure one and watch new abilities appear.</p>
 </header>
 
 <h2><span class="sec-no">1.1</span>The Definition</h2>
-<p>Functional programming means building programs out of <strong>pure functions</strong>. A pure function has <strong>no side effects</strong>: the only thing it does is compute a result from its inputs.</p>
+<p>Functional programming means building programs out of <strong>pure functions</strong>. A pure function has <strong>no side effects</strong>: the only thing it does is compute a result from its arguments.</p>
 <p>A <strong>side effect</strong> is anything a function does besides returning a value:</p>
 <ul>
-  <li>modifying a variable outside its own scope, or mutating an argument</li>
+  <li>modifying a global, a static, a member through <code>this</code>, or an argument passed by non-const reference</li>
   <li>throwing an exception</li>
-  <li>printing, reading input, writing a file, making a network call</li>
+  <li>printing, reading input, writing a file, sending a packet</li>
   <li>reading the clock, generating a random number</li>
 </ul>
-<p>That list looks like most of what useful programs do, and that's the fair objection. The answer, which the whole book builds toward, is that FP doesn't stop you doing these things. It changes <em>where</em> they happen. The core of the program is pure and only <em>describes</em> effects. A thin outer layer actually performs them.</p>
+<p>That looks like most of what useful programs do, and it's a fair objection. The answer, which the whole book builds toward, is that FP doesn't stop you doing these things. It changes <em>where</em> they happen. The core of the program is pure and only <em>describes</em> effects. A thin outer layer performs them.</p>
 <div class="keypoint">FP does not ban effects. It pushes them to the edges, so that the large, interesting middle of your program is made of functions you can understand in isolation.</div>
 
 <h2><span class="sec-no">1.2</span>A Function With Side Effects</h2>
-<p>Here's a typical piece of code: book a train ticket and charge the customer's card.</p>
-<pre><code class="language-scala">class Ticket(val route: String, val price: Int)
+<p>A typical piece of code: book a train ticket and charge the customer's card.</p>
+<pre><code class="language-cpp">struct Ticket { std::string route; int price; };
 
-class PaymentGateway:
-  def charge(card: String, amount: Int): Unit =
-    // talks to the bank over the network
-    ???
+struct PaymentGateway {
+    void charge(const std::string&amp; card, int amount);   // talks to the bank
+};
 
-class BookingService:
-  def book(card: String, route: String, gateway: PaymentGateway): Ticket =
-    val t = Ticket(route, 450)
-    gateway.charge(card, t.price)   // side effect!
-    t</code></pre>
-<p>It works, but look at what it costs us:</p>
+Ticket book(const std::string&amp; card, const std::string&amp; route, PaymentGateway&amp; gw) {
+    Ticket t{route, 450};
+    gw.charge(card, t.price);     // side effect, hidden inside
+    return t;
+}</code></pre>
+<p>It works, but look at what it costs:</p>
 <ol>
-  <li><strong>Testing is awkward.</strong> To test <code>book</code> we need a fake <code>PaymentGateway</code>, a mock framework, and checks that <code>charge</code> was called exactly once with the right amount.</li>
-  <li><strong>It doesn't compose.</strong> A family books four tickets. Calling <code>book</code> four times hits the bank four times, with four fees and four chances to fail halfway. We'd like <em>one</em> charge for the total, but the charge is fused into <code>book</code>.</li>
+  <li><strong>Testing is awkward.</strong> To test <code>book</code> you need a fake gateway (a virtual interface, or a template parameter, or gMock) and checks that <code>charge</code> was called exactly once with the right amount.</li>
+  <li><strong>It doesn't compose.</strong> A family books four tickets. Calling <code>book</code> four times hits the bank four times, with four fees and four chances to fail halfway. You'd like <em>one</em> charge for the total, but the charge is fused into <code>book</code>.</li>
 </ol>
 
 <h2><span class="sec-no">1.3</span>Step 1: Return the Effect Instead of Doing It</h2>
-<p>The fix is to make the charge a <strong>value</strong>. Instead of performing the charge, <code>book</code> returns a description of the charge alongside the ticket.</p>
-<pre><code class="language-scala">case class Charge(card: String, amount: Int):
-  def combine(other: Charge): Charge =
-    if card == other.card then Charge(card, amount + other.amount)
-    else throw IllegalArgumentException("different cards")
+<p>Make the charge a <strong>value</strong>. Instead of performing it, <code>book</code> returns a description of it alongside the ticket:</p>
+<pre><code class="language-cpp">struct Charge {
+    std::string card;
+    int amount;
+    bool operator==(const Charge&amp;) const = default;
 
-class BookingService:
-  def book(card: String, route: String): (Ticket, Charge) =
-    val t = Ticket(route, 450)
-    (t, Charge(card, t.price))</code></pre>
-<p><code>book</code> is now pure. It doesn't know a payment gateway exists. Some other part of the program, the outer layer, takes the <code>Charge</code> and actually sends it to the bank.</p>
-<p>(<code>combine</code> still throws. We'll fix that in Chapter 4, when errors become values too.)</p>
+    Charge combine(const Charge&amp; other) const {
+        if (card != other.card) throw std::invalid_argument("different cards");
+        return {card, amount + other.amount};
+    }
+};
 
-<h2><span class="sec-no">1.4</span>Step 2: Collect New Abilities for Free</h2>
-<p>Because charges are values, we can work with them like any data:</p>
-<pre><code class="language-scala">def bookMany(card: String, route: String, n: Int): (List[Ticket], Charge) =
-  val bookings = List.fill(n)(book(card, route))
-  val (tickets, charges) = bookings.unzip
-  (tickets, charges.reduce((c1, c2) =&gt; c1.combine(c2)))</code></pre>
-<p>Four tickets, one charge. We reused <code>book</code> unchanged. And since it's just values, we can go further: merge all charges from a whole day per card, before sending anything to the bank.</p>
-<pre><code class="language-scala">def coalesce(charges: List[Charge]): List[Charge] =
-  charges.groupBy(_.card).values.map(_.reduce(_.combine(_))).toList</code></pre>
-<p>Testing is now an equality check: <code>assert(book("c1", "BLR-JAI") == ...)</code>. No mocks.</p>
-<div class="analogy">The impure version is a chef who cooks and also pays the supplier while plating. The pure version writes the supplier's invoice and puts it on a spike. At the end of the day someone pays all the invoices in one go. The chef's job got simpler, and the restaurant can now batch, audit or cancel payments.</div>
+struct Booking { Ticket ticket; Charge charge; };
+
+Booking book(const std::string&amp; card, const std::string&amp; route) {
+    Ticket t{route, 450};
+    return {t, Charge{card, t.price}};
+}</code></pre>
+<p><code>book</code> is now pure. It doesn't know a payment gateway exists. Some other part of the program, the outer layer, takes the <code>Charge</code> and sends it to the bank.</p>
+<p>(<code>combine</code> still throws. We'll fix that in the exercises, and properly in Chapter 4.)</p>
+
+<h2><span class="sec-no">1.4</span>Step 2: New Abilities for Free</h2>
+<p>Because charges are values, you can work with them like any data:</p>
+<pre><code class="language-cpp">std::pair&lt;std::vector&lt;Ticket&gt;, Charge&gt;
+book_many(const std::string&amp; card, const std::string&amp; route, int n) {
+    std::vector&lt;Ticket&gt; tickets;
+    Charge total{card, 0};
+    for (int i = 0; i &lt; n; ++i) {
+        auto [t, c] = book(card, route);
+        tickets.push_back(t);
+        total = total.combine(c);
+    }
+    return {tickets, total};
+}</code></pre>
+<p>Four tickets, one charge, and <code>book</code> was reused unchanged. Go further: merge a whole day's charges per card before anything reaches the bank.</p>
+<pre><code class="language-cpp">std::vector&lt;Charge&gt; coalesce(const std::vector&lt;Charge&gt;&amp; charges) {
+    std::map&lt;std::string, int&gt; by_card;
+    for (const auto&amp; c : charges) by_card[c.card] += c.amount;
+    std::vector&lt;Charge&gt; out;
+    for (const auto&amp; [card, amt] : by_card) out.push_back({card, amt});
+    return out;
+}</code></pre>
+<p>Testing is now an equality check: <code>assert(book("c1", "BLR-JAI").charge == Charge{"c1", 450})</code>. No mocks, no interfaces.</p>
+<p>(Yes, <code>book_many</code> and <code>coalesce</code> mutate local variables. That's fine: no caller can see it. More on this in 1.7.)</p>
+<div class="analogy">The impure version is a chef who cooks and also pays the supplier while plating. The pure version writes the supplier's invoice and puts it on a spike. At the end of the day someone pays all the invoices at once. The chef's job got simpler, and the restaurant can now batch, audit or cancel payments.</div>
 
 <h2><span class="sec-no">1.5</span>Referential Transparency</h2>
 <p>We need a precise test for "pure". Here it is.</p>
 <p>An expression is <strong>referentially transparent (RT)</strong> if you can replace it with its result anywhere in the program without changing what the program means. A function is <strong>pure</strong> if calling it with RT arguments always gives an RT expression.</p>
-<p><code>2 + 3</code> is RT: wherever it appears you can write <code>5</code> and nothing changes. Now strings:</p>
-<pre><code class="language-scala">val x = "Hello"
-val r1 = x.reverse       // "olleH"
-val r2 = x.reverse       // "olleH"
-// replace x with its definition:
-val r1b = "Hello".reverse
-val r2b = "Hello".reverse   // same results; x is RT</code></pre>
-<p>Now something mutable:</p>
-<pre><code class="language-scala">val sb = StringBuilder("Hello")
-val y  = sb.append(", World")
-val r1 = y.toString     // "Hello, World"
-val r2 = y.toString     // "Hello, World"
+<p><code>2 + 3</code> is RT: write <code>5</code> anywhere instead and nothing changes. A <code>std::string</code> used as a value is RT too:</p>
+<pre><code class="language-cpp">const std::string x = "Hello";
+std::string r1(x.rbegin(), x.rend());   // "olleH"
+std::string r2(x.rbegin(), x.rend());   // "olleH" — same expression, same result</code></pre>
+<p>Now a mutating member function:</p>
+<pre><code class="language-cpp">std::string sb = "Hello";
+std::string&amp; y = sb.append(", World");
+std::string a = y;                      // "Hello, World"
 
-// substitute y with its definition:
-val sb2 = StringBuilder("Hello")
-val r1b = sb2.append(", World").toString   // "Hello, World"
-val r2b = sb2.append(", World").toString   // "Hello, World, World"  ← different!</code></pre>
-<p><code>append</code> is not RT: the same expression gave two different answers because it changed hidden state. That's the whole problem with side effects. You can't understand an expression by looking at it. You also need to know everything that happened before.</p>
+// substitute y with the expression that defined it:
+std::string b = sb.append(", World");   // "Hello, World, World"  ← different!</code></pre>
+<p><code>append</code> isn't RT: the same expression gave two answers because it changed hidden state. That's the whole problem with side effects. You can't understand an expression by looking at it; you also need to know everything that happened to <code>sb</code> before.</p>
 
 <h2><span class="sec-no">1.6</span>The Substitution Model</h2>
-<p>RT gives you a simple way to reason about code: <strong>replace things with their definitions</strong>, like simplifying algebra.</p>
-<pre><code class="language-scala">def square(n: Int) = n * n
-def sumOfSquares(a: Int, b: Int) = square(a) + square(b)
+<p>RT gives you a simple way to reason: <strong>replace things with their definitions</strong>, as in algebra.</p>
+<pre><code class="language-cpp">constexpr int square(int n) { return n * n; }
+constexpr int sum_of_squares(int a, int b) { return square(a) + square(b); }
 
-sumOfSquares(3, 4)
+sum_of_squares(3, 4)
 = square(3) + square(4)
 = 3 * 3 + 4 * 4
 = 9 + 16
 = 25</code></pre>
-<p>Each step is a local rewrite. You never need to ask "what is the state of memory right now?" This is <strong>local reasoning</strong>, and it's what lets you understand a 30-line pure function without reading the 3,000 lines around it.</p>
+<p>Each step is a local rewrite. You never ask "what's in memory right now?" This is <strong>local reasoning</strong>: it lets you understand a 30-line pure function without reading the 3,000 lines around it.</p>
+<p>You already rely on this in C++. A <code>constexpr</code> function the compiler evaluates at compile time is doing exactly this substitution, which is why <code>constexpr</code> code can't do I/O. Optimisers do it too: common-subexpression elimination is only valid for expressions the compiler can prove are RT.</p>
 <div class="bridge">
-<p>You already prize this in C++. A <code>constexpr</code> function the compiler can evaluate at compile time is basically RT. A <code>const</code> member function that doesn't touch <code>mutable</code> fields is a step toward it. Data races are what you get when two threads break RT on shared state at once. FP applies that discipline to the whole program by default, not just to the hot paths you've had to debug.</p>
+<p>The book uses the same examples with Scala's <code>String</code> (immutable, RT) and <code>StringBuilder</code> (mutable, not RT). In C++, a <code>const std::string</code> plays the first role and <code>append</code> on a non-const string plays the second.</p>
 </div>
 
 <h2><span class="sec-no">1.7</span>Why It's Worth It</h2>
 <ul>
   <li><strong>Modularity.</strong> A pure function's behaviour is entirely in its signature and body. Anyone can reuse it without knowing its context.</li>
-  <li><strong>Testability.</strong> Inputs in, outputs out. You'll see in Chapter 8 that this enables <em>property-based</em> testing: checking a law against thousands of random inputs.</li>
-  <li><strong>Concurrency.</strong> Immutable data can be shared across threads without locks.</li>
-  <li><strong>Refactoring.</strong> If you can always replace an expression with its value, extracting, inlining and reordering code is safe.</li>
+  <li><strong>Testability.</strong> Inputs in, outputs out. In Chapter 8 this enables <em>property-based</em> testing: checking a law against thousands of random inputs.</li>
+  <li><strong>Concurrency.</strong> Immutable data can be shared across threads with no locks. Data races are, by definition, two threads breaking RT on shared state.</li>
+  <li><strong>Refactoring.</strong> If an expression can always be replaced by its value, extracting, inlining and reordering code is safe.</li>
 </ul>
 <div class="warfield">
-<p><strong>"Pure" is about what callers can observe, not how the function is written inside.</strong> A function that builds a local mutable array, fills it in a loop, and returns an immutable copy is still pure: no one outside can tell. Chapter 13 makes this precise with the <code>ST</code> type. Don't refuse an efficient local loop for ideological reasons.</p>
+<p><strong>"Pure" is about what callers can observe, not how the function is written inside.</strong> A function that builds a local <code>std::vector</code>, fills it in a loop and returns it by value is still pure: no one outside can tell. In C++ this is the normal, fast way to write pure functions. Chapter 13 shows how far the idea goes. Don't give up an efficient local loop for ideological reasons.</p>
 </div>
 
 <h2><span class="sec-no">1.8</span>Exercises</h2>
 <div class="exercise" data-n="Exercise 1.1">
-<p>Which of these are referentially transparent? <code>(a)</code> <code>math.max(3, 7)</code> <code>(b)</code> <code>System.currentTimeMillis()</code> <code>(c)</code> <code>List(1,2,3).map(_ + 1)</code> <code>(d)</code> <code>scala.util.Random.nextInt(10)</code> <code>(e)</code> <code>println("hi")</code></p>
+<p>Which are referentially transparent? (a) <code>std::max(3, 7)</code> (b) <code>std::chrono::steady_clock::now()</code> (c) <code>std::views::iota(1, 4)</code> (d) <code>rand() % 10</code> (e) <code>std::cout &lt;&lt; "hi"</code></p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<p>(a) and (c) are RT. (b) and (d) give different results each call, so you can't replace them with any one value. (e) returns <code>()</code> every time, but replacing <code>println("hi")</code> with <code>()</code> deletes the printing, which changes the program's meaning. Not RT.</p>
+<p>(a) and (c) are RT. (b) and (d) give different results each call, so you can't replace them with any one value. (e) returns <code>std::cout</code> every time, but replacing the expression with <code>std::cout</code> deletes the printing, which changes the program. Not RT.</p>
 </div></details>
 
 <div class="exercise" data-n="Exercise 1.2">
-<p>Fix <code>Charge.combine</code> so the case "different cards" can't throw. Hint: what could the function return instead of a <code>Charge</code>?</p>
+<p>Fix <code>Charge::combine</code> so the "different cards" case can't throw. What could it return instead of a <code>Charge</code>?</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<p>Return a value that can say "no result": <code>Option[Charge]</code>.</p>
-<pre><code class="language-scala">def combine(other: Charge): Option[Charge] =
-  if card == other.card then Some(Charge(card, amount + other.amount))
-  else None</code></pre>
-<p>The type now tells callers the truth: combining can fail. Chapter 4 is all about making this pleasant to work with.</p>
+<pre><code class="language-cpp">std::optional&lt;Charge&gt; combine(const Charge&amp; other) const {
+    if (card != other.card) return std::nullopt;
+    return Charge{card, amount + other.amount};
+}</code></pre>
+<p>The return type now tells callers the truth: combining can fail. Chapter 4 is about making this pleasant to work with.</p>
 </div></details>
 
 <div class="exercise" data-n="Exercise 1.3">
 <p>This function uses a mutable variable. Is it pure?</p>
-<pre><code class="language-scala">def sumTo(n: Int): Int =
-  var acc = 0
-  for i &lt;- 1 to n do acc += i
-  acc</code></pre>
 </div>
+<pre><code class="language-cpp">int sum_to(int n) {
+    int acc = 0;
+    for (int i = 1; i &lt;= n; ++i) acc += i;
+    return acc;
+}</code></pre>
 <details class="sol"><summary>Show solution</summary><div>
-<p>Yes. <code>acc</code> is created, mutated and dropped inside the call, so no caller can observe it. <code>sumTo(10)</code> can always be replaced with <code>55</code>. Purity is about the outside view.</p>
+<p>Yes. <code>acc</code> is created, mutated and destroyed inside the call, so no caller can observe it. <code>sum_to(10)</code> can always be replaced with <code>55</code>. You could even mark it <code>constexpr</code>.</p>
 </div></details>
 
 <dl class="jargon">
-  <dt>Side effect</dt><dd>Anything a function does other than return a value: mutation, I/O, exceptions, reading the clock.</dd>
-  <dt>Pure function</dt><dd>A function whose result depends only on its inputs and which has no side effects.</dd>
+  <dt>Side effect</dt><dd>Anything a function does other than return a value: mutation visible outside, I/O, exceptions, reading the clock.</dd>
+  <dt>Pure function</dt><dd>A function whose result depends only on its arguments and which has no side effects.</dd>
   <dt>Referential transparency</dt><dd>An expression can be replaced by its value without changing the program's meaning.</dd>
-  <dt>Substitution model</dt><dd>Reasoning about code by repeatedly replacing names with their definitions, like algebra.</dd>
+  <dt>Substitution model</dt><dd>Reasoning by replacing names with their definitions, like algebra (and like <code>constexpr</code> evaluation).</dd>
 </dl>
 
 <div class="recap"><ul>
   <li>FP is programming with pure functions. Effects move to the edge of the program.</li>
   <li>Turn effects into values (a <code>Charge</code> instead of a charge) and you can combine, batch and test them.</li>
   <li>RT is the test for purity: replace an expression with its result and nothing changes.</li>
-  <li>RT enables the substitution model and local reasoning.</li>
+  <li>Local mutation that callers can't see doesn't break purity.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch01.cpp"><span class="l-k">Full runnable listing</span>code/ch01.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

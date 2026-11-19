@@ -63,7 +63,7 @@
   const KEYWORDS = {
     python: 'def|return|import|from|for|while|if|elif|else|in|is|not|and|or|class|with|as|try|except|raise|lambda|pass|break|continue|None|True|False|print|assert|yield|global|nonlocal',
     bash: 'sudo|apt|install|pip|pip3|git|clone|cd|mkdir|wget|curl|unzip|echo|export|source|cmake|make|mv|cp|rm|set|python3|python|conda|activate|tar|kill|wait|sleep|chmod',
-    cpp: 'auto|int|float|double|void|bool|char|const|constexpr|class|struct|public|private|protected|return|if|else|for|while|new|delete|template|typename|namespace|using|include|true|false|nullptr|static|virtual|override',
+    cpp: 'auto|int|float|double|void|bool|char|const|constexpr|consteval|class|struct|public|private|protected|return|if|else|for|while|do|new|delete|template|typename|namespace|using|include|true|false|nullptr|static|virtual|override|concept|requires|decltype|mutable|noexcept|operator|size_t|long|unsigned|switch|case|break|default|this|inline|enum|explicit|friend|throw|try|catch',
     yaml: 'true|false|null',
     scala: 'def|val|var|lazy|object|class|trait|enum|case|extends|with|given|using|extension|import|match|if|then|else|for|yield|do|while|return|new|this|override|sealed|final|private|protected|type|opaque|true|false|null|end|throw|try|catch|inline'
   };

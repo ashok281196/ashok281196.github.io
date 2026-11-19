@@ -16,170 +16,164 @@
   <div class="chapter-num">14</div>
   <div class="chapter-kicker">Part IV · Effects and I/O</div>
   <h1>Streaming I/O &amp; Where Next</h1>
-  <p class="chapter-sub">IO alone handles one-shot effects well but large data badly. We look at why lazy I/O fails, build the core of a pull-based stream with guaranteed resource cleanup, and finish with a map from this book to the libraries real Scala teams use.</p>
+  <p class="chapter-sub">IO alone handles one-shot effects well but large data badly. We look at why a hand-written loop doesn't compose and why lazy I/O leaks, build stream transducers in C++ that compose with a pipe operator, run them over a 50,000-line file that's always closed, and finish with where these ideas live in real C++.</p>
 </header>
 
 <h2><span class="sec-no">14.1</span>The Problem: Big Files</h2>
-<p>Task: does a file have more than 40,000 lines? With the <code>IO</code> from Chapter 13, the honest version is imperative code inside one big <code>IO</code>:</p>
-<pre><code class="language-scala">def linesGt40k(filename: String): IO[Boolean] = IO {
-  val src = io.Source.fromFile(filename)
-  try
-    var count = 0
-    val lines = src.getLines()
-    while count &lt;= 40000 &amp;&amp; lines.hasNext do
-      lines.next()
-      count += 1
-    count &gt; 40000
-  finally src.close()
+<p>Task: does a log file have more than 40,000 non-blank lines? The honest imperative version:</p>
+<pre><code class="language-cpp">bool more_than_40k(const std::string&amp; path) {
+    std::ifstream in(path);                 // RAII: closed on every exit path
+    std::string line;
+    int count = 0;
+    while (count &lt;= 40000 &amp;&amp; std::getline(in, line))
+        if (!line.empty()) ++count;
+    return count &gt; 40000;
 }</code></pre>
-<p>It's correct: it stops early, uses constant memory and always closes the file. But the logic (count, stop at a threshold) is fused with the I/O. If we now want "skip blank lines", "only count lines with an error" or "stop at the first match", we write a new loop each time. We lost the composability of Part I.</p>
+<p>It's correct: it stops early, uses constant memory, and always closes the file. But the logic (skip blanks, count, stop at a threshold) is fused with the I/O. Now someone wants "only lines containing ERROR", or "the first 5 matches", or the same logic over a socket instead of a file. Each time we write a new loop. We've lost the composability of Part I.</p>
 
-<h3>Why not a lazy iterator?</h3>
-<p>Return <code>IO[Iterator[String]]</code> and let callers use <code>filter</code>, <code>take</code>, <code>map</code>? This is <strong>lazy I/O</strong>, and it's broken: when should the file close? If the iterator closes it at the end, a caller who stops early leaks the handle. If the caller must close it, they can forget. And the iterator is mutable, so passing it to two functions gives wrong results. The resource's lifetime has escaped.</p>
+<h3>Why not a lazy range over the file?</h3>
+<p>Return a lazy range of lines, and let callers use <code>filter</code> and <code>take</code>? This is <strong>lazy I/O</strong>. In C++ it's <code>std::views::istream</code> or a generator over an <code>ifstream</code>:</p>
+<pre><code class="language-cpp">auto lines_of(std::istream&amp; in);        // a lazy view: who owns `in`? when is it closed?</code></pre>
+<p>The view doesn't own the stream, so the caller has to keep the file alive exactly as long as some consumer is still pulling, and close it afterwards. Return the view from a function that opened the file, and it dangles. Make the range own the file, and an early-stopping consumer that stashes the range somewhere keeps the file open indefinitely. The resource's lifetime has escaped from the code that knows when processing is finished.</p>
 <div class="warfield">
-<p>Lazy I/O is the classic trap: the code looks functional, but file handles, sockets and DB cursors leak whenever a consumer stops early or throws. The fix isn't more care; it's an abstraction that owns the resource for its whole lifetime.</p>
+<p>Lazy I/O is the classic trap: the code looks functional, but file handles, sockets and DB cursors leak or dangle whenever a consumer stops early, stores the range, or throws. The fix isn't more care; it's an abstraction that owns the resource for exactly the duration of a run.</p>
 </div>
 
 <h2><span class="sec-no">14.2</span>A Stream Transducer</h2>
-<p>Start without effects. Describe a stream <em>transformation</em> as a small state machine that, at each step, either emits a value, asks for the next input, or stops:</p>
-<pre><code class="language-scala">enum Process[I, O]:
-  case Emit(head: O, tail: Process[I, O] = Halt[I, O]())
-  case Await(recv: Option[I] =&gt; Process[I, O])    // None means: input is exhausted
-  case Halt()
+<p>First, without effects. Describe a stream <em>transformation</em> as a tiny state machine that, at each step, either emits a value, asks for the next input, or stops:</p>
+<pre><code class="language-cpp">template &lt;typename I, typename O&gt; struct PNode;
+template &lt;typename I, typename O&gt; struct Process { std::shared_ptr&lt;const PNode&lt;I, O&gt;&gt; node; };
 
-  def apply(s: LazyList[I]): LazyList[O] = this match
-    case Halt()        =&gt; LazyList()
-    case Await(recv)   =&gt; s match
-      case h #:: t =&gt; recv(Some(h))(t)
-      case _       =&gt; recv(None)(s)
-    case Emit(h, t)    =&gt; h #:: t(s)</code></pre>
-<p>Simple building blocks:</p>
-<pre><code class="language-scala">object Process:
-  def liftOne[I, O](f: I =&gt; O): Process[I, O] =
-    Await:
-      case Some(i) =&gt; Emit(f(i))
-      case None    =&gt; Halt()
+template &lt;typename I, typename O&gt; struct PNode {
+    struct Emit  { O head; Process&lt;I, O&gt; tail; };                                // output a value, continue
+    struct Await { std::function&lt;Process&lt;I, O&gt;(std::optional&lt;I&gt;)&gt; recv; };    // need input (nullopt = end)
+    struct Halt  {};                                                           // done
+    std::variant&lt;Emit, Await, Halt&gt; v;
+};</code></pre>
+<p>Building blocks are small recursive definitions (the helpers <code>emit</code>, <code>await</code> and <code>halt</code> just construct nodes):</p>
+<pre><code class="language-cpp">template &lt;typename I, typename P&gt; Process&lt;I, I&gt; filter(P p) {
+    return await&lt;I, I&gt;([p](std::optional&lt;I&gt; i) -&gt; Process&lt;I, I&gt; {
+        if (!i) return halt&lt;I, I&gt;();
+        return p(*i) ? emit&lt;I, I&gt;(*i, filter&lt;I&gt;(p)) : filter&lt;I&gt;(p);
+    });
+}
 
-  def filter[I](p: I =&gt; Boolean): Process[I, I] =
-    Await[I, I] {
-      case Some(i) if p(i) =&gt; Emit(i)
-      case _               =&gt; Halt()
-    }.repeat
+template &lt;typename I&gt; Process&lt;I, int&gt; count(int n = 0) {
+    return await&lt;I, int&gt;([n](std::optional&lt;I&gt; i) -&gt; Process&lt;I, int&gt; {
+        if (!i) return halt&lt;I, int&gt;();
+        return emit&lt;I, int&gt;(n + 1, count&lt;I&gt;(n + 1));     // running count
+    });
+}
 
-  def take[I](n: Int): Process[I, I] =
-    if n &lt;= 0 then Halt()
-    else Await:
-      case Some(i) =&gt; Emit(i, take(n - 1))
-      case None    =&gt; Halt()
+template &lt;typename I, typename P&gt; Process&lt;I, bool&gt; exists(P p) {   // emits once, then halts
+    return await&lt;I, bool&gt;([p](std::optional&lt;I&gt; i) -&gt; Process&lt;I, bool&gt; {
+        if (!i) return emit&lt;I, bool&gt;(false);
+        return p(*i) ? emit&lt;I, bool&gt;(true) : exists&lt;I&gt;(p);
+    });
+}</code></pre>
+<p>The key combinator is <strong>pipe</strong>: feed the output of one process into another. We spell it <code>|</code>, like ranges:</p>
+<pre><code class="language-cpp">template &lt;typename I, typename M, typename O&gt;
+Process&lt;I, O&gt; operator|(Process&lt;I, M&gt; p1, Process&lt;M, O&gt; p2) {
+    // p2 halted       → halt (and never pull from p1 again)
+    // p2 emits h      → emit h, continue with p1 | rest of p2
+    // p2 awaits:
+    //   p1 emits h    → feed h to p2
+    //   p1 halted     → tell p2 the input is over
+    //   p1 awaits     → await an input I, give it to p1, keep piping
+}</code></pre>
+<p>Now pipelines compose, and the logic is pure and testable on an in-memory vector:</p>
+<pre><code class="language-cpp">auto more_than_40k_nonblank =
+      filter&lt;std::string&gt;([](const std::string&amp; s) { return !s.empty(); })
+    | count&lt;std::string&gt;()
+    | exists&lt;int&gt;([](int n) { return n &gt; 40000; });</code></pre>
+<p>Each element flows through the whole pipeline before the next is read, as with lazy lists. And because <code>exists</code> halts as soon as it knows the answer, the pipe stops pulling: in the listing, running <code>exists(x &gt; 2)</code> against an <em>infinite</em> source pulls exactly 3 values.</p>
 
-  def count[I]: Process[I, Int] =
-    def go(n: Int): Process[I, Int] = Await:
-      case Some(_) =&gt; Emit(n + 1, go(n + 1))
-      case None    =&gt; Halt()
-    go(0)</code></pre>
-<p>(<code>repeat</code> restarts a process when it halts, turning "handle one element" into "handle all of them".) The important combinator is <strong>pipe</strong>, written <code>|&gt;</code>: feed the output of one process into another. It's a function composition for state machines, and it fuses: each element flows through the whole pipeline before the next is read, as with lazy lists.</p>
-<pre><code class="language-scala">val moreThan40k: Process[String, Boolean] =
-  filter[String](_.nonEmpty) |&gt; count |&gt; exists(_ &gt; 40000)</code></pre>
-<p>The logic is now pure, reusable and testable on a <code>LazyList</code> in memory. The I/O is a separate driver that reads lines from a file, feeds them in, and closes the file when the process halts, including when it halts early.</p>
+<h2><span class="sec-no">14.3</span>Effects and Resource Safety</h2>
+<p>The process only describes the transformation. A <strong>driver</strong> runs it against a source of input, pulling only when the process asks:</p>
+<pre><code class="language-cpp">template &lt;typename I, typename O, typename Pull&gt;
+std::vector&lt;O&gt; drive(Process&lt;I, O&gt; p, Pull&amp;&amp; pull) {           // pull: () -&gt; optional&lt;I&gt;
+    std::vector&lt;O&gt; out;
+    for (;;) {
+        if (auto* e = get_if&lt;Emit&gt;(...))       { out.push_back(e-&gt;head); p = e-&gt;tail; }
+        else if (auto* a = get_if&lt;Await&gt;(...)) { p = a-&gt;recv(pull()); }
+        else return out;                                        // halted: stop pulling
+    }
+}</code></pre>
+<p>Resource safety comes from who owns the resource. The file belongs to the <em>source</em>, and the source lives exactly as long as one run:</p>
+<pre><code class="language-cpp">class LineSource {                      // owns the file; RAII closes it
+    std::unique_ptr&lt;Handle&gt; h_;         // Handle wraps std::ifstream, logs open/close
+public:
+    LineSource(const std::string&amp; path, FileLog* log);
+    std::optional&lt;std::string&gt; operator()();     // next line, or nullopt at EOF
+};
 
-<h2><span class="sec-no">14.3</span>Adding Effects and Resource Safety</h2>
-<p>Generalise <code>Await</code> so that instead of waiting for a pure input, it requests an <em>effect</em> <code>F[A]</code> (like reading a line through <code>IO</code>), and give every process a way to clean up:</p>
-<pre><code class="language-scala">enum Process[F[_], O]:
-  case Await[F[_], A, O](req: F[A], recv: Either[Throwable, A] =&gt; Process[F, O]) extends Process[F, O]
-  case Emit(head: O, tail: Process[F, O])
-  case Halt(err: Throwable)          // End (normal), Kill (stopped by consumer), or a real error</code></pre>
-<p>Three ideas make it safe:</p>
-<ol>
-  <li><strong>Halt carries a reason.</strong> Normal end, killed by a consumer (e.g. <code>take(5)</code> got enough) or failed.</li>
-  <li><strong>onHalt / onComplete.</strong> Every process can attach a finaliser that runs on any kind of halt. A resource is acquired and its release attached in one combinator, so they can't be separated.</li>
-  <li><strong>Downstream kills upstream.</strong> When a consumer halts early, the pipe sends <code>Kill</code> to the producer, which runs its finalisers. Early exit can't leak.</li>
-</ol>
-<pre><code class="language-scala">// shape of a safe resource combinator
-def resource[R, O](acquire: IO[R])(use: R =&gt; Process[IO, O])(release: R =&gt; Process[IO, O]): Process[IO, O]
-
-def lines(filename: String): Process[IO, String] =
-  resource(IO(io.Source.fromFile(filename)))(
-    src =&gt; /* emit src.getLines() one at a time */ ???
-  )(src =&gt; eval_(IO(src.close())))
-
-// the whole program: pure description, run once at the edge
-val program = lines("big.log") |&gt; filter(_.nonEmpty) |&gt; count |&gt; exists(_ &gt; 40000)</code></pre>
-<div class="keypoint">A streaming library is a description language for incremental, effectful pipelines where resource lifetime is part of the description. Composition stays pure, memory stays constant, and the file closes whether the pipeline finishes, fails or stops early.</div>
+template &lt;typename O&gt;
+std::vector&lt;O&gt; run_file(const std::string&amp; path, Process&lt;std::string, O&gt; p, FileLog* log) {
+    LineSource src(path, log);
+    return drive(p, src);
+}   // the file is closed here: at EOF, on early halt, or if anything throws</code></pre>
+<p>Running the pipeline over a 50,000-line file:</p>
+<pre><code class="language-text">read 44446 of 50000 lines, file closed: 1</code></pre>
+<p>It stopped as soon as the answer was known, and the file was closed. Asking for the first 3 non-blank lines reads 4 lines and closes the file; a search that never matches reads all 50,000 and closes it. The listing asserts all three. The pipeline itself never mentions files, so the same <code>more_than_40k_nonblank</code> works on a socket or a vector.</p>
+<div class="keypoint">A streaming library is a description language for incremental pipelines in which the resource's lifetime is part of the description. Composition stays pure, memory stays constant, and cleanup happens whether the pipeline finishes, fails or stops early.</div>
 <div class="bridge">
-<p>Resource safety here plays the role RAII plays in C++: tie release to the structure, not to the programmer's discipline. The difference is that a stream's lifetime isn't a lexical scope; it's however long the pipeline runs. The stream library tracks that lifetime the way a destructor tracks scope.</p>
+<p>The book generalises <code>Await</code> to request an <em>effect</em> <code>F[A]</code> (like reading a line through <code>IO</code>) and attaches finalisers to every process with <code>onHalt</code>, so that when a downstream consumer halts, upstream is <em>killed</em> and runs its cleanup. That's how it gets resource safety in a garbage-collected language. In C++ we get the same guarantee more directly with RAII: the driver owns the source, and scope exit is the finaliser. This design grew into Scala's <strong>fs2</strong> library.</p>
 </div>
-<p>This design is roughly where <strong>fs2</strong> (Functional Streams for Scala) started. Modern fs2 uses a pull-based core and chunked elements for speed, but the ideas are the ones in this chapter.</p>
 
 <h2><span class="sec-no">14.4</span>Looking Back</h2>
-<p>The whole book in one table:</p>
 <table>
   <tr><th>Chapter</th><th>What you built</th><th>The idea that lasts</th></tr>
-  <tr><td>1&ndash;2</td><td>pure functions, HOFs</td><td>referential transparency, follow the types</td></tr>
-  <tr><td>3</td><td>List, Tree</td><td>ADTs, pattern matching, folds</td></tr>
-  <tr><td>4</td><td>Option, Either</td><td>errors as values</td></tr>
+  <tr><td>1–2</td><td>pure functions, HOFs</td><td>referential transparency; follow the types</td></tr>
+  <tr><td>3</td><td>persistent List, Tree</td><td>sum types, folds, structural sharing</td></tr>
+  <tr><td>4</td><td>optional, expected</td><td>errors as values</td></tr>
   <tr><td>5</td><td>LazyList</td><td>separate description from evaluation</td></tr>
   <tr><td>6</td><td>State</td><td>thread state through pure functions</td></tr>
-  <tr><td>7&ndash;9</td><td>Par, Gen/Prop, Parser</td><td>algebra first, representation last; laws</td></tr>
-  <tr><td>10</td><td>Monoid, Foldable</td><td>associativity buys parallelism</td></tr>
-  <tr><td>11</td><td>Functor, Monad</td><td>a monad defines sequencing</td></tr>
+  <tr><td>7–9</td><td>Par, Gen/Prop, Parser</td><td>algebra first, representation last; laws</td></tr>
+  <tr><td>10</td><td>Monoid</td><td>associativity buys parallelism</td></tr>
+  <tr><td>11</td><td>Monad</td><td>a monad defines sequencing</td></tr>
   <tr><td>12</td><td>Applicative, Traverse</td><td>use the least power you need</td></tr>
   <tr><td>13</td><td>IO, ST</td><td>effects as values; trampolining</td></tr>
   <tr><td>14</td><td>Process</td><td>composable, resource-safe streaming</td></tr>
 </table>
 
-<h2><span class="sec-no">14.5</span>Where Next: The Real Libraries</h2>
-<p>Everything you built has a production version. You'll recognise all of them now:</p>
+<h2><span class="sec-no">14.5</span>Where These Ideas Live in Real C++</h2>
 <ul>
-  <li><strong>cats</strong>: <code>Monoid</code>, <code>Functor</code>, <code>Applicative</code>, <code>Monad</code>, <code>Traverse</code>, <code>Validated</code>, plus monad transformers (<code>EitherT</code>, <code>OptionT</code>). It's Part III as a library.</li>
-  <li><strong>cats-effect</strong>: an <code>IO</code> like Chapter 13's, but async, cancellable, with lightweight fibers, <code>Resource</code> for safe acquisition and release, and structured concurrency. Where <code>Par</code> was heading.</li>
-  <li><strong>fs2</strong>: streaming on top of cats-effect. Chapter 14 grown up. Used for files, Kafka, HTTP bodies, sockets.</li>
-  <li><strong>ZIO</strong>: an alternative effect system with errors and dependencies in the type: <code>ZIO[R, E, A]</code> is roughly Reader + Either + IO in one type.</li>
-  <li><strong>ScalaCheck</strong>: Chapter 8, with shrinking. <strong>cats-parse</strong> and <strong>fastparse</strong>: Chapter 9.</li>
-  <li><strong>http4s</strong>, <strong>doobie</strong>, <strong>Tapir</strong>: HTTP, SQL and API description built on the above.</li>
+  <li><strong>Errors as values:</strong> <code>std::optional</code> and <code>std::expected</code> with <code>transform</code>/<code>and_then</code>/<code>or_else</code> (C++23). Use them at API boundaries instead of exceptions for expected failures.</li>
+  <li><strong>Laziness and fusion:</strong> <code>std::ranges</code> views, and C++23 <code>std::generator</code> for coroutine-based lazy sequences. Range-v3 has more adaptors.</li>
+  <li><strong>Monoids and parallel folds:</strong> <code>std::reduce</code> / <code>std::transform_reduce</code> with execution policies; oneTBB's <code>parallel_reduce</code>.</li>
+  <li><strong>Persistent data:</strong> the <code>immer</code> library (persistent vectors, maps, sets with structural sharing), used for undo/redo and safe sharing across threads.</li>
+  <li><strong>Effects as values:</strong> <code>std::execution</code> senders/receivers (C++26), libunifex, and coroutine frameworks where a task is a description that runs when awaited.</li>
+  <li><strong>Property testing:</strong> RapidCheck. <strong>Parsing:</strong> PEGTL, Boost.Spirit, lexy.</li>
+  <li><strong>Pure core, imperative shell:</strong> no library needed. It's the habit with the biggest payoff in robotics and embedded code: keep control laws, planners and state machines pure, and keep drivers and I/O at the edges.</li>
 </ul>
 <div class="setup">
-<p>A first real program with cats-effect, runnable with scala-cli:</p>
-<pre><code class="language-scala">//&gt; using scala 3.5
-//&gt; using dep org.typelevel::cats-effect:3.5.7
-
-import cats.effect.{IO, IOApp}
-import cats.syntax.all.*
-import scala.concurrent.duration.*
-
-object Main extends IOApp.Simple:
-  def fetch(i: Int): IO[Int] = IO.sleep(100.millis) *&gt; IO(i * i)
-
-  val run: IO[Unit] =
-    for
-      results &lt;- (1 to 10).toList.parTraverse(fetch)   // traverse, in parallel
-      _       &lt;- IO.println(s"sum of squares = ${results.sum}")
-    yield ()</code></pre>
-<p>Look at what's there: a for-comprehension over <code>IO</code>, <code>*&gt;</code> from Chapter 9, and <code>traverse</code> from Chapter 12 running in parallel. Ten 100 ms fetches finish in about 100 ms.</p>
+<p>A small "everything together" exercise you can do in Compiler Explorer: read numbers from a string stream with a <code>Process</code> pipeline, parse each with <code>std::from_chars</code> into an <code>expected</code>, collect them with an applicative <code>Validated</code> traverse that reports every bad line, and combine the good ones with <code>fold_map</code> into (count, sum, min, max) using a product monoid. That's Chapters 4, 10, 12 and 14 in about 60 lines.</p>
 </div>
 
 <h2><span class="sec-no">14.6</span>How to Keep Going</h2>
 <ol>
-  <li><strong>Redo Part I exercises</strong> from memory a month from now. If <code>foldRight</code>, <code>traverse</code> and <code>State.flatMap</code> come out without thinking, you've got the foundation.</li>
-  <li><strong>Read the cats source</strong> for <code>Traverse</code> and <code>Validated</code>. It'll look familiar.</li>
-  <li><strong>Build something small and real</strong> with cats-effect and fs2: tail a log file, parse each line with cats-parse, aggregate with a monoid, expose the result over http4s. That one project touches every part of this book.</li>
-  <li><strong>Bring the ideas back to C++.</strong> <code>std::expected</code> with <code>and_then</code>, ranges pipelines, pure "core" functions with an effectful shell, monoidal reductions with <code>std::reduce</code>. The language changes; the design habits carry over.</li>
+  <li><strong>Redo the Part I exercises from memory</strong> in a month. If <code>fold_right</code>, <code>traverse</code> and <code>State::flat_map</code> come out without thinking, the foundation is there.</li>
+  <li><strong>Read the original book</strong> with this companion beside it. Its Scala will read easily now, and the "In the book" boxes map each idea back.</li>
+  <li><strong>Refactor one real module</strong> of your own code toward a pure core: pick a state machine or controller, make its step function <code>(State, Input) → (State, Output)</code>, and property-test it.</li>
+  <li><strong>Try a functional language for a week</strong> (Scala, Haskell, OCaml or F#). The ideas feel different when the language makes them the default.</li>
 </ol>
-<div class="keypoint">The lasting lesson isn't Scala or monads. It's a way of designing: make effects explicit, keep the core pure, find the algebra, state the laws, and choose the least powerful abstraction that does the job.</div>
+<div class="keypoint">The lasting lesson isn't a particular language or monads. It's a way of designing: make effects explicit, keep the core pure, find the algebra, state the laws, and choose the least powerful abstraction that does the job.</div>
 
 <dl class="jargon">
-  <dt>Lazy I/O</dt><dd>Exposing an effectful source as a lazy collection; leaks resources when consumers stop early.</dd>
+  <dt>Lazy I/O</dt><dd>Exposing an effectful source as a lazy range; leaks or dangles when consumers stop early.</dd>
   <dt>Stream transducer / Process</dt><dd>A state machine that consumes input and emits output incrementally.</dd>
-  <dt>Pipe (<code>|&gt;</code>)</dt><dd>Composing two stream transformations; elements flow through both, one at a time.</dd>
-  <dt>Finaliser</dt><dd>Cleanup attached to a stream that runs on every kind of termination.</dd>
-  <dt>Fiber</dt><dd>A lightweight logical thread managed by an effect runtime like cats-effect or ZIO.</dd>
+  <dt>Pipe</dt><dd>Composing two stream transformations; elements flow through both, one at a time.</dd>
+  <dt>Driver</dt><dd>The loop that runs a process against a real source, owning the resource for the run.</dd>
 </dl>
 
 <div class="recap"><ul>
-  <li>Imperative loops in IO are correct but don't compose; lazy I/O composes but leaks.</li>
+  <li>Imperative loops are correct but don't compose; lazy I/O composes but leaks.</li>
   <li>Stream transducers describe incremental processing as pure, composable state machines.</li>
-  <li>Effectful streams tie resource release to the stream, so early exit can't leak.</li>
-  <li>cats, cats-effect, fs2 and ZIO are this book's ideas at production strength.</li>
+  <li>A driver that owns the source makes cleanup automatic, even on early stop (RAII).</li>
+  <li>Modern C++ already ships most of these ideas; this book is how to use them on purpose.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch14.cpp"><span class="l-k">Full runnable listing</span>code/ch14.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

@@ -16,220 +16,216 @@
   <div class="chapter-num">04</div>
   <div class="chapter-kicker">Part I · Foundations</div>
   <h1>Errors as Values</h1>
-  <p class="chapter-sub">Exceptions break referential transparency and hide failure from the type system. We replace them with Option and Either, and learn the handful of combinators (map, flatMap, getOrElse, map2, traverse) that make failure-aware code read like the happy path.</p>
+  <p class="chapter-sub">Exceptions break referential transparency and hide failure from the type system. We replace them with std::optional and std::expected, first writing map and flat_map ourselves to see how they work, then using C++23's transform, and_then and value_or to write failure-aware code that reads like the happy path.</p>
 </header>
 
 <h2><span class="sec-no">4.1</span>What's Wrong With Exceptions</h2>
-<pre><code class="language-scala">def failingFn(i: Int): Int =
-  val y: Int = throw Exception("fail!")
-  try
-    val x = 42 + 5
-    x + y
-  catch case e: Exception =&gt; 43</code></pre>
-<p>Calling this throws. Now apply substitution: replace <code>y</code> with its definition inside the <code>try</code>:</p>
-<pre><code class="language-scala">def failingFn2(i: Int): Int =
-  try
-    val x = 42 + 5
-    x + ((throw Exception("fail!")): Int)
-  catch case e: Exception =&gt; 43    // returns 43</code></pre>
-<p>Same code, different result, depending on <em>where</em> the expression sits. So <code>throw</code> isn't referentially transparent: its meaning depends on which <code>try</code> block surrounds it at runtime.</p>
+<pre><code class="language-cpp">int failing_fn() {
+    int y = [] () -&gt; int { throw std::runtime_error("fail!"); }();
+    try { return 42 + 5 + y; }
+    catch (...) { return 43; }
+}</code></pre>
+<p>Calling this throws: <code>y</code> is computed before the <code>try</code>. Now substitute <code>y</code> by its definition, the way the substitution model says we should be able to:</p>
+<pre><code class="language-cpp">int failing_fn2() {
+    try { return 42 + 5 + [] () -&gt; int { throw std::runtime_error("fail!"); }(); }
+    catch (...) { return 43; }    // now returns 43
+}</code></pre>
+<p>Same expression, different result, depending on <em>where</em> it sits. A <code>throw</code> isn't referentially transparent: its meaning depends on which <code>try</code> surrounds it at run time.</p>
 <p>Two more problems:</p>
 <ul>
-  <li><strong>Not type-safe.</strong> <code>def parse(s: String): Int</code> says nothing about failing. Callers forget, and you find out in production.</li>
-  <li><strong>Doesn't work with higher-order functions.</strong> If you pass a function that throws into <code>map</code>, <code>map</code> has no way to know or handle it.</li>
+  <li><strong>Not in the type.</strong> <code>int parse(const std::string&amp;)</code> says nothing about failing. Callers forget, and you find out in production. (<code>noexcept</code> only tells you when something <em>can't</em> throw.)</li>
+  <li><strong>Doesn't play with higher-order functions.</strong> Pass a throwing lambda to <code>std::transform</code> and an exception halfway through leaves the output partly written.</li>
 </ul>
-<p>The fix is the same move as Chapter 1: <strong>represent the failure as a value</strong>, and put it in the return type.</p>
+<p>The fix is Chapter 1's move again: <strong>represent failure as a value</strong>, in the return type.</p>
 
-<h2><span class="sec-no">4.2</span>Option: Maybe There's a Value</h2>
-<pre><code class="language-scala">enum Option[+A]:
-  case Some(get: A)
-  case None</code></pre>
-<p>A function that might not have an answer returns <code>Option</code>:</p>
-<pre><code class="language-scala">def mean(xs: Seq[Double]): Option[Double] =
-  if xs.isEmpty then None
-  else Some(xs.sum / xs.length)</code></pre>
-<p>The signature now tells the truth: "you might not get a <code>Double</code>." The caller can't use the result as a <code>Double</code> without dealing with <code>None</code>. The compiler won't allow it.</p>
-<div class="bridge">
-<p>This is <code>std::optional&lt;T&gt;</code>, and the C++23 monadic operations <code>transform</code>, <code>and_then</code> and <code>or_else</code> are exactly <code>map</code>, <code>flatMap</code> and <code>orElse</code> below. <code>Either</code> is <code>std::expected&lt;T, E&gt;</code>. C++ arrived at the same design for the same reasons.</p>
-</div>
+<h2><span class="sec-no">4.2</span>std::optional: Maybe a Value</h2>
+<pre><code class="language-cpp">std::optional&lt;double&gt; mean(const std::vector&lt;double&gt;&amp; xs) {
+    if (xs.empty()) return std::nullopt;
+    double s = 0; for (double x : xs) s += x;
+    return s / xs.size();
+}</code></pre>
+<p>The signature tells the truth: "you might not get a <code>double</code>." The caller can't use the result as a <code>double</code> without dealing with the empty case.</p>
+<p>(Well, <em>almost</em> can't: <code>*opt</code> on an empty optional is undefined behaviour. Treat <code>operator*</code> on an optional you haven't checked the way you'd treat a raw pointer. The combinators below are how you avoid needing it.)</p>
 
-<h2><span class="sec-no">4.3</span>The Option Toolkit</h2>
-<p>If every caller pattern-matched every <code>Option</code>, code would be unreadable. Instead we write a few combinators once:</p>
-<pre><code class="language-scala">enum Option[+A]:
-  case Some(get: A)
-  case None
-
-  def map[B](f: A =&gt; B): Option[B] = this match
-    case None    =&gt; None
-    case Some(a) =&gt; Some(f(a))
-
-  def flatMap[B](f: A =&gt; Option[B]): Option[B] = this match
-    case None    =&gt; None
-    case Some(a) =&gt; f(a)
-
-  def getOrElse[B &gt;: A](default: =&gt; B): B = this match
-    case None    =&gt; default
-    case Some(a) =&gt; a
-
-  def orElse[B &gt;: A](ob: =&gt; Option[B]): Option[B] = this match
-    case None =&gt; ob
-    case _    =&gt; this
-
-  def filter(p: A =&gt; Boolean): Option[A] = this match
-    case Some(a) if p(a) =&gt; this
-    case _               =&gt; None</code></pre>
-<p>Two new bits of syntax:</p>
-<ul>
-  <li><code>B &gt;: A</code> means "B is a supertype of A". It's needed because <code>Option</code> is covariant. You can say <code>someDog.getOrElse(someCat)</code> and get an <code>Animal</code>.</li>
-  <li><code>default: =&gt; B</code> is a <strong>by-name parameter</strong>: it's evaluated only if used. <code>getOrElse(expensiveFallback())</code> doesn't run the fallback when there's a value. Chapter 5 is about this idea.</li>
-</ul>
+<h2><span class="sec-no">4.3</span>Building map and flat_map Ourselves</h2>
+<p>If every caller wrote <code>if (opt) ... else ...</code> by hand, code would be unreadable. Write the two key combinators once. First <code>map</code>: apply a function to the value if there is one.</p>
+<pre><code class="language-cpp">template &lt;typename A, typename F&gt;
+auto opt_map(const std::optional&lt;A&gt;&amp; oa, F f)
+    -&gt; std::optional&lt;std::invoke_result_t&lt;F, const A&amp;&gt;&gt; {
+    if (!oa) return std::nullopt;
+    return f(*oa);
+}</code></pre>
+<p>Then <code>flat_map</code>, for when the function itself can fail (returns an optional). Using <code>map</code> there would give <code>optional&lt;optional&lt;B&gt;&gt;</code>; <code>flat_map</code> flattens:</p>
+<pre><code class="language-cpp">template &lt;typename A, typename F&gt;
+auto opt_flat_map(const std::optional&lt;A&gt;&amp; oa, F f)
+    -&gt; std::invoke_result_t&lt;F, const A&amp;&gt; {
+    if (!oa) return std::nullopt;
+    return f(*oa);
+}</code></pre>
+<p>That's all there is to it. C++23 put exactly these into the standard:</p>
+<table>
+  <tr><th>Book (Scala)</th><th>Ours</th><th>C++23 <code>std::optional</code></th></tr>
+  <tr><td><code>map</code></td><td><code>opt_map</code></td><td><code>.transform(f)</code></td></tr>
+  <tr><td><code>flatMap</code></td><td><code>opt_flat_map</code></td><td><code>.and_then(f)</code></td></tr>
+  <tr><td><code>getOrElse</code></td><td></td><td><code>.value_or(x)</code></td></tr>
+  <tr><td><code>orElse</code></td><td></td><td><code>.or_else(f)</code></td></tr>
+</table>
+<p>From here on we use the standard names.</p>
 
 <h3>Reading it as a pipeline</h3>
-<pre><code class="language-scala">case class Employee(name: String, dept: String, manager: Option[String])
-def lookupByName(name: String): Option[Employee] = ???
+<pre><code class="language-cpp">struct Employee { std::string name, dept; std::optional&lt;std::string&gt; manager; };
+std::optional&lt;Employee&gt; lookup_by_name(const std::string&amp; name);
 
-val managerOfJoe: String =
-  lookupByName("Joe")
-    .flatMap(_.manager)        // Joe might not exist, or might have no manager
-    .map(_.toUpperCase)
-    .getOrElse("(no manager)")</code></pre>
-<p>Each step is written as if the value is there. If any step returns <code>None</code>, the rest are skipped and <code>None</code> falls through to <code>getOrElse</code>. The error handling is still there; it's just been moved into <code>flatMap</code>.</p>
-<div class="keypoint">Use <code>map</code> when your function always succeeds. Use <code>flatMap</code> when your function can itself fail (returns an <code>Option</code>). Handle the failure once, at the end, with <code>getOrElse</code> or a <code>match</code>.</div>
+std::string manager_of(const std::string&amp; name) {
+    return lookup_by_name(name)
+        .and_then([](const Employee&amp; e) { return e.manager; })   // may have no manager
+        .transform(to_upper)
+        .value_or("(no manager)");
+}</code></pre>
+<p>Each step is written as if the value is there. If a step produces "nothing", the rest are skipped and <code>value_or</code> supplies the fallback. Error handling hasn't gone; it's been moved into the combinators.</p>
+<div class="keypoint">Use <code>transform</code> (map) when your function always succeeds. Use <code>and_then</code> (flat_map) when your function can itself fail. Handle the failure once, at the end, with <code>value_or</code> or an explicit check.</div>
 
 <div class="exercise" data-n="Exercise 4.1 · variance">
-<p>Using <code>flatMap</code> and the <code>mean</code> function above, write <code>variance(xs: Seq[Double]): Option[Double]</code>, the mean of <code>math.pow(x - m, 2)</code> for each <code>x</code>, where <code>m</code> is the mean.</p>
+<p>Using <code>and_then</code> and <code>mean</code>, write <code>variance(xs)</code>: the mean of <code>(x - m)²</code> for each <code>x</code>, where <code>m</code> is the mean.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def variance(xs: Seq[Double]): Option[Double] =
-  mean(xs).flatMap(m =&gt; mean(xs.map(x =&gt; math.pow(x - m, 2))))</code></pre>
-<p>The empty case is handled once, by the first <code>mean</code>. <code>flatMap</code> because the inner computation also returns <code>Option</code>.</p>
+<pre><code class="language-cpp">std::optional&lt;double&gt; variance(const std::vector&lt;double&gt;&amp; xs) {
+    return mean(xs).and_then([&amp;](double m) {
+        std::vector&lt;double&gt; sq;
+        for (double x : xs) sq.push_back(std::pow(x - m, 2));
+        return mean(sq);
+    });
+}</code></pre>
+<p>The empty case is handled once, by the first <code>mean</code>. <code>and_then</code> because the inner step also returns an optional.</p>
 </div></details>
 
 <h2><span class="sec-no">4.4</span>Lifting Ordinary Functions</h2>
-<p>Do we need to rewrite every existing function to accept <code>Option</code>s? No. We <strong>lift</strong> them:</p>
-<pre><code class="language-scala">def lift[A, B](f: A =&gt; B): Option[A] =&gt; Option[B] =
-  _.map(f)
+<p>Do we have to rewrite every existing function to take optionals? No; we <strong>lift</strong> them:</p>
+<pre><code class="language-cpp">template &lt;typename F&gt;
+auto lift(F f) {
+    return [f]&lt;typename A&gt;(const std::optional&lt;A&gt;&amp; oa) { return oa.transform(f); };
+}
 
-val absO: Option[Double] =&gt; Option[Double] = lift(math.abs)</code></pre>
-<p>Now a function of two arguments. Insurance quotes need age and number of tickets, both parsed from strings that might be malformed:</p>
-<pre><code class="language-scala">def insuranceRate(age: Int, tickets: Int): Double = ???
+auto abs_o = lift([](double d) { return std::fabs(d); });
+abs_o(std::optional{-2.5});   // optional(2.5)</code></pre>
+<p>Now a function of two arguments. An insurance quote needs age and number of speeding tickets, both parsed from strings that might be malformed:</p>
+<pre><code class="language-cpp">double insurance_rate(int age, int tickets);
 
-def toIntOption(s: String): Option[Int] =
-  try Some(s.toInt)
-  catch case _: NumberFormatException =&gt; None</code></pre>
-<p>(This is the right way to deal with an exception-throwing library: catch it at the boundary and convert it to a value.) To combine two <code>Option</code>s with a two-argument function, we need <code>map2</code>:</p>
+std::optional&lt;int&gt; to_int(const std::string&amp; s) {
+    int v{};
+    auto [p, ec] = std::from_chars(s.data(), s.data() + s.size(), v);
+    if (ec != std::errc{} || p != s.data() + s.size()) return std::nullopt;
+    return v;
+}</code></pre>
+<p>(That's the pattern for exception-throwing or error-code APIs: convert at the boundary, and from then on it's a value. <code>std::from_chars</code> doesn't throw, which is why we prefer it to <code>std::stoi</code> here.) To combine two optionals with a two-argument function, we need <code>map2</code>:</p>
 
 <div class="exercise" data-n="Exercise 4.2 · map2">
-<p>Write <code>def map2[A, B, C](a: Option[A], b: Option[B])(f: (A, B) =&gt; C): Option[C]</code>. Then use it to write <code>parseInsuranceRateQuote(age: String, tickets: String): Option[Double]</code>.</p>
+<p>Write <code>map2(a, b, f)</code> for optionals using <code>and_then</code> and <code>transform</code>. Use it for <code>parse_insurance_rate_quote(age, tickets)</code>.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def map2[A, B, C](a: Option[A], b: Option[B])(f: (A, B) =&gt; C): Option[C] =
-  a.flatMap(aa =&gt; b.map(bb =&gt; f(aa, bb)))
+<pre><code class="language-cpp">template &lt;typename A, typename B, typename F&gt;
+auto map2(const std::optional&lt;A&gt;&amp; a, const std::optional&lt;B&gt;&amp; b, F f)
+    -&gt; std::optional&lt;std::invoke_result_t&lt;F, const A&amp;, const B&amp;&gt;&gt; {
+    return a.and_then([&amp;](const A&amp; aa) {
+        return b.transform([&amp;](const B&amp; bb) { return f(aa, bb); });
+    });
+}
 
-def parseInsuranceRateQuote(age: String, tickets: String): Option[Double] =
-  map2(toIntOption(age), toIntOption(tickets))(insuranceRate)</code></pre>
-<p>The nesting "flatMap on the outer, map on the inner" comes up constantly. Scala has syntax for it:</p>
-<pre><code class="language-scala">def map2[A, B, C](a: Option[A], b: Option[B])(f: (A, B) =&gt; C): Option[C] =
-  for
-    aa &lt;- a
-    bb &lt;- b
-  yield f(aa, bb)</code></pre>
-<p>A <strong>for-comprehension</strong> is just sugar: every <code>&lt;-</code> except the last becomes <code>flatMap</code>, the last becomes <code>map</code>. It works for any type with those methods, which is why it reads like a loop for lists and like sequential steps for <code>Option</code>.</p>
+std::optional&lt;double&gt; parse_insurance_rate_quote(const std::string&amp; age,
+                                                 const std::string&amp; tickets) {
+    return map2(to_int(age), to_int(tickets), insurance_rate);
+}</code></pre>
+<p>The shape <em>and_then outside, transform inside</em> comes up constantly. Scala and Haskell have syntax for it (a for-comprehension / do-notation) that flattens the nesting. C++ doesn't, so with three or four steps the lambdas nest deeper. When that gets ugly, an early-return style with explicit checks is a perfectly good C++ alternative, as long as the function still returns an optional instead of throwing.</p>
 </div></details>
 
 <h2><span class="sec-no">4.5</span>sequence and traverse</h2>
-<p>We have a list of strings and want to parse them all. If any fails, the whole thing fails.</p>
+<p>We have a list of strings and want to parse them all, failing if any fails.</p>
+<pre><code class="language-cpp">template &lt;typename A, typename F&gt;
+auto traverse(const std::vector&lt;A&gt;&amp; as, F f)
+    -&gt; std::optional&lt;std::vector&lt;typename std::invoke_result_t&lt;F, const A&amp;&gt;::value_type&gt;&gt; {
+    using B = typename std::invoke_result_t&lt;F, const A&amp;&gt;::value_type;
+    std::vector&lt;B&gt; out;
+    for (const auto&amp; a : as) {
+        auto ob = f(a);
+        if (!ob) return std::nullopt;       // one failure fails the whole thing
+        out.push_back(std::move(*ob));
+    }
+    return out;
+}
 
-<div class="exercise" data-n="Exercise 4.3 · sequence">
-<p>Write <code>def sequence[A](as: List[Option[A]]): Option[List[A]]</code>. It returns <code>Some</code> of all values if every element is <code>Some</code>, else <code>None</code>. (Use Scala's built-in <code>List</code> from here on.)</p>
+template &lt;typename A&gt;
+std::optional&lt;std::vector&lt;A&gt;&gt; sequence(const std::vector&lt;std::optional&lt;A&gt;&gt;&amp; as) {
+    return traverse(as, [](const std::optional&lt;A&gt;&amp; o) { return o; });
+}
+
+traverse(std::vector&lt;std::string&gt;{"1", "2", "3"}, to_int);   // optional(vector{1,2,3})
+traverse(std::vector&lt;std::string&gt;{"1", "x", "3"}, to_int);   // nullopt</code></pre>
+<p><code>traverse</code> applies a fallible function to each element and <em>swaps the layers</em>: from "a vector of maybe-values" to "maybe a vector". Remember it: in Chapter 12 it turns out to work for far more than vectors and optionals.</p>
+<div class="bridge">
+<p>The book writes <code>traverse</code> as a <code>foldRight</code> with <code>map2</code>, starting from <code>Some(Nil)</code>. That's the same computation; in C++ we write the loop, which is clearer and stack-safe. Keep the fold version in mind, though, because the <em>map2-based</em> definition is what generalises later.</p>
 </div>
-<details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def sequence[A](as: List[Option[A]]): Option[List[A]] =
-  as.foldRight(Some(Nil): Option[List[A]])((oa, acc) =&gt; map2(oa, acc)(_ :: _))</code></pre>
-<p>Start from <code>Some(Nil)</code>, and at each element use <code>map2</code> to prepend the value to the accumulated list. One <code>None</code> anywhere makes <code>map2</code> return <code>None</code>, and it stays <code>None</code>.</p>
-</div></details>
-<p>Using it: <code>sequence(strings.map(toIntOption))</code>. That walks the list twice: once to build a list of Options, once to sequence it. <code>traverse</code> does both in one pass:</p>
-<pre><code class="language-scala">def traverse[A, B](as: List[A])(f: A =&gt; Option[B]): Option[List[B]] =
-  as.foldRight(Some(Nil): Option[List[B]])((a, acc) =&gt; map2(f(a), acc)(_ :: _))
 
-def sequence[A](as: List[Option[A]]): Option[List[A]] =
-  traverse(as)(identity)
+<h2><span class="sec-no">4.6</span>std::expected: Failure With a Reason</h2>
+<p><code>nullopt</code> says <em>that</em> something failed, not <em>why</em>. <code>std::expected&lt;T, E&gt;</code> holds either a <code>T</code> or an error <code>E</code>, and has the same combinators:</p>
+<pre><code class="language-cpp">std::expected&lt;int, std::string&gt; safe_div(int x, int y) {
+    if (y == 0) return std::unexpected("division by zero");
+    return x / y;
+}
 
-traverse(List("1", "2", "3"))(toIntOption)   // Some(List(1, 2, 3))
-traverse(List("1", "x", "3"))(toIntOption)   // None</code></pre>
-<p>Remember <code>traverse</code>. In Chapter 12 it turns out to work for far more than <code>List</code> and <code>Option</code>, and it's one of the most useful functions in real FP code.</p>
+struct Person { std::string name; int age; };
 
-<h2><span class="sec-no">4.6</span>Either: Failure With a Reason</h2>
-<p><code>None</code> says <em>that</em> something failed, not <em>why</em>. <code>Either</code> carries the reason:</p>
-<pre><code class="language-scala">enum Either[+E, +A]:
-  case Left(value: E)      // failure, by convention
-  case Right(value: A)     // success ("right" as in correct)
+std::expected&lt;std::string, std::string&gt; mk_name(const std::string&amp; n) {
+    if (n.empty()) return std::unexpected("name is empty");
+    return n;
+}
+std::expected&lt;int, std::string&gt; mk_age(int a) {
+    if (a &lt; 0) return std::unexpected("age is out of range");
+    return a;
+}
 
-  def map[B](f: A =&gt; B): Either[E, B] = this match
-    case Right(a) =&gt; Right(f(a))
-    case Left(e)  =&gt; Left(e)
+std::expected&lt;Person, std::string&gt; mk_person(const std::string&amp; n, int a) {
+    return mk_name(n).and_then([&amp;](std::string name) {
+        return mk_age(a).transform([&amp;](int age) { return Person{name, age}; });
+    });
+}
 
-  def flatMap[EE &gt;: E, B](f: A =&gt; Either[EE, B]): Either[EE, B] = this match
-    case Right(a) =&gt; f(a)
-    case Left(e)  =&gt; Left(e)
-
-  def orElse[EE &gt;: E, AA &gt;: A](b: =&gt; Either[EE, AA]): Either[EE, AA] = this match
-    case Left(_)  =&gt; b
-    case Right(a) =&gt; Right(a)</code></pre>
-<p>Notice that the definitions are nearly identical to <code>Option</code>'s. <code>Left(e)</code> plays the role of <code>None</code> but keeps <code>e</code>. Keep noticing that.</p>
-<pre><code class="language-scala">def safeDiv(x: Int, y: Int): Either[String, Int] =
-  if y == 0 then Left("division by zero") else Right(x / y)
-
-case class Person(name: String, age: Int)
-
-def mkName(name: String): Either[String, String] =
-  if name.isBlank then Left("Name is empty.") else Right(name)
-
-def mkAge(age: Int): Either[String, Int] =
-  if age &lt; 0 then Left("Age is out of range.") else Right(age)
-
-def mkPerson(name: String, age: Int): Either[String, Person] =
-  for
-    n &lt;- mkName(name)
-    a &lt;- mkAge(age)
-  yield Person(n, a)
-
-mkPerson("", -1)   // Left("Name is empty.")  — only the FIRST error</code></pre>
+mk_person("", -1).error();   // "name is empty" — only the FIRST error</code></pre>
+<p>It's the same nesting as <code>map2</code> for optionals. The unexpected value plays the role of <code>nullopt</code> but carries the reason. Notice how similar the two types' combinators are. Keep noticing that.</p>
 <div class="warfield">
-<p><strong><code>flatMap</code> stops at the first error.</strong> It has to: the second step might depend on the result of the first. But in <code>mkPerson</code>, name and age are independent, and a user filling in a form wants to see <em>both</em> problems. That needs a different abstraction, less powerful than <code>flatMap</code>, which you'll meet in Chapter 12.</p>
+<p><strong><code>and_then</code> stops at the first error.</strong> It has to: the second step might depend on the first's result. But here name and age are independent, and a user filling in a form wants to see <em>both</em> problems. That needs a different, less powerful abstraction, which you'll meet in Chapter 12.</p>
 </div>
 
-<div class="exercise" data-n="Exercise 4.4 · catchNonFatal">
-<p>Write <code>def catchNonFatal[A](a: =&gt; A): Either[Throwable, A]</code> that runs <code>a</code> and captures any non-fatal exception as a <code>Left</code>.</p>
+<div class="exercise" data-n="Exercise 4.4 · catch_non_fatal">
+<p>Write <code>catch_non_fatal(f)</code>: call <code>f()</code> and return its result in an <code>expected</code>, with any <code>std::exception</code> converted to an error string.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">import scala.util.control.NonFatal
+<pre><code class="language-cpp">template &lt;typename F&gt;
+auto catch_non_fatal(F f) -&gt; std::expected&lt;std::invoke_result_t&lt;F&gt;, std::string&gt; {
+    try { return f(); }
+    catch (const std::exception&amp; e) { return std::unexpected(std::string(e.what())); }
+}
 
-def catchNonFatal[A](a: =&gt; A): Either[Throwable, A] =
-  try Right(a)
-  catch case NonFatal(t) =&gt; Left(t)</code></pre>
-<p>The by-name parameter is essential: if <code>a</code> were evaluated before entering the function, the exception would be thrown before the <code>try</code>. <code>NonFatal</code> deliberately doesn't catch things like <code>OutOfMemoryError</code>.</p>
+auto r = catch_non_fatal([] { return std::stoi("nope"); });   // error: "stoi"</code></pre>
+<p>Taking a callable rather than a value is essential. If the caller evaluated the expression first, it would throw before reaching the <code>try</code>. The book uses a by-name parameter for the same reason.</p>
 </div></details>
-
-<h2><span class="sec-no">4.7</span>In the Standard Library</h2>
-<p>Scala's own <code>Option</code>, <code>Either</code> and <code>Try</code> work as described. Standard <code>Either</code> is right-biased, so <code>map</code> and <code>flatMap</code> work on <code>Right</code>, just like ours. <code>traverse</code> isn't in the standard library. It comes from the <strong>cats</strong> library, which we'll meet at the end of the book.</p>
 
 <dl class="jargon">
-  <dt>Option</dt><dd>A value that may be absent: <code>Some(a)</code> or <code>None</code>.</dd>
-  <dt>Either</dt><dd>A success <code>Right(a)</code> or a failure <code>Left(e)</code> that carries the error.</dd>
-  <dt>Lifting</dt><dd>Turning <code>A =&gt; B</code> into <code>F[A] =&gt; F[B]</code>, usually with <code>map</code>.</dd>
-  <dt>map2</dt><dd>Combine two wrapped values with a two-argument function.</dd>
-  <dt>traverse</dt><dd>Apply a failing function to each element, collecting results or failing as a whole.</dd>
-  <dt>By-name parameter (<code>=&gt; A</code>)</dt><dd>An argument evaluated only when (and each time) it's used.</dd>
+  <dt><code>std::optional&lt;T&gt;</code></dt><dd>A value that may be absent. The book's <code>Option</code>.</dd>
+  <dt><code>std::expected&lt;T, E&gt;</code></dt><dd>A value or an error describing why there isn't one. The book's <code>Either</code>.</dd>
+  <dt><code>transform</code> / <code>and_then</code></dt><dd>map and flat_map: apply a function that always succeeds / that can fail.</dd>
+  <dt>Lifting</dt><dd>Turning <code>A → B</code> into <code>optional&lt;A&gt; → optional&lt;B&gt;</code>.</dd>
+  <dt>traverse</dt><dd>Apply a fallible function to each element; collect all results or fail as a whole.</dd>
 </dl>
 
 <div class="recap"><ul>
-  <li>Exceptions aren't RT and aren't in the type. Return <code>Option</code> or <code>Either</code> instead.</li>
-  <li>Catch exceptions at library boundaries and turn them into values.</li>
-  <li>Write the happy path with <code>map</code>, <code>flatMap</code> or a for-comprehension. Handle failure once at the end.</li>
+  <li>Exceptions aren't RT and aren't in the type. Return <code>optional</code> or <code>expected</code> instead.</li>
+  <li>Convert exceptions and error codes to values at library boundaries.</li>
+  <li><code>map</code>/<code>flat_map</code> are a few lines each; C++23 calls them <code>transform</code>/<code>and_then</code>.</li>
   <li><code>map2</code>, <code>sequence</code> and <code>traverse</code> combine many fallible values.</li>
-  <li><code>Option</code> and <code>Either</code> have nearly identical combinators. That's a clue.</li>
+  <li><code>optional</code> and <code>expected</code> have nearly identical combinators. That's a clue.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch04.cpp"><span class="l-k">Full runnable listing</span>code/ch04.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

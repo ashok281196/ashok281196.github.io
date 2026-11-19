@@ -16,230 +16,261 @@
   <div class="chapter-num">06</div>
   <div class="chapter-kicker">Part I · Foundations</div>
   <h1>Purely Functional State</h1>
-  <p class="chapter-sub">How do you write a random number generator, a parser position or a game loop without mutation? Return the new state with the result. Then make that pattern pleasant with a State type, and meet your first glimpse of a monad.</p>
+  <p class="chapter-sub">How do you write a random number generator, a parser position or a simulation step without mutation? Return the new state with the result. Then make that pattern pleasant with a State type, and catch a first glimpse of a monad.</p>
 </header>
 
-<h2><span class="sec-no">6.1</span>The Problem With <code>Random</code></h2>
-<pre><code class="language-scala">val rng = scala.util.Random()
-rng.nextInt()   // -1151252339
-rng.nextInt()   // 1957568493  — same expression, different value</code></pre>
-<p><code>nextInt</code> isn't RT: it updates a hidden seed inside <code>rng</code>. That hurts in a practical way. Say a test of a dice-rolling function fails occasionally. To reproduce it you need the exact sequence of states the generator went through, and that state is hidden and was mutated by every other caller.</p>
+<h2><span class="sec-no">6.1</span>The Problem With rand()</h2>
+<pre><code class="language-cpp">std::mt19937 gen(42);
+gen();   // 1608637542
+gen();   // 3421126067 — same expression, different value</code></pre>
+<p>Calling the engine isn't RT: <code>operator()</code> updates the engine's hidden state. That hurts in practice. A test of a dice-rolling function fails occasionally; to reproduce it you need the exact sequence of states the engine went through, but the engine is shared, and every other caller advanced it too.</p>
 
 <h2><span class="sec-no">6.2</span>Make the State Explicit</h2>
-<p>The fix: don't update the state in place. <strong>Return the new state</strong> next to the value, and let the caller decide what to do with it.</p>
-<pre><code class="language-scala">trait RNG:
-  def nextInt: (Int, RNG)   // a value AND the generator to use next
+<p>Don't update the state in place. <strong>Return the new state</strong> alongside the value, and let the caller decide what to do with it.</p>
+<pre><code class="language-cpp">struct RNG {
+    std::uint64_t seed;
+    // a linear congruential generator with java.util.Random's constants
+    std::pair&lt;int, RNG&gt; next_int() const {
+        std::uint64_t new_seed = (seed * 0x5DEECE66DULL + 0xBULL) &amp; 0xFFFFFFFFFFFFULL;
+        int n = static_cast&lt;int&gt;(static_cast&lt;std::uint32_t&gt;(new_seed &gt;&gt; 16));
+        return {n, RNG{new_seed}};    // a value AND the generator to use next
+    }
+};
 
-case class SimpleRNG(seed: Long) extends RNG:
-  def nextInt: (Int, RNG) =
-    // a linear congruential generator, the same constants as java.util.Random
-    val newSeed = (seed * 0x5DEECE66DL + 0xBL) &amp; 0xFFFFFFFFFFFFL
-    val n = (newSeed &gt;&gt;&gt; 16).toInt
-    (n, SimpleRNG(newSeed))</code></pre>
-<pre><code class="language-scala">val rng = SimpleRNG(42)
-val (n1, rng2) = rng.nextInt    // (16159453, SimpleRNG(...))
-val (n2, rng3) = rng2.nextInt   // (-1281479697, ...)
-rng.nextInt                     // (16159453, ...) again: fully reproducible</code></pre>
-<p><code>nextInt</code> is now a pure function from a state to a (value, new state) pair. Same input, same output. To get a different number, you pass the <em>new</em> generator.</p>
-<div class="analogy">The old <code>Random</code> is a shared deck of cards that anyone can draw from. The new <code>RNG</code> hands you the top card and a <em>new deck</em> without that card. The old deck still exists and still has the same top card, so anyone holding it gets the same draw.</div>
+RNG rng{42};
+auto [n1, rng2] = rng.next_int();    // 16159453
+auto [n2, rng3] = rng2.next_int();   // -1281479697
+rng.next_int().first;                // 16159453 again: fully reproducible</code></pre>
+<p><code>next_int</code> is a pure function from a state to a (value, new state) pair. Same input, same output. To get a different number, pass the <em>new</em> generator. (Note the unsigned arithmetic: the same formula with signed 64-bit integers overflows, which is undefined behaviour in C++. The listing was checked with the undefined-behaviour sanitizer.)</p>
+<div class="analogy">The old engine is a shared deck that anyone can draw from. The new <code>RNG</code> hands you the top card and a <em>new deck</em> without that card. The old deck still exists and still has the same top card, so anyone holding it draws the same card.</div>
 
-<div class="exercise" data-n="Exercise 6.1 · nonNegativeInt and double">
-<p>Write <code>nonNegativeInt(rng: RNG): (Int, RNG)</code> returning a value in [0, Int.MaxValue], and <code>double(rng: RNG): (Double, RNG)</code> in [0, 1). Careful: <code>Int.MinValue</code> has no positive counterpart.</p>
+<div class="exercise" data-n="Exercise 6.1 · non_negative_int and random_double">
+<p>Write <code>non_negative_int(RNG)</code> returning a value in [0, INT_MAX], and <code>random_double(RNG)</code> in [0, 1). Careful: <code>INT_MIN</code> has no positive counterpart.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def nonNegativeInt(rng: RNG): (Int, RNG) =
-  val (i, r) = rng.nextInt
-  (if i &lt; 0 then -(i + 1) else i, r)
-
-def double(rng: RNG): (Double, RNG) =
-  val (i, r) = nonNegativeInt(rng)
-  (i / (Int.MaxValue.toDouble + 1), r)</code></pre>
-<p><code>-(i + 1)</code> maps <code>-1 → 0</code>, ..., <code>Int.MinValue → Int.MaxValue</code>, so every negative maps to a distinct non-negative.</p>
+<pre><code class="language-cpp">std::pair&lt;int, RNG&gt; non_negative_int(RNG rng) {
+    auto [i, r] = rng.next_int();
+    return {i &lt; 0 ? -(i + 1) : i, r};
+}
+std::pair&lt;double, RNG&gt; random_double(RNG rng) {
+    auto [i, r] = non_negative_int(rng);
+    return {i / (static_cast&lt;double&gt;(INT_MAX) + 1), r};
+}</code></pre>
+<p><code>-(i + 1)</code> maps <code>-1 → 0</code>, ..., <code>INT_MIN → INT_MAX</code>, so every negative maps to a distinct non-negative without overflowing.</p>
 </div></details>
 
 <h2><span class="sec-no">6.3</span>The Pain of Threading State</h2>
-<p>Now generate three random values:</p>
-<pre><code class="language-scala">def intDoubleInt(rng: RNG): ((Int, Double, Int), RNG) =
-  val (i1, r1) = rng.nextInt
-  val (d,  r2) = double(r1)
-  val (i2, r3) = r2.nextInt
-  ((i1, d, i2), r3)</code></pre>
-<p>It works, but it's tedious and easy to get wrong. Pass <code>r1</code> twice by accident and two values are no longer independent. The pattern is always the same: take a state, produce a value and a new state, feed the new state to the next step. When code repeats a pattern, we extract it.</p>
+<pre><code class="language-cpp">std::pair&lt;std::tuple&lt;int, double, int&gt;, RNG&gt; int_double_int(RNG rng) {
+    auto [i1, r1] = rng.next_int();
+    auto [d,  r2] = random_double(r1);
+    auto [i2, r3] = r2.next_int();
+    return {{i1, d, i2}, r3};
+}</code></pre>
+<p>It works, but it's tedious and fragile. Pass <code>r1</code> twice by accident and two "random" values come out identical. The pattern is always the same: take a state, produce a value and a new state, feed the new state to the next step. When code repeats a pattern, extract it.</p>
 
-<h2><span class="sec-no">6.4</span>A Type for "State Actions"</h2>
-<p>Every function above has the shape <code>RNG =&gt; (A, RNG)</code>. Give it a name:</p>
-<pre><code class="language-scala">type Rand[+A] = RNG =&gt; (A, RNG)
+<h2><span class="sec-no">6.4</span>A Type for State Actions</h2>
+<p>Every function above has the shape <code>RNG → (A, RNG)</code>. Name it:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt;
+using Rand = std::function&lt;std::pair&lt;A, RNG&gt;(RNG)&gt;;
 
-val int: Rand[Int] = _.nextInt</code></pre>
-<p>A <code>Rand[A]</code> is a <strong>description</strong> of how to produce a random <code>A</code>: a program waiting for a generator. Now we write combinators that build bigger <code>Rand</code>s from smaller ones and do the state threading for us:</p>
-<pre><code class="language-scala">def unit[A](a: A): Rand[A] =
-  rng =&gt; (a, rng)                  // a constant; state passes through
+const Rand&lt;int&gt; int_ = [](RNG r) { return r.next_int(); };</code></pre>
+<p>A <code>Rand&lt;A&gt;</code> is a <strong>description</strong> of how to produce a random <code>A</code>: a program waiting for a generator. Now write combinators that build bigger <code>Rand</code>s from smaller ones and do the threading for us:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt;
+Rand&lt;A&gt; unit(A a) { return [a](RNG r) { return std::pair{a, r}; }; }   // constant; state passes through
 
-def map[A, B](s: Rand[A])(f: A =&gt; B): Rand[B] =
-  rng =&gt;
-    val (a, rng2) = s(rng)
-    (f(a), rng2)
+template &lt;typename A, typename F&gt;
+auto map(Rand&lt;A&gt; s, F f) -&gt; Rand&lt;std::invoke_result_t&lt;F, A&gt;&gt; {
+    return [s, f](RNG rng) {
+        auto [a, rng2] = s(rng);
+        return std::pair{f(a), rng2};
+    };
+}
 
-val nonNegativeEven: Rand[Int] =
-  map(nonNegativeInt)(i =&gt; i - i % 2)</code></pre>
-<p>Look at <code>map</code>: the threading is written <em>once</em>, inside the combinator. Users of <code>map</code> never see a generator.</p>
+const Rand&lt;int&gt; non_negative_even =
+    map(Rand&lt;int&gt;(non_negative_int), [](int i) { return i - i % 2; });</code></pre>
+<p>Look at <code>map</code>: the threading is written <em>once</em>, inside the combinator. Users of <code>map</code> never touch a generator.</p>
 
 <div class="exercise" data-n="Exercise 6.2 · map2 and sequence">
-<p>Write <code>map2[A, B, C](ra: Rand[A], rb: Rand[B])(f: (A, B) =&gt; C): Rand[C]</code>, then <code>sequence[A](rs: List[Rand[A]]): Rand[List[A]]</code>, then <code>ints(count: Int): Rand[List[Int]]</code>.</p>
+<p>Write <code>map2(ra, rb, f)</code>, then <code>sequence</code> (a vector of <code>Rand</code>s to a <code>Rand</code> of a vector), then <code>ints(count)</code>.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def map2[A, B, C](ra: Rand[A], rb: Rand[B])(f: (A, B) =&gt; C): Rand[C] =
-  rng =&gt;
-    val (a, r1) = ra(rng)
-    val (b, r2) = rb(r1)
-    (f(a, b), r2)
+<pre><code class="language-cpp">template &lt;typename A, typename B, typename F&gt;
+auto map2(Rand&lt;A&gt; ra, Rand&lt;B&gt; rb, F f) -&gt; Rand&lt;std::invoke_result_t&lt;F, A, B&gt;&gt; {
+    return [ra, rb, f](RNG rng) {
+        auto [a, r1] = ra(rng);
+        auto [b, r2] = rb(r1);
+        return std::pair{f(a, b), r2};
+    };
+}
 
-def both[A, B](ra: Rand[A], rb: Rand[B]): Rand[(A, B)] =
-  map2(ra, rb)((_, _))
+template &lt;typename A&gt;
+Rand&lt;std::vector&lt;A&gt;&gt; sequence(std::vector&lt;Rand&lt;A&gt;&gt; rs) {
+    return [rs](RNG rng) {
+        std::vector&lt;A&gt; out;
+        for (const auto&amp; r : rs) { auto [a, next] = r(rng); out.push_back(a); rng = next; }
+        return std::pair{out, rng};
+    };
+}
 
-def sequence[A](rs: List[Rand[A]]): Rand[List[A]] =
-  rs.foldRight(unit(Nil: List[A]))((r, acc) =&gt; map2(r, acc)(_ :: _))
-
-def ints(count: Int): Rand[List[Int]] =
-  sequence(List.fill(count)(int))</code></pre>
-<p>Compare <code>sequence</code> with the one for <code>Option</code> in Chapter 4. Same fold, same <code>map2</code>, same <code>unit</code>-of-empty-list start. Only the type changed.</p>
+Rand&lt;std::vector&lt;int&gt;&gt; ints(int count) {
+    return sequence(std::vector&lt;Rand&lt;int&gt;&gt;(count, int_));
+}</code></pre>
+<p>Compare <code>sequence</code> with <code>traverse</code> for optionals in Chapter 4: walk the inputs, combine each result with what we have so far, and pass something along. Only the "something" changed.</p>
 </div></details>
 
-<h2><span class="sec-no">6.5</span>When map2 Isn't Enough: flatMap</h2>
-<p>Generate a number in [0, n). The obvious way, <code>map(nonNegativeInt)(_ % n)</code>, is slightly biased: if <code>Int.MaxValue</code> isn't a multiple of <code>n</code>, small numbers come up more often. The fix is to <em>retry</em> when the number falls in the uneven top part of the range. But retrying means the next step depends on the value we got, and <code>map</code> can't decide which <code>Rand</code> to run next. We need:</p>
-<pre><code class="language-scala">def flatMap[A, B](r: Rand[A])(f: A =&gt; Rand[B]): Rand[B] =
-  rng =&gt;
-    val (a, rng2) = r(rng)
-    f(a)(rng2)                  // the value chooses the next action
+<h2><span class="sec-no">6.5</span>When map2 Isn't Enough: flat_map</h2>
+<p>Generate a number in [0, n). The obvious way, <code>map(non_negative_int, i ↦ i % n)</code>, is slightly biased: unless INT_MAX + 1 is a multiple of <code>n</code>, small numbers come up more often. The fix is to <em>retry</em> when the number lands in the uneven top part of the range. But retrying means the next step depends on the value we got, and <code>map</code> can't choose which <code>Rand</code> to run next. We need:</p>
+<pre><code class="language-cpp">template &lt;typename A, typename F&gt;                       // F: A -&gt; Rand&lt;B&gt;
+auto flat_map(Rand&lt;A&gt; r, F f) -&gt; std::invoke_result_t&lt;F, A&gt; {
+    return [r, f](RNG rng) {
+        auto [a, rng2] = r(rng);
+        return f(a)(rng2);                              // the value chooses the next action
+    };
+}
 
-def nonNegativeLessThan(n: Int): Rand[Int] =
-  flatMap(nonNegativeInt): i =&gt;
-    val mod = i % n
-    if i + (n - 1) - mod &gt;= 0 then unit(mod)   // no overflow: not in the biased region
-    else nonNegativeLessThan(n)                // retry with the next state</code></pre>
-<div class="keypoint"><code>map</code> transforms a result. <code>map2</code> combines independent results. <code>flatMap</code> lets a result decide what happens next. It's strictly more powerful: both <code>map</code> and <code>map2</code> can be written using <code>flatMap</code> and <code>unit</code>.</div>
-
-<div class="exercise" data-n="Exercise 6.3 · map and map2 via flatMap">
-<p>Reimplement <code>map</code> and <code>map2</code> using only <code>flatMap</code> and <code>unit</code>.</p>
-</div>
-<details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def mapViaFlatMap[A, B](r: Rand[A])(f: A =&gt; B): Rand[B] =
-  flatMap(r)(a =&gt; unit(f(a)))
-
-def map2ViaFlatMap[A, B, C](ra: Rand[A], rb: Rand[B])(f: (A, B) =&gt; C): Rand[C] =
-  flatMap(ra)(a =&gt; map(rb)(b =&gt; f(a, b)))</code></pre>
-<p>Same shape as <code>map2</code> for <code>Option</code>: flatMap outside, map inside.</p>
-</div></details>
-
-<h2><span class="sec-no">6.6</span>Generalising: State</h2>
-<p>Nothing in <code>unit</code>, <code>map</code>, <code>map2</code> or <code>flatMap</code> used anything specific to random numbers. They work for <em>any</em> state. Replace <code>RNG</code> with a type parameter <code>S</code>:</p>
-<pre><code class="language-scala">opaque type State[S, +A] = S =&gt; (A, S)
-
-object State:
-  def apply[S, A](f: S =&gt; (A, S)): State[S, A] = f
-  def unit[S, A](a: A): State[S, A] = s =&gt; (a, s)
-
-  def get[S]: State[S, S] = s =&gt; (s, s)              // read the state
-  def set[S](s: S): State[S, Unit] = _ =&gt; ((), s)    // replace it
-  def modify[S](f: S =&gt; S): State[S, Unit] =
-    for
-      s &lt;- get[S]
-      _ &lt;- set(f(s))
-    yield ()
-
-  extension [S, A](underlying: State[S, A])
-    def run(s: S): (A, S) = underlying(s)
-
-    def map[B](f: A =&gt; B): State[S, B] =
-      flatMap(a =&gt; unit(f(a)))
-
-    def map2[B, C](sb: State[S, B])(f: (A, B) =&gt; C): State[S, C] =
-      for
-        a &lt;- underlying
-        b &lt;- sb
-      yield f(a, b)
-
-    def flatMap[B](f: A =&gt; State[S, B]): State[S, B] =
-      s =&gt;
-        val (a, s1) = underlying(s)
-        f(a)(s1)
-
-type Rand[A] = State[RNG, A]</code></pre>
-<p>An <code>opaque type</code> is a type alias that's only transparent inside its defining scope. Outside, users can't treat a <code>State</code> as a plain function, so they must use the combinators. At runtime it's still just the function, with no wrapper object.</p>
-<p><code>get</code>, <code>set</code> and <code>modify</code> are the primitives. With them and a for-comprehension, stateful code reads almost like imperative code, but every step is pure.</p>
+Rand&lt;int&gt; non_negative_less_than(int n) {
+    return flat_map(Rand&lt;int&gt;(non_negative_int), [n](int i) -&gt; Rand&lt;int&gt; {
+        int mod = i % n;
+        if (i + (n - 1) - mod &gt;= 0) return unit(mod);   // not in the biased region
+        return non_negative_less_than(n);               // retry with the next state
+    });
+}</code></pre>
+<div class="keypoint"><code>map</code> transforms a result. <code>map2</code> combines independent results. <code>flat_map</code> lets a result decide what happens next. It's strictly more powerful: <code>map</code> and <code>map2</code> can both be written using <code>flat_map</code> and <code>unit</code>.</div>
 <div class="bridge">
-<p>Think of a <code>State[S, A]</code> as a function you'd write as <code>std::pair&lt;A, S&gt; step(S s)</code>, the style you use when you want a deterministic, replayable simulation step with no globals. <code>flatMap</code> is the code that chains steps and passes the state along so you don't have to.</p>
+<p><code>std::uniform_int_distribution</code> does the same rejection trick inside, with a mutable engine. The book's <code>nonNegativeLessThan</code> is exactly this function, written with <code>flatMap</code>.</p>
+</div>
+
+<div class="exercise" data-n="Exercise 6.3 · map via flat_map">
+<p>Reimplement <code>map</code> using only <code>flat_map</code> and <code>unit</code>.</p>
+</div>
+<details class="sol"><summary>Show solution</summary><div>
+<pre><code class="language-cpp">template &lt;typename A, typename F&gt;
+auto map_via_flat_map(Rand&lt;A&gt; r, F f) -&gt; Rand&lt;std::invoke_result_t&lt;F, A&gt;&gt; {
+    using B = std::invoke_result_t&lt;F, A&gt;;
+    return flat_map(r, [f](A a) { return unit&lt;B&gt;(f(a)); });
+}</code></pre>
+<p>Same shape as <code>map2</code> for optionals in Chapter 4: <code>flat_map</code> on the outside, wrap the result with <code>unit</code>.</p>
+</div></details>
+
+<h2><span class="sec-no">6.6</span>Generalising: State&lt;S, A&gt;</h2>
+<p>Nothing in <code>unit</code>, <code>map</code>, <code>map2</code> or <code>flat_map</code> used anything specific to random numbers. They work for <em>any</em> state. Replace <code>RNG</code> with a type parameter <code>S</code>, and make the combinators members so they chain left to right:</p>
+<pre><code class="language-cpp">template &lt;typename S, typename A&gt;
+class State {
+    std::function&lt;std::pair&lt;A, S&gt;(S)&gt; run_;
+public:
+    using value_type = A;
+    explicit State(std::function&lt;std::pair&lt;A, S&gt;(S)&gt; f) : run_(std::move(f)) {}
+    std::pair&lt;A, S&gt; run(S s) const { return run_(std::move(s)); }
+
+    static State unit(A a) { return State([a](S s) { return std::pair{a, std::move(s)}; }); }
+
+    template &lt;typename F&gt;                                   // F: A -&gt; State&lt;S, B&gt;
+    auto flat_map(F f) const -&gt; std::invoke_result_t&lt;F, A&gt; {
+        auto self = *this;
+        return std::invoke_result_t&lt;F, A&gt;([self, f](S s) {
+            auto [a, s1] = self.run(std::move(s));
+            return f(a).run(std::move(s1));
+        });
+    }
+
+    template &lt;typename F&gt;                                   // F: A -&gt; B
+    auto map(F f) const -&gt; State&lt;S, std::invoke_result_t&lt;F, A&gt;&gt; {
+        using B = std::invoke_result_t&lt;F, A&gt;;
+        return flat_map([f](A a) { return State&lt;S, B&gt;::unit(f(a)); });
+    }
+};
+
+template &lt;typename S&gt; State&lt;S, S&gt; get() {                  // read the state
+    return State&lt;S, S&gt;([](S s) { return std::pair{s, s}; });
+}
+template &lt;typename S&gt; State&lt;S, std::monostate&gt; set(S s) {  // replace it
+    return State&lt;S, std::monostate&gt;([s](S) { return std::pair{std::monostate{}, s}; });
+}
+template &lt;typename S, typename F&gt; State&lt;S, std::monostate&gt; modify(F f) {
+    return get&lt;S&gt;().flat_map([f](S s) { return set&lt;S&gt;(f(s)); });
+}</code></pre>
+<p><code>get</code>, <code>set</code> and <code>modify</code> are the primitives. <code>std::monostate</code> stands in for "no interesting value" (the book's <code>Unit</code>). <code>Rand&lt;A&gt;</code> is now just <code>State&lt;RNG, A&gt;</code>.</p>
+<div class="bridge">
+<p>The book writes <code>opaque type State[S, +A] = S =&gt; (A, S)</code> and composes steps with a for-comprehension that reads almost like imperative code. C++ has no such syntax, so we chain <code>.flat_map(...).map(...)</code>. The meaning is identical: each step receives the state the previous step left behind.</p>
 </div>
 
 <h2><span class="sec-no">6.7</span>Worked Example: A Turnstile</h2>
-<p>A metro turnstile is locked. Inserting a token unlocks it (if locked). Pushing through a locked gate does nothing; through an unlocked one locks it again and counts a passenger. Inputs arrive as a list; we want the final counts.</p>
-<pre><code class="language-scala">enum Input:
-  case Token, Push
+<p>A metro turnstile starts locked. Inserting a token unlocks it (if locked). Pushing through an unlocked gate locks it again and counts a passenger; anything else does nothing. Inputs arrive as a list; we want the final counts.</p>
+<pre><code class="language-cpp">enum class Input { Token, Push };
+struct Gate { bool locked; int tokens; int passengers; };
 
-case class Gate(locked: Boolean, tokens: Int, passengers: Int)
+Gate step(Input i, Gate g) {                       // the rules: a plain pure function
+    if (i == Input::Token &amp;&amp; g.locked)  return {false, g.tokens + 1, g.passengers};
+    if (i == Input::Push  &amp;&amp; !g.locked) return {true, g.tokens, g.passengers + 1};
+    return g;
+}
 
-def step(i: Input)(g: Gate): Gate = (i, g) match
-  case (Input.Token, Gate(true, t, p))  =&gt; Gate(false, t + 1, p)
-  case (Input.Push,  Gate(false, t, p)) =&gt; Gate(true, t, p + 1)
-  case _                                 =&gt; g          // anything else: no change
+State&lt;Gate, std::pair&lt;int, int&gt;&gt; simulate(std::vector&lt;Input&gt; inputs) {
+    return traverse&lt;Gate&gt;(inputs, [](Input i) {
+               return modify&lt;Gate&gt;([i](Gate g) { return step(i, g); });
+           })
+        .flat_map([](auto) { return get&lt;Gate&gt;(); })
+        .map([](Gate g) { return std::pair{g.tokens, g.passengers}; });
+}
 
-def simulate(inputs: List[Input]): State[Gate, (Int, Int)] =
-  for
-    _ &lt;- State.traverse(inputs)(i =&gt; State.modify(step(i)))
-    g &lt;- State.get[Gate]
-  yield (g.tokens, g.passengers)
+simulate({Input::Token, Input::Push, Input::Push, Input::Token, Input::Push})
+    .run(Gate{true, 0, 0});
+// ({2, 2}, Gate{true, 2, 2})</code></pre>
+<p>The rules live in <code>step</code>, which is trivial to unit-test. The sequencing lives in <code>State</code>. The simulation is a value you can run against any starting gate, as many times as you like.</p>
 
-simulate(List(Input.Token, Input.Push, Input.Push, Input.Token, Input.Push))
-  .run(Gate(true, 0, 0))
-// ((2, 2), Gate(true, 2, 2))</code></pre>
-<p>The rules live in a pure function <code>step</code> that is easy to test on its own. The sequencing lives in <code>State</code>. <code>traverse</code> works on <code>State</code> too (see the exercise).</p>
-
-<div class="exercise" data-n="Exercise 6.4 · State.traverse">
-<p>Add <code>traverse[S, A, B](as: List[A])(f: A =&gt; State[S, B]): State[S, List[B]]</code> to the <code>State</code> object. Make it stack-safe for long lists.</p>
+<div class="exercise" data-n="Exercise 6.4 · traverse for State">
+<p>Write <code>traverse&lt;S&gt;(as, f)</code>, where <code>f</code> returns a <code>State&lt;S, B&gt;</code> for each input, producing a <code>State&lt;S, vector&lt;B&gt;&gt;</code>. It must handle 200,000 inputs.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">  def traverse[S, A, B](as: List[A])(f: A =&gt; State[S, B]): State[S, List[B]] =
-    s =&gt;
-      var state = s               // local mutation, invisible to callers
-      val out = List.newBuilder[B]
-      for a &lt;- as do
-        val (b, s2) = f(a).run(state)
-        out += b
-        state = s2
-      (out.result(), state)</code></pre>
-<p>The fold-and-map2 version (<code>as.foldRight(unit(Nil))((a, acc) =&gt; f(a).map2(acc)(_ :: _))</code>) is correct but nests a function call per element when it runs, so it overflows on long inputs. This version is a loop. It's still pure: the mutation is local to the call (Chapter 1, Exercise 1.3).</p>
+<pre><code class="language-cpp">template &lt;typename S, typename A, typename F&gt;
+auto traverse(std::vector&lt;A&gt; as, F f)
+    -&gt; State&lt;S, std::vector&lt;typename std::invoke_result_t&lt;F, A&gt;::value_type&gt;&gt; {
+    using B = typename std::invoke_result_t&lt;F, A&gt;::value_type;
+    return State&lt;S, std::vector&lt;B&gt;&gt;([as, f](S s) {
+        std::vector&lt;B&gt; out;
+        for (const auto&amp; a : as) {
+            auto [b, s2] = f(a).run(std::move(s));
+            out.push_back(b);
+            s = std::move(s2);
+        }
+        return std::pair{out, s};
+    });
+}</code></pre>
+<p>A fold of <code>map2</code>s would be correct too, but running it nests one function call per element and overflows the stack on long inputs. The loop is still pure: the mutation of <code>s</code> and <code>out</code> is local to one run (Exercise 1.3).</p>
 </div></details>
 
 <div class="warfield">
-<p><strong>Don't reuse an old state.</strong> With <code>RNG</code> by hand, <code>val (a, _) = int(rng); val (b, _) = int(rng)</code> gives <code>a == b</code>. That's not a bug in <code>RNG</code>. It's exactly what RT promises. Using <code>State</code> combinators instead of passing generators by hand removes this whole class of mistake.</p>
+<p><strong>Don't reuse an old state.</strong> <code>auto [a, _] = int_(rng); auto [b, __] = int_(rng);</code> gives <code>a == b</code>. That's not a bug in <code>RNG</code>; it's exactly what RT promises. Composing with <code>State</code> combinators instead of passing generators by hand removes this whole class of mistake.</p>
 </div>
 
 <h2><span class="sec-no">6.8</span>A Pattern Emerges</h2>
-<p>Line up what we have so far:</p>
+<p>Line up what we have:</p>
 <table>
-  <tr><th>Type</th><th>unit</th><th>map</th><th>map2</th><th>flatMap</th><th>sequence / traverse</th></tr>
+  <tr><th>Type</th><th>unit</th><th>map</th><th>map2</th><th>flat_map</th><th>sequence / traverse</th></tr>
   <tr><td><code>List</code></td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
-  <tr><td><code>Option</code></td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
-  <tr><td><code>Either</code></td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+  <tr><td><code>optional</code></td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
+  <tr><td><code>expected</code></td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
   <tr><td><code>LazyList</code></td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
   <tr><td><code>State</code></td><td>✓</td><td>✓</td><td>✓</td><td>✓</td><td>✓</td></tr>
 </table>
-<p>Five different types, the same five operations, and in each case <code>map</code>, <code>map2</code> and <code>sequence</code> could be written in terms of <code>unit</code> and <code>flatMap</code>. That's not a coincidence. In Part III we'll write those derived functions once, for all of these types. For now, keep noticing.</p>
+<p>Five different types, the same five operations, and each time <code>map</code>, <code>map2</code> and <code>sequence</code> could be written from <code>unit</code> and <code>flat_map</code>. That's not a coincidence. In Part III we write those derived functions once, for all of these types. For now, keep noticing.</p>
 
 <dl class="jargon">
-  <dt>State action / state transition</dt><dd>A function <code>S =&gt; (A, S)</code>: consume a state, produce a value and the next state.</dd>
-  <dt>Opaque type</dt><dd>A type alias hidden outside its scope. Type-safe like a wrapper, free at runtime like an alias.</dd>
+  <dt>State action</dt><dd>A function <code>S → (A, S)</code>: take a state, produce a value and the next state.</dd>
   <dt>get / set / modify</dt><dd>The primitive State actions that read, replace and update the state.</dd>
-  <dt>Combinator</dt><dd>A function that builds new values of a type out of existing ones (<code>map</code>, <code>map2</code>, <code>flatMap</code>).</dd>
+  <dt>Combinator</dt><dd>A function that builds new values of a type from existing ones (<code>map</code>, <code>map2</code>, <code>flat_map</code>).</dd>
+  <dt><code>std::monostate</code></dt><dd>A type with one value, used for "this step returns nothing interesting".</dd>
 </dl>
 
 <div class="recap"><ul>
   <li>Pure state: return the new state along with the result.</li>
-  <li>Name the shape <code>S =&gt; (A, S)</code> and write the threading once, in combinators.</li>
-  <li><code>flatMap</code> lets one step's result choose the next step.</li>
-  <li>For-comprehensions over <code>State</code> read like imperative code, but stay pure.</li>
+  <li>Name the shape <code>S → (A, S)</code> and write the threading once, in combinators.</li>
+  <li><code>flat_map</code> lets one step's result choose the next step.</li>
+  <li>C++ chains <code>.flat_map().map()</code> where Scala uses a for-comprehension.</li>
   <li>The same operations keep appearing on every type. Part III explains why.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch06.cpp"><span class="l-k">Full runnable listing</span>code/ch06.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

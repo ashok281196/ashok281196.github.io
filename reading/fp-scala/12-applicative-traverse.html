@@ -16,169 +16,183 @@
   <div class="chapter-num">12</div>
   <div class="chapter-kicker">Part III · Common Structures</div>
   <h1>Applicative &amp; Traversable</h1>
-  <p class="chapter-sub">Most of the functions we derived from Monad only ever used map2 and unit. Making those the primitives gives a weaker abstraction, Applicative, with more instances: validation that collects every error, applicatives that compose, and a traverse that works over any data structure.</p>
+  <p class="chapter-sub">Most functions we derived from Monad only ever used map2 and unit. Making those the primitives gives a weaker abstraction, Applicative, with more instances: validation that reports every error, applicatives that compose, and a traverse that works over any structure, including trees.</p>
 </header>
 
 <h2><span class="sec-no">12.1</span>A Weaker Interface</h2>
-<p>Look back at the <code>Monad</code> trait. <code>sequence</code>, <code>traverse</code> and <code>replicateM</code> were written using only <code>map2</code> and <code>unit</code>, never <code>flatMap</code> directly. So split it out:</p>
-<pre><code class="language-scala">trait Applicative[F[_]] extends Functor[F]:
-  def unit[A](a: =&gt; A): F[A]
+<p>Look back at Chapter 11. <code>traverse</code>, <code>sequence</code> and <code>replicate_m</code> only used <code>map2</code> and <code>unit</code>; they never called <code>flat_map</code> directly. So make those two the primitives of a separate type class:</p>
+<pre><code class="language-cpp">template &lt;typename K&gt; struct Applicative;   // must provide unit(a) and map2(fa, fb, f)
 
-  extension [A](fa: F[A])
-    def map2[B, C](fb: F[B])(f: (A, B) =&gt; C): F[C]
+template &lt;&gt; struct Applicative&lt;OptionalK&gt; {
+    template &lt;typename A&gt; static std::optional&lt;A&gt; unit(A a) { return a; }
+    template &lt;typename A, typename B, typename Fn&gt;
+    static auto map2(const std::optional&lt;A&gt;&amp; a, const std::optional&lt;B&gt;&amp; b, Fn f)
+        -&gt; std::optional&lt;std::invoke_result_t&lt;Fn, const A&amp;, const B&amp;&gt;&gt; {
+        if (a &amp;&amp; b) return f(*a, *b);
+        return std::nullopt;
+    }
+};
 
-    def map[B](f: A =&gt; B): F[B] =
-      fa.map2(unit(()))((a, _) =&gt; f(a))
-
-    def product[B](fb: F[B]): F[(A, B)] =
-      fa.map2(fb)((_, _))
-
-  def traverse[A, B](as: List[A])(f: A =&gt; F[B]): F[List[B]] =
-    as.foldRight(unit(List.empty[B]))((a, acc) =&gt; f(a).map2(acc)(_ :: _))
-
-  def sequence[A](fas: List[F[A]]): F[List[A]] = traverse(fas)(identity)
-
-trait Monad[F[_]] extends Applicative[F]:
-  extension [A](fa: F[A])
-    def flatMap[B](f: A =&gt; F[B]): F[B]
-    override def map2[B, C](fb: F[B])(f: (A, B) =&gt; C): F[C] =
-      fa.flatMap(a =&gt; fb.map(b =&gt; f(a, b)))</code></pre>
-<p>Every monad is an <strong>applicative functor</strong>. Not every applicative is a monad. Why would we want the weaker one?</p>
+template &lt;typename K, typename A, typename Fn&gt;     // written once, for every applicative
+auto traverse(const std::vector&lt;A&gt;&amp; as, Fn f) {
+    using B = typename std::invoke_result_t&lt;Fn, const A&amp;&gt;::value_type;
+    auto acc = Applicative&lt;K&gt;::unit(std::vector&lt;B&gt;{});
+    for (const auto&amp; a : as)
+        acc = Applicative&lt;K&gt;::map2(acc, f(a), [](std::vector&lt;B&gt; v, const B&amp; b) { v.push_back(b); return v; });
+    return acc;
+}</code></pre>
+<p>Every monad is an <strong>applicative functor</strong> (define <code>map2</code> with <code>flat_map</code> and <code>map</code>, as in Chapter 11). Not every applicative is a monad. Why would we want the weaker one?</p>
 
 <h2><span class="sec-no">12.2</span>The Real Difference</h2>
-<pre><code class="language-scala">// Monad: the second computation is CHOSEN using the first result
-fa.flatMap(a =&gt; if a &gt; 0 then fb else fc)
+<pre><code class="language-cpp">// Monad: the second computation is CHOSEN using the first result
+flat_map(fa, [](A a) { return a &gt; 0 ? fb : fc; });
 
-// Applicative: both computations are FIXED up front; only the values are combined
-fa.map2(fb)((a, b) =&gt; a + b)</code></pre>
-<p>With <code>map2</code>, the structure of the computation is known before anything runs. With <code>flatMap</code>, it's only known as it runs. That gives each side something:</p>
+// Applicative: both computations are FIXED up front; only their values are combined
+map2(fa, fb, std::plus{});</code></pre>
+<p>With <code>map2</code>, the whole structure of the computation is known before anything runs. With <code>flat_map</code>, it's discovered as it runs. That trade gives each side something:</p>
 <ul>
-  <li><strong>Monad</strong>: more power for the <em>user</em>. Later steps can depend on earlier results.</li>
-  <li><strong>Applicative</strong>: more freedom for the <em>implementer</em>. Since steps are independent, an applicative can run them in parallel, inspect the whole structure ahead of time, or keep going after a failure.</li>
+  <li><strong>Monad</strong>: more power for the <em>user</em>; later steps can depend on earlier results.</li>
+  <li><strong>Applicative</strong>: more freedom for the <em>implementer</em>; since steps are independent, an applicative can run them in parallel, inspect the whole structure in advance, or keep going after a failure.</li>
 </ul>
 <div class="analogy">A monadic program is a conversation: what you ask next depends on the answer you just got. An applicative program is a printed form: every question is on the page before anyone answers. You can't adapt a form to earlier answers, but you can hand page 1 and page 2 to two people at once, and you can list every unanswered question at the end.</div>
-<p>Parsers make it concrete. An applicative parser is a fixed grammar: <code>name ** age ** email</code>. A monadic parser can read a header and choose a format, which is more expressive. But applicative parsers can be analysed and optimised before running, which monadic ones can't, because the next parser is hidden inside a function.</p>
+<p>Build systems are a neat C++ example. A Makefile or CMake graph declares all dependencies up front: applicative. That's what lets <code>make -j</code> parallelise and lets tools draw the graph. A build step that decides what to build next based on output it just produced (dynamic dependencies, like C++20 modules scanning) is monadic, and is much harder for the build system to plan.</p>
 
-<h2><span class="sec-no">12.3</span>Validation: Collecting Every Error</h2>
-<p>Recall the form from Chapter 4. <code>Either</code>'s <code>flatMap</code> stops at the first error, so a user with a bad name <em>and</em> a bad age only hears about the name. The fields are independent, so we don't need <code>flatMap</code>. We need an applicative that collects errors:</p>
-<pre><code class="language-scala">enum Validated[+E, +A]:
-  case Valid(get: A)
-  case Invalid(errors: List[E])    // keep all of them
+<h2><span class="sec-no">12.3</span>Validation: Report Every Error</h2>
+<p>Back to Chapter 4. <code>std::expected</code>'s <code>and_then</code> stops at the first error, so a user with a bad name <em>and</em> a bad age only hears about the name. The fields are independent, so we don't need <code>flat_map</code>. We need an applicative that keeps errors from both sides:</p>
+<pre><code class="language-cpp">template &lt;typename E, typename A&gt; struct Valid { A value; };
+template &lt;typename E&gt;             struct Invalid { std::vector&lt;E&gt; errors; };   // ALL of them
+template &lt;typename E, typename A&gt;
+struct Validated {
+    using value_type = A;
+    std::variant&lt;Valid&lt;E, A&gt;, Invalid&lt;E&gt;&gt; v;
+    bool ok() const { return v.index() == 0; }
+    // value(), errors() accessors
+};
+template &lt;typename E&gt; struct ValidatedK { template &lt;typename A&gt; using F = Validated&lt;E, A&gt;; };
 
-given validatedApplicative[E]: Applicative[[x] =&gt;&gt; Validated[E, x]] with
-  def unit[A](a: =&gt; A) = Validated.Valid(a)
-  extension [A](fa: Validated[E, A])
-    override def map2[B, C](fb: Validated[E, B])(f: (A, B) =&gt; C): Validated[E, C] =
-      (fa, fb) match
-        case (Validated.Valid(a), Validated.Valid(b))       =&gt; Validated.Valid(f(a, b))
-        case (Validated.Invalid(e1), Validated.Invalid(e2)) =&gt; Validated.Invalid(e1 ++ e2)
-        case (e @ Validated.Invalid(_), _)                  =&gt; e
-        case (_, e @ Validated.Invalid(_))                  =&gt; e</code></pre>
-<p>The case with two <code>Invalid</code>s is the point: both error lists are kept. This would break the monad laws if we also defined a <code>flatMap</code> (which can't know the second step's errors without the first's value), so <code>Validated</code> is an applicative but deliberately not a monad.</p>
-<pre><code class="language-scala">import Validated.*
+template &lt;typename E&gt; struct Applicative&lt;ValidatedK&lt;E&gt;&gt; {
+    template &lt;typename A&gt; static Validated&lt;E, A&gt; unit(A a) { return {Valid&lt;E, A&gt;{a}}; }
+    template &lt;typename A, typename B, typename Fn&gt;
+    static auto map2(const Validated&lt;E, A&gt;&amp; a, const Validated&lt;E, B&gt;&amp; b, Fn f) {
+        using C = std::invoke_result_t&lt;Fn, const A&amp;, const B&amp;&gt;;
+        if (a.ok() &amp;&amp; b.ok()) return Validated&lt;E, C&gt;{Valid&lt;E, C&gt;{f(a.value(), b.value())}};
+        std::vector&lt;E&gt; errs;                                   // keep errors from BOTH sides
+        if (!a.ok()) errs.insert(errs.end(), a.errors().begin(), a.errors().end());
+        if (!b.ok()) errs.insert(errs.end(), b.errors().begin(), b.errors().end());
+        return Validated&lt;E, C&gt;{Invalid&lt;E&gt;{errs}};
+    }
+};</code></pre>
+<p>A lawful <code>flat_map</code> for this type would have to stop at the first error (it can't run the second step without the first's value), so <code>Validated</code> is deliberately an applicative and not a monad.</p>
+<pre><code class="language-cpp">Validated&lt;std::string, User&gt; valid_user(const std::string&amp; n, int a, const std::string&amp; e) {
+    using AP = Applicative&lt;ValidatedK&lt;std::string&gt;&gt;;
+    auto name_age = AP::map2(valid_name(n), valid_age(a),
+                             [](std::string n, int a) { return std::pair{n, a}; });
+    return AP::map2(name_age, valid_email(e), [](std::pair&lt;std::string, int&gt; na, std::string e) {
+        return User{na.first, na.second, e};
+    });
+}
 
-def validName(n: String): Validated[String, String] =
-  if n.isBlank then Invalid(List("name is empty")) else Valid(n)
-
-def validAge(a: Int): Validated[String, Int] =
-  if a &lt; 0 || a &gt; 150 then Invalid(List(s"age $a out of range")) else Valid(a)
-
-def validEmail(e: String): Validated[String, String] =
-  if e.contains("@") then Valid(e) else Invalid(List(s"bad email '$e'"))
-
-case class User(name: String, age: Int, email: String)
-
-def validUser(n: String, a: Int, e: String): Validated[String, User] =
-  validName(n).map2(validAge(a))((_, _)).map2(validEmail(e)) { case ((n, a), e) =&gt; User(n, a, e) }
-
-validUser("", -5, "nope")
-// Invalid(List("name is empty", "age -5 out of range", "bad email 'nope'"))</code></pre>
-<p>All three errors, in one pass. This is what form validation and config loading should do, and it's why the cats library ships <code>Validated</code> next to <code>Either</code>.</p>
+valid_user("", -5, "nope").errors();
+// { "name is empty", "age -5 out of range", "bad email 'nope'" }</code></pre>
+<p>All three errors in one pass. This is what form validation, config loading and command-line parsing should do. And <code>traverse&lt;ValidatedK&lt;std::string&gt;&gt;(ages, valid_age)</code> checks a whole list and reports every bad entry.</p>
 <div class="keypoint">Use the least powerful abstraction that does the job. If your steps don't depend on each other, an applicative gives you more: parallelism, error accumulation, static analysis.</div>
 
-<h2><span class="sec-no">12.4</span>Applicative Laws and Composition</h2>
-<p>The laws, in terms of <code>map2</code> and <code>unit</code>:</p>
-<pre><code class="language-text">unit(()).map2(fa)((_, a) =&gt; a) == fa                     // left identity
-fa.map2(unit(()))((a, _) =&gt; a) == fa                     // right identity
-fa.product(fb).product(fc) == fa.product(fb.product(fc))  // associativity (up to tuple nesting)</code></pre>
-<p>Identity and associativity again: a monoid, at one more level of abstraction.</p>
-<p>And unlike monads, <strong>applicatives compose</strong>. If <code>F</code> and <code>G</code> are applicatives, so is <code>F[G[_]]</code>:</p>
-<pre><code class="language-scala">def compose[F[_], G[_]](F: Applicative[F], G: Applicative[G]): Applicative[[x] =&gt;&gt; F[G[x]]] =
-  new:
-    def unit[A](a: =&gt; A) = F.unit(G.unit(a))
-    extension [A](fga: F[G[A]])
-      override def map2[B, C](fgb: F[G[B]])(f: (A, B) =&gt; C) =
-        F.map2(fga)(fgb)((ga, gb) =&gt; G.map2(ga)(gb)(f))</code></pre>
-<p>(<code>F.map2(x)(y)(f)</code> is the explicit way to call an extension method from a specific instance.) For example, <code>Par</code> composed with <code>Validated</code> gives "validate many inputs in parallel, collecting all errors" without writing anything new.</p>
+<h2><span class="sec-no">12.4</span>Laws, and Composition</h2>
+<p>Applicative laws, in terms of <code>map2</code> and <code>unit</code>:</p>
+<pre><code class="language-text">map2(unit(()), fa, (_, a) ↦ a) == fa                 left identity
+map2(fa, unit(()), (a, _) ↦ a) == fa                 right identity
+product(product(fa, fb), fc) ≅ product(fa, product(fb, fc))   associativity (up to tuple nesting)</code></pre>
+<p>Identity and associativity once more: a monoid, at one more level of abstraction.</p>
+<p>And unlike monads, <strong>applicatives compose</strong>. If <code>F</code> and <code>G</code> are applicatives, so is <code>F&lt;G&lt;_&gt;&gt;</code>:</p>
+<pre><code class="language-cpp">template &lt;typename K1, typename K2&gt; struct ComposeK {
+    template &lt;typename A&gt; using F = typename K1::template F&lt;typename K2::template F&lt;A&gt;&gt;;
+};
 
-<h2><span class="sec-no">12.5</span>Traverse: Beyond Lists</h2>
-<p>So far, <code>traverse</code> works on <code>List</code>. But nothing about it is specific to lists. You can traverse a tree, an <code>Option</code>, a <code>Map</code>'s values. Abstract over the <em>container</em> too:</p>
-<pre><code class="language-scala">trait Traverse[F[_]] extends Functor[F], Foldable[F]:
-  extension [A](fa: F[A])
-    def traverse[G[_]: Applicative, B](f: A =&gt; G[B]): G[F[B]]
+template &lt;typename K1, typename K2&gt; struct Applicative&lt;ComposeK&lt;K1, K2&gt;&gt; {
+    template &lt;typename A&gt; static auto unit(A a) {
+        return Applicative&lt;K1&gt;::unit(Applicative&lt;K2&gt;::unit(a));
+    }
+    template &lt;typename FGA, typename FGB, typename Fn&gt;
+    static auto map2(const FGA&amp; fga, const FGB&amp; fgb, Fn f) {
+        using GA = typename FGA::value_type;
+        using GB = typename FGB::value_type;
+        return Applicative&lt;K1&gt;::map2(fga, fgb, [f](const GA&amp; ga, const GB&amp; gb) {
+            return Applicative&lt;K2&gt;::map2(ga, gb, f);       // combine inner layer inside outer layer
+        });
+    }
+};</code></pre>
+<p><code>ComposeK&lt;OptionalK, ValidatedK&lt;std::string&gt;&gt;</code> is an applicative for "maybe present, and if present, validated" with no new code. A composition of <code>Par</code> and <code>Validated</code> would give "validate many inputs in parallel, collecting all errors".</p>
 
-  extension [G[_]: Applicative, A](fga: F[G[A]])
-    def sequence: G[F[A]] = fga.traverse(ga =&gt; ga)</code></pre>
-<p><code>G[_]: Applicative</code> is shorthand for "and a <code>using Applicative[G]</code> parameter". So <code>traverse</code> has two dimensions of generality: the structure being walked (<code>F</code>), and the effect applied at each element (<code>G</code>). Some combinations:</p>
+<h2><span class="sec-no">12.5</span>Traverse: Beyond Vectors</h2>
+<p>So far <code>traverse</code> walks a vector. But you can traverse an optional, a tree, a map's values. The idea has two dimensions of generality: the <strong>structure</strong> being walked, and the <strong>applicative effect</strong> applied at each element.</p>
 <table>
-  <tr><th>F (structure)</th><th>G (effect)</th><th>Meaning</th></tr>
-  <tr><td>List</td><td>Option</td><td>parse every item; fail if any fails</td></tr>
-  <tr><td>List</td><td>Validated</td><td>check every item; report all failures</td></tr>
+  <tr><th>Structure</th><th>Effect</th><th>Meaning</th></tr>
+  <tr><td>vector</td><td>optional</td><td>parse every item; fail if any fails</td></tr>
+  <tr><td>vector</td><td>Validated</td><td>check every item; report all failures</td></tr>
   <tr><td>Tree</td><td>Par</td><td>process every node in parallel, keep the tree shape</td></tr>
-  <tr><td>Map[K, _]</td><td>Future / IO</td><td>fetch a value for every key concurrently</td></tr>
-  <tr><td>Option</td><td>Either</td><td>validate an optional field only if present</td></tr>
+  <tr><td>map&lt;K, _&gt;</td><td>future</td><td>fetch a value for every key concurrently</td></tr>
+  <tr><td>optional</td><td>expected</td><td>validate an optional field only if present</td></tr>
 </table>
-<p>And <code>sequence</code> <strong>swaps the layers</strong>: <code>List[Option[A]]</code> becomes <code>Option[List[A]]</code>, a <code>Map[K, Future[V]]</code> becomes <code>Future[Map[K, V]]</code>.</p>
+<p>For a rose tree, each node has a value and a vector of children:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; struct Tree { A head; std::vector&lt;Tree&gt; children; };
 
-<div class="exercise" data-n="Exercise 12.1 · Traverse for Option and Tree">
-<p>Write <code>Traverse</code> instances for <code>Option</code> and for a rose tree <code>case class Tree[+A](head: A, tail: List[Tree[A]])</code>. You only need <code>traverse</code>; assume <code>map</code> and the fold methods are filled in.</p>
+template &lt;typename K, typename A, typename Fn,
+          typename B = typename std::invoke_result_t&lt;Fn, const A&amp;&gt;::value_type&gt;
+auto traverse_tree(const Tree&lt;A&gt;&amp; t, Fn f) -&gt; typename K::template F&lt;Tree&lt;B&gt;&gt; {
+    auto kids = traverse&lt;K&gt;(t.children, [f](const Tree&lt;A&gt;&amp; c) -&gt; typename K::template F&lt;Tree&lt;B&gt;&gt; {
+        return traverse_tree&lt;K&gt;(c, f);
+    });
+    return Applicative&lt;K&gt;::map2(f(t.head), kids,
+        [](const B&amp; b, std::vector&lt;Tree&lt;B&gt;&gt; cs) { return Tree&lt;B&gt;{b, cs}; });
+}</code></pre>
+<p>Apply <code>f</code> to the head, traverse the children (reusing vector's <code>traverse</code>), and rebuild the node with <code>map2</code>. The shape is always preserved: a tree comes back as a tree with the same shape, or the effect says why not. (A recursive function needs an explicit return type in C++, hence the trailing <code>-&gt;</code>.)</p>
+<p>A <code>traverse</code> with an applicative effect is also called "map with an effect". And <strong>sequence</strong> (traverse with the identity function) swaps the layers: <code>vector&lt;optional&lt;A&gt;&gt;</code> becomes <code>optional&lt;vector&lt;A&gt;&gt;</code>, a <code>map&lt;K, future&lt;V&gt;&gt;</code> becomes <code>future&lt;map&lt;K, V&gt;&gt;</code>.</p>
+
+<div class="exercise" data-n="Exercise 12.1 · traverse for optional">
+<p>Write <code>traverse_opt&lt;K&gt;(optional&lt;A&gt;, f)</code>, returning <code>K::F&lt;optional&lt;B&gt;&gt;</code>.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">// Option: if empty, there's nothing to do but wrap; otherwise apply f and rewrap
-extension [A](oa: Option[A])
-  def traverse[G[_], B](f: A =&gt; G[B])(using G: Applicative[G]): G[Option[B]] =
-    oa match
-      case Some(a) =&gt; f(a).map(Some(_))
-      case None    =&gt; G.unit(None)
-
-// Tree: apply f to the head, traverse the children (a List of Trees), rebuild
-extension [A](ta: Tree[A])
-  def traverse[G[_], B](f: A =&gt; G[B])(using G: Applicative[G]): G[Tree[B]] =
-    f(ta.head).map2(G.traverse(ta.tail)(t =&gt; t.traverse(f)))(Tree(_, _))</code></pre>
-<p>The structure is always preserved: a <code>Some</code> stays a <code>Some</code>, the tree keeps its shape. Traverse is "map with an effect".</p>
+<pre><code class="language-cpp">template &lt;typename K, typename A, typename Fn&gt;
+auto traverse_opt(const std::optional&lt;A&gt;&amp; oa, Fn f) {
+    using B = typename std::invoke_result_t&lt;Fn, const A&amp;&gt;::value_type;
+    if (!oa) return Applicative&lt;K&gt;::unit(std::optional&lt;B&gt;{});        // nothing to do: just wrap
+    return map&lt;K&gt;(f(*oa), [](const B&amp; b) { return std::optional&lt;B&gt;(b); });
+}</code></pre>
+<p>Empty stays empty (wrapped in the effect); a value gets <code>f</code> applied and is rewrapped. <code>map</code> here is derived from <code>map2</code> and <code>unit</code>.</p>
 </div></details>
 
 <h2><span class="sec-no">12.6</span>Traverse Generalises Map and Fold</h2>
 <p>Two surprising facts:</p>
-<p><strong>map is traverse with no effect.</strong> Use the identity "applicative" <code>Id[x] = x</code>: <code>fa.traverse[Id, B](f)</code> is just <code>fa.map(f)</code>. So every <code>Traverse</code> is a <code>Functor</code>.</p>
-<p><strong>foldMap is traverse with a monoid.</strong> Every monoid gives an applicative that ignores its type parameter: <code>Const[M, x] = M</code>, with <code>unit = M.empty</code> and <code>map2 = M.combine</code>. Traversing with it accumulates a monoid value across the structure, which is <code>foldMap</code>. So every <code>Traverse</code> is a <code>Foldable</code>.</p>
-<p>And with the <code>State</code> applicative, traverse can carry state across a structure: number every node of a tree, or zip it with a list.</p>
-<pre><code class="language-scala">// label each element with its index, for ANY traversable structure
-extension [F[_]: Traverse, A](fa: F[A])
-  def zipWithIndex: F[(A, Int)] =
-    fa.traverse[[x] =&gt;&gt; State[Int, x], (A, Int)](a =&gt;
-      for
-        i &lt;- State.get[Int]
-        _ &lt;- State.set(i + 1)
-      yield (a, i)
-    ).run(0)(0)</code></pre>
-<p>One function, written once, and it works for lists, trees, options and maps. That's the payoff of Part III.</p>
+<p><strong>map is traverse with no effect.</strong> Use the identity applicative (<code>Id&lt;A&gt;</code> from Chapter 11) and traverse is just map.</p>
+<p><strong>fold_map is traverse with a monoid.</strong> Every monoid gives an applicative that ignores its value type, called <code>Const</code>: <code>unit</code> is the monoid's <code>empty</code>, and <code>map2</code> is its <code>combine</code>. Traversing with it accumulates a monoid value across the structure, which is exactly <code>fold_map</code>.</p>
+<p>And with the <code>State</code> applicative, traverse can carry state across any structure. Numbering every element, for a vector or a tree, with the same labelling function:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; auto label = [](const A&amp; a) {
+    return State&lt;int, std::pair&lt;A, int&gt;&gt;{[a](int i) { return std::pair{std::pair{a, i}, i + 1}; }};
+};
+
+traverse&lt;StateK&lt;int&gt;&gt;(std::vector&lt;std::string&gt;{"a", "b", "c"}, label&lt;std::string&gt;).run(0);
+// ({("a",0), ("b",1), ("c",2)}, 3)
+
+traverse_tree&lt;StateK&lt;int&gt;&gt;(char_tree, label&lt;char&gt;).run(0);
+// every node numbered in pre-order, tree shape unchanged</code></pre>
+<p>One function, written once, working across structures and effects. That's the payoff of Part III.</p>
 
 <dl class="jargon">
   <dt>Applicative functor</dt><dd><code>unit</code> + <code>map2</code> with identity and associativity laws. Combines independent effects.</dd>
-  <dt>Validated</dt><dd>An applicative like <code>Either</code> that accumulates errors instead of stopping at the first.</dd>
-  <dt>Traverse</dt><dd>A type class for structures you can walk with an applicative effect, keeping their shape.</dd>
-  <dt>Context bound <code>G[_]: Applicative</code></dt><dd>Shorthand for a <code>using Applicative[G]</code> parameter.</dd>
-  <dt>Const applicative</dt><dd>An applicative made from a monoid, ignoring its value type. Turns traverse into foldMap.</dd>
+  <dt>Validated</dt><dd>An applicative like <code>expected</code> that accumulates errors instead of stopping at the first.</dd>
+  <dt>Traverse</dt><dd>Walking a structure with an applicative effect, keeping its shape.</dd>
+  <dt>Const applicative</dt><dd>An applicative built from a monoid, ignoring its value type; turns traverse into fold_map.</dd>
 </dl>
 
 <div class="recap"><ul>
   <li>Applicative = <code>unit</code> + <code>map2</code>. Every monad is one; not the other way round.</li>
   <li>Applicative steps are fixed in advance, so they can run in parallel or accumulate errors.</li>
-  <li><code>Validated</code> collects all errors; use it for independent checks.</li>
-  <li>Applicatives compose; monads don't.</li>
-  <li><code>traverse</code> generalises over both the structure and the effect, and subsumes <code>map</code> and <code>foldMap</code>.</li>
+  <li><code>Validated</code> reports every error; use it for independent checks.</li>
+  <li>Applicatives compose (<code>ComposeK</code>); monads don't.</li>
+  <li><code>traverse</code> is generic in both structure and effect, and subsumes <code>map</code> and <code>fold_map</code>.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch12.cpp"><span class="l-k">Full runnable listing</span>code/ch12.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

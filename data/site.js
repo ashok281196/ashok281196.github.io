@@ -28,8 +28,8 @@ const SITE = {
     },
     {
       file: 'reading/fp-scala/index.html',
-      title: 'Functional Programming in Scala — A Study Companion',
-      desc: 'The concepts of the “red book”, rebuilt step by step in fifteen chapters of Scala 3: pure functions, functional data structures, errors as values, laziness, State, library design, property testing, parsers, monoids, monads, applicatives, IO and streaming. Exercises with hidden solutions in every chapter.',
+      title: 'Functional Programming in Scala — Taught in C++',
+      desc: 'The concepts of the “red book”, rebuilt step by step in fifteen chapters of modern C++: pure functions, persistent data, optional and expected, laziness, State, library design, property testing, parsers, monoids, monads, applicatives, IO and streaming. Exercises with hidden solutions, and a compiled, tested .cpp file for every chapter.',
       meta: [
         { label: 'NEW', hot: true },
         { label: 'book' },

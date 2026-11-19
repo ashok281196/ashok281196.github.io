@@ -16,232 +16,225 @@
   <div class="chapter-num">09</div>
   <div class="chapter-kicker">Part II · Functional Design</div>
   <h1>Parser Combinators</h1>
-  <p class="chapter-sub">The purest exercise in algebraic design: write the whole interface of a parsing library, and a JSON parser using it, before deciding how a parser is represented. Then implement a dozen primitives and watch everything else work.</p>
+  <p class="chapter-sub">The purest exercise in algebraic design: decide the operations of a parsing library and write a JSON parser with them before deciding how a parser is represented. Then implement six primitives in C++ and watch the whole grammar work, with useful error messages.</p>
 </header>
 
 <h2><span class="sec-no">9.1</span>What We're Building</h2>
-<p>A <strong>parser</strong> turns unstructured text into structured data: <code>"[1, 2, true]"</code> into a JSON array value. A <strong>parser combinator</strong> library gives you small parsers (match a string, match a digit) and functions that combine them (this then that, this or that, many of this). You build a full parser in code, with no separate grammar file or generator step.</p>
-<p>This chapter pushes "algebra first" to its limit. We'll write the API as a trait with an abstract type <code>Parser[+A]</code>, use it to write a JSON parser, and only at the end choose a representation.</p>
+<p>A <strong>parser</strong> turns text into structured data: <code>"[1, 2, true]"</code> into a JSON array. A <strong>parser combinator</strong> library gives you small parsers (match a string, match a regex) and functions that combine them (this then that, this or that, many of this). You write the grammar as ordinary code, with no separate grammar file or code generator.</p>
+<p>This chapter pushes "algebra first" to the limit: decide the operations, write a JSON parser against them, and only at the end pick a representation.</p>
 
 <h2><span class="sec-no">9.2</span>Primitives, From Examples</h2>
-<p>Start with the simplest things we'd want to parse, and invent a function for each:</p>
-<pre><code class="language-scala">trait Parsers[Parser[+_]]:
-  def string(s: String): Parser[String]          // match exactly s
-  def char(c: Char): Parser[Char] = string(c.toString).map(_.charAt(0))
-  def succeed[A](a: A): Parser[A]                // consume nothing, always succeed
+<p>Start with the simplest things we'd want to parse, and invent an operation for each. Think of this as the header file of the library, before any <code>.cpp</code> exists:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; class Parser;   // representation: not decided yet
 
-  extension [A](p: Parser[A])
-    def run(input: String): Either[ParseError, A]
-    infix def or(p2: =&gt; Parser[A]): Parser[A]    // try p; if it fails, try p2
-    def |(p2: =&gt; Parser[A]): Parser[A] = p.or(p2)</code></pre>
-<p><code>Parsers[Parser[+_]]</code> is new: <code>Parser</code> is a <strong>type constructor</strong> parameter, a type that takes a type. The trait is generic over <em>how parsers are represented</em>. Any implementation must supply these functions for its own <code>Parser</code> type.</p>
+Parser&lt;std::string&gt; string(std::string s);               // match exactly s
+Parser&lt;std::string&gt; regex(std::string pattern);          // match a regex at this position
+template &lt;typename A&gt; Parser&lt;A&gt; succeed(A a);            // consume nothing, always succeed
+template &lt;typename A&gt; Parser&lt;A&gt; operator|(Parser&lt;A&gt; p, Parser&lt;A&gt; p2);   // p, or else p2
+template &lt;typename A&gt; std::variant&lt;A, ParseError&gt; run(const Parser&lt;A&gt;&amp; p, std::string_view input);</code></pre>
 <p>Laws come immediately:</p>
-<pre><code class="language-text">string(s).run(s)          == Right(s)
-succeed(a).run(anything)  == Right(a)
-(string("ab") | string("cd")).run("cd") == Right("cd")</code></pre>
+<pre><code class="language-text">run(string(s), s)            == s
+run(succeed(a), anything)    == a
+run(string("ab") | string("cd"), "cd") == "cd"</code></pre>
 
-<h3>Repetition</h3>
-<p>Parse "zero or more of p", and "exactly n of p":</p>
-<pre><code class="language-scala">  extension [A](p: Parser[A])
-    def many: Parser[List[A]]
-    def listOfN(n: Int): Parser[List[A]]
-    def map[B](f: A =&gt; B): Parser[B]</code></pre>
-<p>Counting characters is now <code>char('a').many.map(_.size)</code>. That builds a list just to count it. A better primitive: <code>slice</code>, which returns the part of the input a parser consumed, ignoring its result:</p>
-<pre><code class="language-scala">    def slice: Parser[String]
+<h3>Repetition and slices</h3>
+<p>Parse "zero or more of p":</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; Parser&lt;std::vector&lt;A&gt;&gt; many(Parser&lt;A&gt; p);
+template &lt;typename A, typename F&gt; auto map(Parser&lt;A&gt; p, F f);   // transform the result</code></pre>
+<p>Counting a's is now <code>map(many(char_('a')), size)</code>, but that builds a vector just to count it. A better primitive, <code>slice</code>, returns the piece of input a parser consumed and ignores its result:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; Parser&lt;std::string&gt; slice(Parser&lt;A&gt; p);
 
-char('a').many.slice.map(_.size)   // no intermediate list</code></pre>
+map(slice(many(char_('a'))), [](std::string s) { return s.size(); });   // no vector built</code></pre>
 
 <h3>Sequencing</h3>
-<p>To parse "one or more a's", we need "p, then p.many". That needs a way to run two parsers in sequence:</p>
-<pre><code class="language-scala">    def product[B](p2: =&gt; Parser[B]): Parser[(A, B)]
-    def **[B](p2: =&gt; Parser[B]): Parser[(A, B)] = product(p2)
+<p>"One or more a's" needs "p, then many(p)": two parsers in sequence.</p>
+<pre><code class="language-cpp">template &lt;typename A, typename B, typename F&gt; auto map2(Parser&lt;A&gt; pa, Parser&lt;B&gt; pb, F f);
 
-    def map2[B, C](p2: =&gt; Parser[B])(f: (A, B) =&gt; C): Parser[C] =
-      product(p2).map((a, b) =&gt; f(a, b))
-
-    def many1: Parser[List[A]] =
-      map2(p.many)(_ :: _)</code></pre>
-<p>Why is <code>p2</code> by-name? Look at <code>many</code> written with <code>map2</code>:</p>
-<pre><code class="language-scala">    def many: Parser[List[A]] =
-      p.map2(p.many)(_ :: _) | succeed(Nil)</code></pre>
-<p>If <code>map2</code> evaluated <code>p.many</code> eagerly, it would call <code>many</code> again, forever. By-name makes the recursion lazy: the inner <code>p.many</code> is built only when parsing actually reaches it. Laziness from Chapter 5 is load-bearing here. So <code>many</code> is derived, not primitive.</p>
+template &lt;typename A&gt; Parser&lt;std::vector&lt;A&gt;&gt; many1(Parser&lt;A&gt; p) {
+    return map2(p, many(p), [](A a, std::vector&lt;A&gt; v) { v.insert(v.begin(), a); return v; });
+}</code></pre>
 
 <h3>Context sensitivity</h3>
-<p>Parse a digit <em>n</em>, then exactly <em>n</em> letter a's ("3aaa"). The second parser depends on the result of the first. <code>map2</code> can't express that. You know what can:</p>
-<pre><code class="language-scala">    def flatMap[B](f: A =&gt; Parser[B]): Parser[B]
+<p>Parse a digit <em>n</em>, then exactly <em>n</em> letter a's ("3aaa"). The second parser depends on the first one's result, which <code>map2</code> can't express. You know what can:</p>
+<pre><code class="language-cpp">template &lt;typename A, typename F&gt; auto flat_map(Parser&lt;A&gt; p, F f);   // F: A -&gt; Parser&lt;B&gt;
 
-val countedAs: Parser[Int] =
-  for
-    digit &lt;- regex("[0-9]".r)
-    n = digit.toInt
-    _     &lt;- char('a').listOfN(n)
-  yield n</code></pre>
-<p>With <code>flatMap</code>, <code>product</code> and <code>map</code> become derived too (exercise). <code>regex</code> is another primitive: <code>def regex(r: scala.util.matching.Regex): Parser[String]</code>.</p>
+Parser&lt;int&gt; counted_as() {
+    return flat_map(regex("[0-9]"), [](std::string d) {
+        int n = d[0] - '0';
+        return map(list_of_n(n, char_('a')), [n](std::vector&lt;char&gt;) { return n; });
+    });
+}</code></pre>
 
-<div class="exercise" data-n="Exercise 9.1 · derive product and map">
-<p>Write <code>product</code> and <code>map</code> using <code>flatMap</code> and <code>succeed</code>.</p>
+<div class="exercise" data-n="Exercise 9.1 · derive map and map2">
+<p>Write <code>map</code> and <code>map2</code> using only <code>flat_map</code> and <code>succeed</code>.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">    def product[B](p2: =&gt; Parser[B]): Parser[(A, B)] =
-      p.flatMap(a =&gt; p2.map(b =&gt; (a, b)))
+<pre><code class="language-cpp">template &lt;typename A, typename F&gt;
+auto map(Parser&lt;A&gt; p, F f) -&gt; Parser&lt;std::invoke_result_t&lt;F, A&gt;&gt; {
+    using B = std::invoke_result_t&lt;F, A&gt;;
+    return flat_map(p, [f](A a) { return succeed&lt;B&gt;(f(a)); });
+}
 
-    def map[B](f: A =&gt; B): Parser[B] =
-      p.flatMap(a =&gt; succeed(f(a)))</code></pre>
-<p>The same derivations as for <code>Option</code>, <code>State</code> and <code>Par</code>. <code>succeed</code> plays the role of <code>unit</code>.</p>
+template &lt;typename A, typename B, typename F&gt;
+auto map2(Parser&lt;A&gt; pa, Parser&lt;B&gt; pb, F f) -&gt; Parser&lt;std::invoke_result_t&lt;F, A, B&gt;&gt; {
+    return flat_map(pa, [pb, f](A a) { return map(pb, [a, f](B b) { return f(a, b); }); });
+}</code></pre>
+<p>The same derivations as for <code>optional</code>, <code>State</code> and <code>Par</code>. <code>succeed</code> plays the role of <code>unit</code>.</p>
 </div></details>
 
-<div class="keypoint">Our primitive set is now: <code>string</code>, <code>regex</code>, <code>succeed</code>, <code>slice</code>, <code>or</code>, <code>flatMap</code>. Everything else (<code>map</code>, <code>map2</code>, <code>product</code>, <code>many</code>, <code>many1</code>, <code>listOfN</code>) is derived. An implementation only has to provide six functions.</div>
+<div class="keypoint">The primitives are <code>string</code>, <code>regex</code>, <code>succeed</code>, <code>slice</code>, <code>|</code> and <code>flat_map</code> (plus error-reporting ones below). Everything else (<code>map</code>, <code>map2</code>, <code>product</code>, <code>many1</code>, <code>list_of_n</code>, <code>sep</code>) is derived. An implementation only has to provide those few functions.</div>
 
 <h2><span class="sec-no">9.3</span>A JSON Parser, Before Any Implementation</h2>
-<p>JSON as an ADT:</p>
-<pre><code class="language-scala">enum JSON:
-  case JNull
-  case JNumber(get: Double)
-  case JString(get: String)
-  case JBool(get: Boolean)
-  case JArray(get: IndexedSeq[JSON])
-  case JObject(get: Map[String, JSON])</code></pre>
-<p>A few more derived helpers make grammars pleasant: skip whitespace, keep the left or right result of a sequence, and separate by a delimiter.</p>
-<pre><code class="language-scala">  def whitespace: Parser[String] = regex("\\s*".r)
+<p>JSON as a sum type. <code>std::vector</code> may hold an incomplete type, so the variant can mention <code>JSON</code> inside <code>JSON</code>:</p>
+<pre><code class="language-cpp">struct JSON {
+    std::variant&lt;std::nullptr_t, double, std::string, bool,
+                 std::vector&lt;JSON&gt;,                              // array
+                 std::vector&lt;std::pair&lt;std::string, JSON&gt;&gt;&gt; v;  // object
+};</code></pre>
+<p>A few more derived helpers make grammars pleasant: skip whitespace, keep only the left or right result of a sequence, separate by a delimiter.</p>
+<pre><code class="language-cpp">template &lt;typename A, typename B&gt; Parser&lt;B&gt; skip_l(Parser&lt;A&gt; pa, Parser&lt;B&gt; pb) {
+    return map2(slice(pa), pb, [](std::string, B b) { return b; });
+}
+template &lt;typename A, typename B&gt; Parser&lt;A&gt; skip_r(Parser&lt;A&gt; pa, Parser&lt;B&gt; pb) {
+    return map2(pa, slice(pb), [](A a, std::string) { return a; });
+}
+Parser&lt;std::string&gt; whitespace() { return regex("\\s*"); }
+template &lt;typename A&gt; Parser&lt;A&gt; token(Parser&lt;A&gt; p) { return skip_r(p, whitespace()); }
+Parser&lt;std::string&gt; tok(std::string s) { return token(string(std::move(s))); }
 
-  extension [A](p: Parser[A])
-    def *&gt;[B](p2: =&gt; Parser[B]): Parser[B] = p.slice.map2(p2)((_, b) =&gt; b)   // keep right
-    def &lt;*(p2: =&gt; Parser[Any]): Parser[A] = p.map2(p2.slice)((a, _) =&gt; a)    // keep left
-    def token: Parser[A] = p &lt;* whitespace
-    def sep(separator: Parser[Any]): Parser[List[A]] =
-      (p.map2((separator *&gt; p).many)(_ :: _)) | succeed(Nil)
-    def as[B](b: B): Parser[B] = p.slice.map(_ =&gt; b)
+template &lt;typename A, typename S&gt;
+Parser&lt;std::vector&lt;A&gt;&gt; sep(Parser&lt;A&gt; p, Parser&lt;S&gt; separator) {
+    return map2(p, many(skip_l(separator, p)),
+                [](A a, std::vector&lt;A&gt; v) { v.insert(v.begin(), a); return v; })
+         | succeed(std::vector&lt;A&gt;{});
+}</code></pre>
+<p>Now the grammar, written only with combinators:</p>
+<pre><code class="language-cpp">Parser&lt;JSON&gt; json_value();                       // declared first: the grammar is recursive
 
-  def token(s: String): Parser[String] = string(s).token</code></pre>
-<p>Now the grammar, written only against the trait:</p>
-<pre><code class="language-scala">object JSON:
-  def jsonParser[Parser[+_]](P: Parsers[Parser]): Parser[JSON] =
-    import P.*
+Parser&lt;std::string&gt; quoted() {
+    return skip_r(skip_l(string("\""), regex("[^\"]*")), tok("\""));
+}
 
-    def lit: Parser[JSON] = (
-      token("null").as(JNull) |
-      token("true").as(JBool(true)) |
-      token("false").as(JBool(false)) |
-      regex("-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?".r).token.map(s =&gt; JNumber(s.toDouble)) |
-      (string("\"") *&gt; regex("[^\"]*".r) &lt;* token("\"")).map(JString(_))
-    )
+Parser&lt;JSON&gt; json_literal() {
+    return as(tok("null"),  JSON{nullptr})
+         | as(tok("true"),  JSON{true})
+         | as(tok("false"), JSON{false})
+         | map(token(regex("-?[0-9]+(\\.[0-9]+)?([eE][-+]?[0-9]+)?")),
+               [](std::string s) { return JSON{std::stod(s)}; })
+         | map(quoted(), [](std::string s) { return JSON{s}; });
+}
 
-    def array: Parser[JSON] =
-      (token("[") *&gt; value.sep(token(",")) &lt;* token("]")).map(vs =&gt; JArray(vs.toIndexedSeq))
+Parser&lt;JSON&gt; json_array() {
+    return scope("array", map(surround(tok("["), tok("]"), sep(json_value(), tok(","))),
+                              [](std::vector&lt;JSON&gt; vs) { return JSON{vs}; }));
+}
 
-    def keyval: Parser[(String, JSON)] =
-      (string("\"") *&gt; regex("[^\"]*".r) &lt;* token("\"")) ** (token(":") *&gt; value)
+Parser&lt;JSON&gt; json_object() {
+    auto keyval = product(quoted(), skip_l(tok(":"), json_value()));
+    return scope("object", map(surround(tok("{"), tok("}"), sep(keyval, tok(","))),
+                               [](auto kvs) { return JSON{kvs}; }));
+}
 
-    def obj: Parser[JSON] =
-      (token("{") *&gt; keyval.sep(token(",")) &lt;* token("}")).map(kvs =&gt; JObject(kvs.toMap))
-
-    def value: Parser[JSON] = lit | obj | array
-
-    whitespace *&gt; value</code></pre>
-<p>That's a whole JSON parser (simplified strings without escapes), and we still haven't decided what a <code>Parser</code> is. The grammar reads almost like the JSON spec. Mutual recursion between <code>value</code>, <code>array</code> and <code>obj</code> works because the combinators take by-name arguments.</p>
+Parser&lt;JSON&gt; json_value() {
+    return lazy&lt;JSON&gt;([] { return json_literal() | json_object() | json_array(); });
+}
+Parser&lt;JSON&gt; json() { return skip_l(whitespace(), json_value()); }</code></pre>
+<p>That's a whole JSON parser (strings without escapes, for brevity), and it reads almost like the JSON spec.</p>
+<p>One C++-specific detail: <code>json_value</code> calls <code>json_array</code>, which calls <code>json_value</code>. If building a parser immediately built its sub-parsers, constructing the grammar would recurse forever. <code>lazy</code> wraps a parser-builder and runs it on first use, which breaks the cycle. It plays the role of the book's by-name parameters.</p>
 <div class="bridge">
-<p>Compare this to Boost.Spirit or PEGTL in C++: same idea (grammars as code, built from combinators), but those encode the grammar in template types and resolve it at compile time. Here a parser is an ordinary runtime value. That's slower, but you can build parsers dynamically, pass them to functions and test them like any other value.</p>
+<p>The book writes the API as <code>trait Parsers[Parser[+_]]</code>, an interface that's generic over the parser <em>type constructor</em>, and writes the JSON parser as a function taking any implementation of that trait. C++ can't easily abstract over a template like that (we'll meet template template parameters in Chapter 11), so here the "algebra" is a set of free-function declarations, and the JSON grammar only calls those.</p>
+</div>
+<div class="bridge">
+<p>In C++ terms: Boost.Spirit and PEGTL are parser combinator libraries that encode the grammar in templates and resolve it at compile time, which is fast but heavy on build time. Here a parser is an ordinary runtime value (a <code>std::function</code>). It's slower, but you can build parsers dynamically, pass them around and test them like any other value.</p>
 </div>
 
 <h2><span class="sec-no">9.4</span>Error Reporting</h2>
-<p>A parser that says "failed" with no location is useless on real input. We want the position and a stack of human-readable context ("in array, in object, expected ':'"). Add two primitives:</p>
-<pre><code class="language-scala">  extension [A](p: Parser[A])
-    def label(msg: String): Parser[A]   // on failure, replace the error message with msg
-    def scope(msg: String): Parser[A]   // on failure, add msg as outer context
+<p>A parser that only says "failed" is useless on real input. We want the position and a stack of context ("in object, in array, expected ']'"). Add two primitives:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; Parser&lt;A&gt; label(std::string msg, Parser&lt;A&gt; p);   // on failure, replace the message
+template &lt;typename A&gt; Parser&lt;A&gt; scope(std::string msg, Parser&lt;A&gt; p);   // on failure, add outer context
 
-case class Location(input: String, offset: Int = 0):
-  lazy val line = input.slice(0, offset + 1).count(_ == '\n') + 1
-  lazy val col  = input.slice(0, offset + 1).lastIndexOf('\n') match
-    case -1        =&gt; offset + 1
-    case lineStart =&gt; offset - lineStart
-
-case class ParseError(stack: List[(Location, String)])</code></pre>
+struct Location {
+    std::string_view input;
+    size_t offset = 0;
+    int line() const;   // computed from offset
+    int col() const;
+};
+struct ParseError { std::vector&lt;std::pair&lt;Location, std::string&gt;&gt; stack; };</code></pre>
+<p>With <code>scope</code> already in the JSON grammar above, parsing <code>{ "a": [1, 2 }</code> reports:</p>
+<pre><code class="language-text">1:1 object
+1:8 array
+1:14 expected "]"</code></pre>
 
 <h3>Committed vs backtracking</h3>
-<p>There's a subtle design question in <code>or</code>. Parsing <code>(string("abra") ** string("cadabra")) | other</code> on <code>"abraxyz"</code>: the left side matched "abra" then failed. Should <code>or</code> try <code>other</code> from the start? For good error messages, usually not: once a parser has consumed input, it has <strong>committed</strong>, and the error from that branch is the useful one. The solution is a combinator <code>attempt(p)</code> that explicitly allows backtracking:</p>
-<pre><code class="language-scala">    def attempt: Parser[A]   // if p fails after consuming input, treat it as not having consumed</code></pre>
-<p>By default, <code>or</code> only tries the right side if the left failed <em>without consuming input</em>. Many real parser libraries (Parsec, FastParse, cats-parse) make this same choice.</p>
+<p>There's a subtle design choice in <code>|</code>. Take <code>product(string("abra"), string("cadabra")) | other</code> on <code>"abraxyz"</code>. The left side matched "abra" and then failed. Should <code>|</code> try <code>other</code> from the start? For good error messages, usually not: once a parser has consumed input it has <strong>committed</strong>, and that branch's error is the useful one. To allow backtracking explicitly, wrap with <code>attempt</code>:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; Parser&lt;A&gt; attempt(Parser&lt;A&gt; p);   // a failure here counts as "consumed nothing"
+
+run(ab_cad | other, "abraxyz");            // error: committed to the first branch
+run(attempt(ab_cad) | other, "abraxyz");   // backtracks and succeeds with other</code></pre>
+<p>By default <code>|</code> only tries the right side if the left failed <em>without consuming input</em>. Parsec, FastParse, cats-parse and PEGTL's <code>must&lt;&gt;</code> all make some version of this choice.</p>
 
 <h2><span class="sec-no">9.5</span>Finally, a Representation</h2>
-<p>A parser takes input at some position and either fails with an error, or succeeds with a value and how many characters it consumed. A small, working version:</p>
-<pre><code class="language-scala">enum Result[+A]:
-  case Success(get: A, consumed: Int)
-  case Failure(get: ParseError, isCommitted: Boolean)
+<p>A parser takes the input at some position and either fails with an error, or succeeds with a value and the number of characters consumed:</p>
+<pre><code class="language-cpp">template &lt;typename A&gt; struct Success { A value; size_t consumed; };
+struct Failure { ParseError error; bool committed; };
+template &lt;typename A&gt; using Result = std::variant&lt;Success&lt;A&gt;, Failure&gt;;
 
-opaque type Parser[+A] = Location =&gt; Result[A]
+template &lt;typename A&gt; using Parser = std::function&lt;Result&lt;A&gt;(Location)&gt;;</code></pre>
+<p>Each primitive is a few lines. The three that matter most:</p>
+<pre><code class="language-cpp">Parser&lt;std::string&gt; string(std::string w) {
+    return [w](Location l) -&gt; Result&lt;std::string&gt; {
+        if (l.input.substr(l.offset).starts_with(w)) return Success&lt;std::string&gt;{w, w.size()};
+        return Failure{{{{l, "expected \"" + w + "\""}}}, false};
+    };
+}
 
-object MyParsers extends Parsers[Parser]:
-  def string(w: String): Parser[String] =
-    l =&gt;
-      if l.input.startsWith(w, l.offset) then Result.Success(w, w.length)
-      else Result.Failure(ParseError(List(l -&gt; s"expected \"$w\"")), isCommitted = false)
+template &lt;typename A&gt; Parser&lt;A&gt; operator|(Parser&lt;A&gt; p, Parser&lt;A&gt; p2) {
+    return [p, p2](Location l) -&gt; Result&lt;A&gt; {
+        auto r = p(l);
+        if (auto* f = std::get_if&lt;Failure&gt;(&amp;r); f &amp;&amp; !f-&gt;committed) return p2(l);   // uncommitted: try p2
+        return r;
+    };
+}
 
-  def regex(r: scala.util.matching.Regex): Parser[String] =
-    l =&gt; r.findPrefixOf(l.input.substring(l.offset)) match
-      case Some(m) =&gt; Result.Success(m, m.length)
-      case None    =&gt; Result.Failure(ParseError(List(l -&gt; s"expected $r")), false)
-
-  def succeed[A](a: A): Parser[A] = _ =&gt; Result.Success(a, 0)
-
-  extension [A](p: Parser[A])
-    def run(input: String) = p(Location(input)) match
-      case Result.Success(a, _)    =&gt; Right(a)
-      case Result.Failure(err, _)  =&gt; Left(err)
-
-    def slice: Parser[String] =
-      l =&gt; p(l) match
-        case Result.Success(_, n) =&gt; Result.Success(l.input.substring(l.offset, l.offset + n), n)
-        case f: Result.Failure    =&gt; f
-
-    infix def or(p2: =&gt; Parser[A]): Parser[A] =
-      l =&gt; p(l) match
-        case Result.Failure(_, false) =&gt; p2(l)      // uncommitted: try the alternative
-        case r                        =&gt; r
-
-    def flatMap[B](f: A =&gt; Parser[B]): Parser[B] =
-      l =&gt; p(l) match
-        case Result.Success(a, n) =&gt;
-          f(a)(l.copy(offset = l.offset + n)) match
-            case Result.Success(b, m)   =&gt; Result.Success(b, n + m)
-            case Result.Failure(e, c)   =&gt; Result.Failure(e, c || n &gt; 0)  // consumed input → committed
-        case f: Result.Failure =&gt; f
-
-    def attempt: Parser[A] =
-      l =&gt; p(l) match
-        case Result.Failure(e, _) =&gt; Result.Failure(e, false)
-        case s                    =&gt; s
-
-    def label(msg: String): Parser[A] =
-      l =&gt; p(l) match
-        case Result.Failure(e, c) =&gt; Result.Failure(ParseError(List(l -&gt; msg)), c)
-        case s                    =&gt; s
-
-    def scope(msg: String): Parser[A] =
-      l =&gt; p(l) match
-        case Result.Failure(e, c) =&gt; Result.Failure(ParseError((l -&gt; msg) :: e.stack), c)
-        case s                    =&gt; s</code></pre>
-<p>About 60 lines, and <code>JSON.jsonParser(MyParsers).run("""{"a": [1, true, null]}""")</code> works. Everything we wrote in 9.3 runs on this representation unchanged.</p>
+template &lt;typename A, typename F&gt;
+auto flat_map(Parser&lt;A&gt; p, F f) -&gt; std::invoke_result_t&lt;F, A&gt; {
+    using B = typename parser_value&lt;std::invoke_result_t&lt;F, A&gt;&gt;::type;
+    return [p, f](Location l) -&gt; Result&lt;B&gt; {
+        auto r = p(l);
+        auto* s = std::get_if&lt;Success&lt;A&gt;&gt;(&amp;r);
+        if (!s) return std::get&lt;Failure&gt;(r);
+        auto r2 = f(s-&gt;value)(l.advance(s-&gt;consumed));
+        if (auto* s2 = std::get_if&lt;Success&lt;B&gt;&gt;(&amp;r2))
+            return Success&lt;B&gt;{std::move(s2-&gt;value), s-&gt;consumed + s2-&gt;consumed};
+        auto fail = std::get&lt;Failure&gt;(r2);
+        fail.committed = fail.committed || s-&gt;consumed &gt; 0;   // consumed input → committed
+        return fail;
+    };
+}</code></pre>
+<p><code>regex</code>, <code>slice</code>, <code>attempt</code>, <code>label</code>, <code>scope</code> and <code>lazy</code> are in the full listing; altogether the representation is about 120 lines. The JSON grammar from 9.3 runs on it unchanged and parses <code>{"robot": "PiPER", "dof": 6, "arms": [1, 2.5, true, null], "ok": false}</code>.</p>
 <div class="warfield">
-<p><strong>This simple <code>many</code> isn't stack-safe and <code>substring</code> copies.</strong> A production implementation makes <code>many</code> a primitive with a loop, works on offsets instead of substrings, and uses a faster representation. Those are representation changes. Because the JSON parser only uses the algebra, none of them would touch it.</p>
+<p><strong>Make <code>many</code> a loop.</strong> Derived recursively as "<code>map2(p, many(p)) | succeed({})</code>", it recurses once per repetition, and a 20,000-element JSON array overflows the stack. The listing implements <code>many</code> as a primitive with a loop (and checks the 20,000-element case). That's a representation change; the grammar doesn't notice. Similarly, <code>std::regex</code> is slow; a production version would hand-write the number and string matchers.</p>
 </div>
 
 <h2><span class="sec-no">9.6</span>Part II in One Paragraph</h2>
-<p>Three libraries: parallelism, testing, parsing. Each was designed the same way: usage first, a small set of primitives, laws, representation last. And each ended up with <code>unit</code>/<code>succeed</code>, <code>map</code>, <code>map2</code>, <code>flatMap</code> and some kind of <code>sequence</code> or <code>many</code>. Part III gives that recurring shape names and writes it down once.</p>
+<p>Three libraries: parallelism, testing, parsing. Each was designed the same way: usage first, a small set of primitives, laws, representation last. And each ended up with <code>unit</code>/<code>succeed</code>, <code>map</code>, <code>map2</code>, <code>flat_map</code> and some form of <code>sequence</code> (<code>list_of_n</code>, <code>many</code>). Part III gives that recurring shape names and writes it down once.</p>
 
 <dl class="jargon">
   <dt>Parser combinator</dt><dd>A function that builds a parser from smaller parsers.</dd>
-  <dt>Type constructor</dt><dd>A type that takes a type parameter, like <code>Parser[_]</code> or <code>List[_]</code>. A trait can abstract over one.</dd>
-  <dt>Context-sensitive grammar</dt><dd>A grammar where what to parse next depends on what was just parsed; needs <code>flatMap</code>.</dd>
-  <dt>Commit / backtrack</dt><dd>Whether, after consuming input and failing, a parser lets an alternative retry from the original position.</dd>
+  <dt>Context-sensitive grammar</dt><dd>A grammar where what to parse next depends on what was just parsed; needs <code>flat_map</code>.</dd>
+  <dt>Commit / backtrack</dt><dd>Whether, after consuming input and failing, an alternative may retry from the original position.</dd>
+  <dt>Lazy parser</dt><dd>A parser built on first use, which lets recursive grammars refer to themselves.</dd>
 </dl>
 
 <div class="recap"><ul>
-  <li>Write the algebra (as a trait over an abstract <code>Parser[+_]</code>) before any implementation.</li>
-  <li>Six primitives are enough; <code>many</code>, <code>map2</code> and friends are derived.</li>
-  <li>By-name parameters make recursive grammars work.</li>
-  <li>Design error reporting into the algebra: labels, scopes, commit vs <code>attempt</code>.</li>
-  <li>A 60-line representation runs a full JSON grammar written against the trait.</li>
+  <li>Decide the operations before any implementation, and write real grammars against them.</li>
+  <li>About six primitives are enough; <code>many1</code>, <code>map2</code>, <code>sep</code> and the rest are derived.</li>
+  <li>Recursive grammars need laziness (<code>lazy</code> in C++).</li>
+  <li>Design error reporting in: <code>scope</code>, <code>label</code>, commit vs <code>attempt</code>.</li>
+  <li>A ~120-line representation runs a full JSON grammar, and can be optimised without touching it.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch09.cpp"><span class="l-k">Full runnable listing</span>code/ch09.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 

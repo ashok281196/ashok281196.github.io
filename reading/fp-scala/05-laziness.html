@@ -16,205 +16,256 @@
   <div class="chapter-num">05</div>
   <div class="chapter-kicker">Part I · Foundations</div>
   <h1>Strictness &amp; Laziness</h1>
-  <p class="chapter-sub">Chaining map and filter on lists builds a new list at every step. By delaying evaluation we can fuse those steps into one pass, stop early, and even describe infinite sequences. We'll build a lazy list of our own to see how.</p>
+  <p class="chapter-sub">Chaining transforms on vectors builds a new vector at every step. By delaying evaluation we can fuse those steps into one pass, stop early, and even describe infinite sequences. We build a memoised lazy list in C++ to see how, then recognise the same idea in std::ranges views.</p>
 </header>
 
-<h2><span class="sec-no">5.1</span>The Problem: Intermediate Lists</h2>
-<pre><code class="language-scala">List(1, 2, 3, 4).map(_ + 10).filter(_ % 2 == 0).map(_ * 3)</code></pre>
-<p>This builds three lists: one after <code>map</code>, one after <code>filter</code>, and the final one. Each step traverses the whole input before the next starts. For four elements it doesn't matter; for a million, or for a pipeline that only needs the first result, it's wasteful. A hand-written <code>while</code> loop would do it in one pass.</p>
-<p>We want to <strong>write</strong> the pipeline with high-level combinators but have it <strong>run</strong> like the fused loop. The key is <strong>non-strictness</strong>.</p>
+<h2><span class="sec-no">5.1</span>The Problem: Intermediate Containers</h2>
+<pre><code class="language-cpp">std::vector&lt;int&gt; xs{1, 2, 3, 4};
+auto a = map(xs, plus10);       // new vector
+auto b = filter(a, is_even);    // another new vector
+auto c = map(b, times3);        // and another</code></pre>
+<p>Three allocations, three full passes. Each step finishes the whole input before the next starts. For four elements it doesn't matter; for a million, or a pipeline that only needs the first result, it's wasteful. A hand-written loop would do it in one pass with no temporaries.</p>
+<p>We want to <strong>write</strong> the pipeline with separate, reusable steps but have it <strong>run</strong> like the hand-fused loop. The key is <strong>non-strictness</strong>.</p>
 
 <h2><span class="sec-no">5.2</span>Strict and Non-Strict</h2>
-<p>A function is <strong>strict</strong> in a parameter if it always evaluates that argument. Most functions are. Some aren't, and you already use them:</p>
-<pre><code class="language-scala">false &amp;&amp; { println("!!"); true }    // prints nothing
-if input.isEmpty then sys.error("empty") else input   // only one branch runs</code></pre>
-<p><code>&amp;&amp;</code>, <code>||</code> and <code>if</code> are non-strict. We can write our own non-strict functions with <strong>by-name parameters</strong>, which you saw in Chapter 4:</p>
-<pre><code class="language-scala">def if2[A](cond: Boolean, onTrue: =&gt; A, onFalse: =&gt; A): A =
-  if cond then onTrue else onFalse
+<p>A function is <strong>strict</strong> in an argument if it always evaluates it. In C++, every ordinary function is strict in every argument: arguments are evaluated before the call. A few built-in operators aren't:</p>
+<pre><code class="language-cpp">false &amp;&amp; (std::cout &lt;&lt; "!!", true);    // prints nothing
+cond ? expensive_a() : expensive_b();  // only one branch runs</code></pre>
+<p>To write our own non-strict function, pass a <strong>thunk</strong>: a zero-argument function that computes the value when called.</p>
+<pre><code class="language-cpp">template &lt;typename A&gt;
+A if2(bool cond, const std::function&lt;A()&gt;&amp; on_true, const std::function&lt;A()&gt;&amp; on_false) {
+    return cond ? on_true() : on_false();
+}
 
-if2(false, sys.error("fail"), 3)   // 3; the error is never evaluated</code></pre>
-<p>Under the hood, a by-name argument is passed as a <strong>thunk</strong>: a zero-argument function <code>() =&gt; A</code> the callee calls when it needs the value.</p>
+if2&lt;int&gt;(false, [] () -&gt; int { throw std::runtime_error("boom"); },
+                [] { return 3; });   // 3; the throwing thunk never runs</code></pre>
 
-<h3>Evaluated each time, unless cached</h3>
-<pre><code class="language-scala">def maybeTwice(b: Boolean, i: =&gt; Int) = if b then i + i else 0
+<h3>Evaluated each time, unless memoised</h3>
+<pre><code class="language-cpp">int maybe_twice(bool b, const std::function&lt;int()&gt;&amp; i) { return b ? i() + i() : 0; }
 
-maybeTwice(true, { println("hi"); 1 + 41 })
-// prints "hi" TWICE, returns 84</code></pre>
-<p>A by-name parameter is re-evaluated at every reference. To evaluate once and remember, use <code>lazy val</code>:</p>
-<pre><code class="language-scala">def maybeTwice2(b: Boolean, i: =&gt; Int) =
-  lazy val j = i          // not evaluated yet
-  if b then j + j else 0  // evaluated on first use, then cached
-
-maybeTwice2(true, { println("hi"); 1 + 41 })   // prints "hi" once</code></pre>
+maybe_twice(true, [] { std::cout &lt;&lt; "hi\n"; return 42; });   // prints "hi" TWICE</code></pre>
+<p>A thunk runs every time it's called. To evaluate once and remember the result, wrap it:</p>
+<pre><code class="language-cpp">template &lt;typename T&gt;
+class Lazy {
+    mutable std::function&lt;T()&gt; f_;
+    mutable std::optional&lt;T&gt; v_;
+public:
+    explicit Lazy(std::function&lt;T()&gt; f) : f_(std::move(f)) {}
+    const T&amp; get() const {
+        if (!v_) { v_ = f_(); f_ = nullptr; }   // compute on first use, then cache
+        return *v_;
+    }
+};</code></pre>
 <div class="bridge">
-<p>A thunk is a <code>std::function&lt;A()&gt;</code>; a <code>lazy val</code> is a thunk plus <code>std::call_once</code> and a cached result. Scala generates the thread-safe initialisation for you.</p>
+<p>Scala has this built in. A <em>by-name parameter</em> <code>x: =&gt; Int</code> makes the compiler wrap the argument in a thunk for you, and <code>lazy val</code> is <code>Lazy</code> with thread-safe initialisation. In C++ you write the lambda yourself at the call site. That's more noise, but nothing is hidden.</p>
+</div>
+<div class="warfield">
+<p><code>Lazy</code> above isn't thread-safe: two threads calling <code>get()</code> at once can both run <code>f_</code>. For shared lazies, guard with <code>std::call_once</code> (that's what a function-local <code>static</code> does for you too).</p>
 </div>
 
 <h2><span class="sec-no">5.3</span>A Lazy List</h2>
-<p>Take the list from Chapter 3 and make the head and tail thunks:</p>
-<pre><code class="language-scala">enum LazyList[+A]:
-  case Empty
-  case Cons(h: () =&gt; A, t: () =&gt; LazyList[A])
+<p>A lazy list is a list where "what's the next element, and what's the rest?" is a memoised thunk. Nothing is computed until someone asks for a step:</p>
+<pre><code class="language-cpp">template &lt;typename T&gt;
+class LazyList {
+public:
+    using Step = std::optional&lt;std::pair&lt;T, LazyList&gt;&gt;;   // nothing, or (head, rest)
+private:
+    struct Node {
+        std::function&lt;Step()&gt; thunk;
+        std::optional&lt;Step&gt; memo;
+    };
+    std::shared_ptr&lt;Node&gt; n_;
+public:
+    explicit LazyList(std::function&lt;Step()&gt; f)
+        : n_(std::make_shared&lt;Node&gt;(Node{std::move(f), std::nullopt})) {}
+    LazyList() : LazyList([] { return Step{}; }) {}          // empty
 
-object LazyList:
-  // "smart constructor": caches head and tail so each is computed at most once
-  def cons[A](hd: =&gt; A, tl: =&gt; LazyList[A]): LazyList[A] =
-    lazy val head = hd
-    lazy val tail = tl
-    Cons(() =&gt; head, () =&gt; tail)
+    const Step&amp; step() const {                                // force one step, at most once
+        if (!n_-&gt;memo) { n_-&gt;memo = n_-&gt;thunk(); n_-&gt;thunk = nullptr; }
+        return *n_-&gt;memo;
+    }
+};</code></pre>
+<p>Because the memo lives in a shared node, every copy of a <code>LazyList</code> sees the same cached result: each step is computed at most once, however many times it's read.</p>
 
-  def empty[A]: LazyList[A] = Empty
-
-  def apply[A](as: A*): LazyList[A] =
-    if as.isEmpty then empty
-    else cons(as.head, apply(as.tail*))</code></pre>
-<p>Use <code>cons</code>, never <code>Cons</code> directly. It's the smart constructor that adds caching. Without it, each time someone looked at the head, the head expression would run again.</p>
-<p>A first helper, to see what's inside:</p>
-<pre><code class="language-scala">  def toList: List[A] =
-    @annotation.tailrec
-    def go(ll: LazyList[A], acc: List[A]): List[A] = ll match
-      case Cons(h, t) =&gt; go(t(), h() :: acc)
-      case Empty      =&gt; acc.reverse
-    go(this, Nil)</code></pre>
-<p>(This and the following methods go inside <code>enum LazyList</code>.)</p>
-
-<div class="exercise" data-n="Exercise 5.1 · take and takeWhile">
-<p>Write <code>take(n: Int): LazyList[A]</code> and <code>takeWhile(p: A =&gt; Boolean): LazyList[A]</code>. They should do no work until the result is consumed.</p>
+<div class="exercise" data-n="Exercise 5.1 · take and take_while">
+<p>Write <code>take(ll, n)</code> and <code>take_while(ll, p)</code>. They must do no work until the result is consumed.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">  def take(n: Int): LazyList[A] = this match
-    case Cons(h, t) if n &gt; 1  =&gt; LazyList.cons(h(), t().take(n - 1))
-    case Cons(h, _) if n == 1 =&gt; LazyList.cons(h(), LazyList.empty)
-    case _                    =&gt; LazyList.empty
-
-  def takeWhile(p: A =&gt; Boolean): LazyList[A] = this match
-    case Cons(h, t) if p(h()) =&gt; LazyList.cons(h(), t().takeWhile(p))
-    case _                    =&gt; LazyList.empty</code></pre>
-<p>The recursive call sits inside <code>cons</code>'s by-name tail, so it doesn't run until someone asks for the tail. Calling <code>take(3)</code> just returns one <code>Cons</code> immediately.</p>
+<pre><code class="language-cpp">template &lt;typename T&gt; LazyList&lt;T&gt; take(LazyList&lt;T&gt; ll, int n) {
+    return LazyList&lt;T&gt;([ll, n]() -&gt; typename LazyList&lt;T&gt;::Step {
+        if (n &lt;= 0) return std::nullopt;
+        const auto&amp; s = ll.step();
+        if (!s) return std::nullopt;
+        return std::pair{s-&gt;first, take(s-&gt;second, n - 1)};
+    });
+}
+template &lt;typename T, typename P&gt; LazyList&lt;T&gt; take_while(LazyList&lt;T&gt; ll, P p) {
+    return LazyList&lt;T&gt;([ll, p]() -&gt; typename LazyList&lt;T&gt;::Step {
+        const auto&amp; s = ll.step();
+        if (!s || !p(s-&gt;first)) return std::nullopt;
+        return std::pair{s-&gt;first, take_while(s-&gt;second, p)};
+    });
+}</code></pre>
+<p>Calling <code>take</code> just builds one node holding a lambda. The recursive call is <em>inside</em> the lambda, so it only happens when someone asks for that step.</p>
 </div></details>
 
 <h2><span class="sec-no">5.4</span>A Lazy Fold Can Stop Early</h2>
-<p>Here's the trick that makes everything work. Write <code>foldRight</code> with a <em>by-name</em> second argument to <code>f</code>:</p>
-<pre><code class="language-scala">  def foldRight[B](acc: =&gt; B)(f: (A, =&gt; B) =&gt; B): B = this match
-    case Cons(h, t) =&gt; f(h(), t().foldRight(acc)(f))
-    case Empty      =&gt; acc</code></pre>
-<p>The recursion <code>t().foldRight(acc)(f)</code> is passed to <code>f</code> unevaluated. If <code>f</code> doesn't look at it, the rest of the list is never touched:</p>
-<pre><code class="language-scala">  def exists(p: A =&gt; Boolean): Boolean =
-    foldRight(false)((a, b) =&gt; p(a) || b)    // || doesn't evaluate b if p(a)</code></pre>
-<p><code>exists</code> stops at the first match, like a loop with <code>break</code>, but it's a fold.</p>
+<p>Here's the trick that makes everything work. Write <code>fold_right</code> so the result for the rest of the list is passed to <code>f</code> as a <em>thunk</em>:</p>
+<pre><code class="language-cpp">template &lt;typename T, typename B, typename F&gt;
+B fold_right(LazyList&lt;T&gt; ll, std::function&lt;B()&gt; acc, F f) {
+    const auto&amp; s = ll.step();
+    if (!s) return acc();
+    auto rest = s-&gt;second;
+    return f(s-&gt;first, std::function&lt;B()&gt;([rest, acc, f] { return fold_right&lt;T, B, F&gt;(rest, acc, f); }));
+}</code></pre>
+<p>If <code>f</code> never calls the thunk, the rest of the list is never touched:</p>
+<pre><code class="language-cpp">template &lt;typename T, typename P&gt; bool exists(LazyList&lt;T&gt; ll, P p) {
+    return fold_right&lt;T, bool&gt;(ll, [] { return false; },
+        [&amp;p](const T&amp; a, const std::function&lt;bool()&gt;&amp; rest) { return p(a) || rest(); });
+}</code></pre>
+<p><code>||</code> doesn't call <code>rest()</code> once <code>p(a)</code> is true, so <code>exists</code> stops at the first match, like a loop with <code>break</code>, while being a fold.</p>
 
-<div class="exercise" data-n="Exercise 5.2 · forAll, map, filter, append, flatMap">
-<p>Using <code>foldRight</code>, write <code>forAll</code>, <code>map</code>, <code>filter</code>, <code>append</code> and <code>flatMap</code>. They must stay lazy.</p>
+<div class="exercise" data-n="Exercise 5.2 · for_all, map, filter, append">
+<p>Write <code>for_all</code> with <code>fold_right</code>, and lazy versions of <code>map</code>, <code>filter</code> and <code>append</code>.</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">  def forAll(p: A =&gt; Boolean): Boolean =
-    foldRight(true)((a, b) =&gt; p(a) &amp;&amp; b)
+<pre><code class="language-cpp">template &lt;typename T, typename P&gt; bool for_all(LazyList&lt;T&gt; ll, P p) {
+    return fold_right&lt;T, bool&gt;(ll, [] { return true; },
+        [&amp;p](const T&amp; a, const std::function&lt;bool()&gt;&amp; rest) { return p(a) &amp;&amp; rest(); });
+}
 
-  def map[B](f: A =&gt; B): LazyList[B] =
-    foldRight(LazyList.empty[B])((a, acc) =&gt; LazyList.cons(f(a), acc))
+template &lt;typename T, typename F&gt;
+auto map(LazyList&lt;T&gt; ll, F f) -&gt; LazyList&lt;std::invoke_result_t&lt;F, const T&amp;&gt;&gt; {
+    using U = std::invoke_result_t&lt;F, const T&amp;&gt;;
+    return LazyList&lt;U&gt;([ll, f]() -&gt; typename LazyList&lt;U&gt;::Step {
+        const auto&amp; s = ll.step();
+        if (!s) return std::nullopt;
+        return std::pair{f(s-&gt;first), map(s-&gt;second, f)};
+    });
+}
 
-  def filter(p: A =&gt; Boolean): LazyList[A] =
-    foldRight(LazyList.empty[A])((a, acc) =&gt; if p(a) then LazyList.cons(a, acc) else acc)
+template &lt;typename T, typename P&gt; LazyList&lt;T&gt; filter(LazyList&lt;T&gt; ll, P p) {
+    return LazyList&lt;T&gt;([ll, p]() -&gt; typename LazyList&lt;T&gt;::Step {
+        LazyList&lt;T&gt; cur = ll;
+        while (const auto&amp; s = cur.step()) {        // skip non-matches in a loop
+            if (p(s-&gt;first)) return std::pair{s-&gt;first, filter(s-&gt;second, p)};
+            auto next = s-&gt;second; cur = next;
+        }
+        return std::nullopt;
+    });
+}
 
-  def append[A2 &gt;: A](that: =&gt; LazyList[A2]): LazyList[A2] =
-    foldRight(that)((a, acc) =&gt; LazyList.cons(a, acc))
-
-  def flatMap[B](f: A =&gt; LazyList[B]): LazyList[B] =
-    foldRight(LazyList.empty[B])((a, acc) =&gt; f(a).append(acc))</code></pre>
-<p>In each, <code>acc</code> is by-name, and it's passed into <code>cons</code>'s by-name tail, so it stays unevaluated.</p>
+template &lt;typename T&gt; LazyList&lt;T&gt; append(LazyList&lt;T&gt; a, std::function&lt;LazyList&lt;T&gt;()&gt; b) {
+    return LazyList&lt;T&gt;([a, b]() -&gt; typename LazyList&lt;T&gt;::Step {
+        const auto&amp; s = a.step();
+        if (!s) return b().step();
+        return std::pair{s-&gt;first, append(s-&gt;second, b)};
+    });
+}</code></pre>
+<p>Each one returns a new node holding a lambda, and recursion happens only inside the lambda, so building a pipeline does no work. The full listing also has <code>flat_map</code>.</p>
 </div></details>
 
 <h2><span class="sec-no">5.5</span>Watching It Run</h2>
-<p>Trace the pipeline from 5.1 on a lazy list, asking for the result with <code>toList</code>:</p>
-<pre><code class="language-text">LazyList(1,2,3,4).map(_ + 10).filter(_ % 2 == 0).toList
+<p>Instrument the pipeline from 5.1 to log each call:</p>
+<pre><code class="language-cpp">auto pipeline = filter(map(xs, plus10_logged), is_even_logged);
+// nothing printed yet: the pipeline is only a description
+to_vector(pipeline);   // {12, 14}</code></pre>
+<pre><code class="language-text">map 1 → filter 11 (odd, skip)
+map 2 → filter 12 (keep)
+map 3 → filter 13 (odd, skip)
+map 4 → filter 14 (keep)</code></pre>
+<p>Each element goes all the way through the pipeline before the next element is touched. No intermediate containers are built. That's the fused loop we wanted, assembled from separate combinators. The full listing checks this exact trace with an <code>assert</code>.</p>
+<p>It also means <code>find</code> does only as much work as needed, even written with <code>filter</code>:</p>
+<pre><code class="language-cpp">template &lt;typename T, typename P&gt; std::optional&lt;T&gt; find(LazyList&lt;T&gt; ll, P p) {
+    auto matches = filter(ll, p);
+    const auto&amp; s = matches.step();      // forces only up to the first match
+    return s ? std::optional&lt;T&gt;(s-&gt;first) : std::nullopt;
+}</code></pre>
 
-map 1 → 11 · filter 11 → odd, skip
-map 2 → 12 · filter 12 → even, emit 12
-map 3 → 13 · filter 13 → odd, skip
-map 4 → 14 · filter 14 → even, emit 14
-→ List(12, 14)</code></pre>
-<p>Each element goes all the way through the pipeline before the next element is touched. No intermediate lists are built. That's the fused loop we wanted, assembled from separate combinators. Lazy lists are sometimes called "first-class loops".</p>
-<p>It also means that something like <code>find</code> does only as much work as needed:</p>
-<pre><code class="language-scala">  def find(p: A =&gt; Boolean): Option[A] = filter(p).headOption</code></pre>
-<p>Even though it's written with <code>filter</code>, it stops at the first match.</p>
+<h2><span class="sec-no">5.6</span>Infinite Lists, and unfold</h2>
+<p>Nothing runs until it's needed, so a lazy list can be infinite:</p>
+<pre><code class="language-cpp">LazyList&lt;int&gt; from(int n) {
+    return LazyList&lt;int&gt;([n]() -&gt; LazyList&lt;int&gt;::Step { return std::pair{n, from(n + 1)}; });
+}
 
-<h2><span class="sec-no">5.6</span>Infinite Lists</h2>
-<p>Since nothing runs until it's needed, a lazy list can be infinite:</p>
-<pre><code class="language-scala">val ones: LazyList[Int] = LazyList.cons(1, ones)
+to_vector(take(from(5), 3));                    // {5, 6, 7}
+find(from(1), [](int x) { return x * x &gt; 50; }); // 8</code></pre>
+<p><code>fold_right</code> consumes a list down to a value. Its opposite, <code>unfold</code>, <em>produces</em> a list from a seed. You give it a starting state and a function that says either "stop" or "here's the next element and the next state":</p>
+<pre><code class="language-cpp">template &lt;typename A, typename S, typename F&gt;     // F: S -&gt; optional&lt;pair&lt;A, S&gt;&gt;
+LazyList&lt;A&gt; unfold(S state, F f) {
+    return LazyList&lt;A&gt;([state, f]() -&gt; typename LazyList&lt;A&gt;::Step {
+        auto r = f(state);
+        if (!r) return std::nullopt;
+        return std::pair{r-&gt;first, unfold&lt;A&gt;(r-&gt;second, f)};
+    });
+}
 
-ones.take(5).toList           // List(1, 1, 1, 1, 1)
-ones.exists(_ % 2 != 0)       // true
-ones.map(_ + 1).exists(_ % 2 == 0)   // true
-ones.forAll(_ == 1)           // never terminates! (stack overflow)</code></pre>
+LazyList&lt;long&gt; fibs() {
+    return unfold&lt;long&gt;(std::pair{0L, 1L}, [](std::pair&lt;long, long&gt; s) {
+        return std::optional{std::pair{s.first, std::pair{s.second, s.first + s.second}}};
+    });
+}
+template &lt;typename A&gt; LazyList&lt;A&gt; continually(A a) {
+    return unfold&lt;A&gt;(a, [](A s) { return std::optional{std::pair{s, s}}; });
+}</code></pre>
+<p>Functions like <code>unfold</code> that produce data lazily are called <strong>corecursive</strong>. A corecursive function doesn't need to terminate; it just needs to keep producing.</p>
 <div class="warfield">
-<p>On an infinite list, anything that must look at every element (<code>forAll</code> when it's true, <code>toList</code>, <code>length</code>) never finishes. Laziness lets you <em>describe</em> infinite data. You still have to consume it with something that stops.</p>
+<p><strong>Two C++-specific traps.</strong> (1) On an infinite list, anything that looks at every element (<code>to_vector</code>, <code>for_all</code> when it's true) never finishes. Laziness lets you <em>describe</em> infinite data; you still have to consume it with something that stops. (2) Don't build <code>ones</code> as a list whose tail points back to itself. With <code>shared_ptr</code>, a cycle is never freed: that's a memory leak. Generating it with <code>unfold</code> avoids the cycle. Garbage-collected languages, including the book's Scala, can use the self-referential version safely.</p>
 </div>
-
-<div class="exercise" data-n="Exercise 5.3 · from and fibs">
-<p>Write <code>continually[A](a: A): LazyList[A]</code>, <code>from(n: Int): LazyList[Int]</code> (n, n+1, n+2, ...) and <code>fibs: LazyList[Int]</code> (0, 1, 1, 2, 3, 5, ...).</p>
-</div>
-<details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">def continually[A](a: A): LazyList[A] =
-  lazy val single: LazyList[A] = LazyList.cons(a, single)
-  single
-
-def from(n: Int): LazyList[Int] =
-  LazyList.cons(n, from(n + 1))
-
-val fibs: LazyList[Int] =
-  def go(cur: Int, next: Int): LazyList[Int] =
-    LazyList.cons(cur, go(next, cur + next))
-  go(0, 1)</code></pre>
-<p><code>continually</code> refers to itself, so it's one node pointing to itself in memory. <code>from</code> creates new nodes as you go.</p>
-</div></details>
-
-<h2><span class="sec-no">5.7</span>unfold: the General Generator</h2>
-<p><code>foldRight</code> consumes a list down to a value. Its opposite, <code>unfold</code>, produces a list from a seed. You give it a starting state and a function that either says "stop" or gives the next element and the next state:</p>
-<pre><code class="language-scala">def unfold[A, S](state: S)(f: S =&gt; Option[(A, S)]): LazyList[A] =
-  f(state) match
-    case Some((a, next)) =&gt; LazyList.cons(a, unfold(next)(f))
-    case None            =&gt; LazyList.empty
-
-val fibsViaUnfold = unfold((0, 1)) { case (cur, next) =&gt; Some((cur, (next, cur + next))) }
-def fromViaUnfold(n: Int) = unfold(n)(s =&gt; Some((s, s + 1)))</code></pre>
-<p>Folding consumes data; unfolding produces it. Functions that consume are <em>recursive</em>; functions like <code>unfold</code> that produce lazily are called <strong>corecursive</strong>. A corecursive function doesn't need to terminate. It just needs to keep producing.</p>
 
 <div class="exercise" data-n="Exercise 5.4 · map and take via unfold">
-<p>Write <code>map</code> and <code>take</code> using <code>unfold</code>.</p>
+<p>Write <code>map</code> and <code>take</code> using <code>unfold</code>. What does the state need to hold?</p>
 </div>
 <details class="sol"><summary>Show solution</summary><div>
-<pre><code class="language-scala">  def mapViaUnfold[B](f: A =&gt; B): LazyList[B] =
-    unfold(this):
-      case Cons(h, t) =&gt; Some((f(h()), t()))
-      case Empty      =&gt; None
+<pre><code class="language-cpp">template &lt;typename T, typename F&gt; auto map_via_unfold(LazyList&lt;T&gt; ll, F f) {
+    using U = std::invoke_result_t&lt;F, const T&amp;&gt;;
+    return unfold&lt;U&gt;(ll, [f](LazyList&lt;T&gt; cur) -&gt; std::optional&lt;std::pair&lt;U, LazyList&lt;T&gt;&gt;&gt; {
+        const auto&amp; s = cur.step();
+        if (!s) return std::nullopt;
+        return std::pair{f(s-&gt;first), s-&gt;second};
+    });
+}
 
-  def takeViaUnfold(n: Int): LazyList[A] =
-    unfold((this, n)):
-      case (Cons(h, t), k) if k &gt; 0 =&gt; Some((h(), (t(), k - 1)))
-      case _                        =&gt; None</code></pre>
-<p>The state is whatever you need to remember: the rest of the list, plus a counter for <code>take</code>.</p>
+template &lt;typename T&gt; LazyList&lt;T&gt; take_via_unfold(LazyList&lt;T&gt; ll, int n) {
+    return unfold&lt;T&gt;(std::pair{ll, n}, [](std::pair&lt;LazyList&lt;T&gt;, int&gt; st)
+                     -&gt; std::optional&lt;std::pair&lt;T, std::pair&lt;LazyList&lt;T&gt;, int&gt;&gt;&gt; {
+        if (st.second &lt;= 0) return std::nullopt;
+        const auto&amp; s = st.first.step();
+        if (!s) return std::nullopt;
+        return std::pair{s-&gt;first, std::pair{s-&gt;second, st.second - 1}};
+    });
+}</code></pre>
+<p>The state is whatever you need to remember between steps: the rest of the input, plus a counter for <code>take</code>.</p>
 </div></details>
 
-<h2><span class="sec-no">5.8</span>The Big Idea: Description vs Evaluation</h2>
-<p>Step back. A lazy list is a <strong>description</strong> of a computation that produces elements. Building it does nothing. Running it (<code>toList</code>, <code>exists</code>, <code>take(5).toList</code>) decides how much of that description to evaluate.</p>
-<div class="keypoint">Separating the description of a computation from its evaluation is the theme of the whole book. Lazy lists separate "what sequence" from "how much of it". Chapter 7 separates "what to compute in parallel" from "how to schedule it". Chapter 13 separates "what effects to perform" from "performing them".</div>
-<p>Scala's standard <code>LazyList</code> works like ours: lazy, memoised, with all the combinators.</p>
+<h2><span class="sec-no">5.7</span>You Already Use This: std::ranges Views</h2>
+<p>C++20 views are lazy, fused pipelines built on the same idea:</p>
+<pre><code class="language-cpp">auto r = std::views::iota(1)                                   // infinite: 1, 2, 3, ...
+       | std::views::transform([](int x) { return x + 10; })
+       | std::views::filter([](int x) { return x % 2 == 0; })
+       | std::views::take(2);
+// nothing has run yet
+for (int x : r) std::cout &lt;&lt; x &lt;&lt; ' ';                        // 12 14</code></pre>
+<p>Building <code>r</code> computes nothing. Iterating pulls elements through the whole pipeline one at a time, and <code>take(2)</code> stops the infinite <code>iota</code>. Two differences from our <code>LazyList</code>: views aren't memoised (iterate twice and the work is done twice), and they hold references to their source, so a view must not outlive the container it views.</p>
+<div class="keypoint">The big idea is separating the <strong>description</strong> of a computation from its <strong>evaluation</strong>. A lazy list or a view says <em>what</em> sequence; the consumer decides <em>how much</em> of it to compute. Chapter 7 separates "what to compute in parallel" from scheduling it; Chapter 13 separates "what effects to perform" from performing them.</div>
 
 <dl class="jargon">
   <dt>Strict / non-strict</dt><dd>Whether a function always evaluates an argument or may skip it.</dd>
-  <dt>Thunk</dt><dd>An unevaluated expression packaged as <code>() =&gt; A</code>.</dd>
-  <dt>Memoisation</dt><dd>Caching a computed value so it's evaluated at most once (<code>lazy val</code>).</dd>
-  <dt>Smart constructor</dt><dd>A function that builds a value while enforcing extra invariants, here caching.</dd>
+  <dt>Thunk</dt><dd>An unevaluated computation packaged as a zero-argument function.</dd>
+  <dt>Memoisation</dt><dd>Caching a computed value so it's evaluated at most once.</dd>
   <dt>Corecursion / unfold</dt><dd>Producing data step by step from a seed, possibly forever.</dd>
+  <dt>View</dt><dd>A lazy, non-owning C++ range adaptor; pipelines of views are fused.</dd>
 </dl>
 
 <div class="recap"><ul>
-  <li>By-name parameters and <code>lazy val</code> delay evaluation.</li>
-  <li>A lazy list with a lazy <code>foldRight</code> can stop early and fuses pipelines into one pass.</li>
-  <li>Laziness allows infinite structures, as long as the consumer stops.</li>
+  <li>Thunks delay evaluation; <code>Lazy</code> adds caching.</li>
+  <li>A lazy list with a lazy <code>fold_right</code> can stop early and fuses pipelines into one pass.</li>
+  <li>Laziness allows infinite structures, as long as the consumer stops. Avoid <code>shared_ptr</code> cycles.</li>
   <li><code>unfold</code> generates lists from a seed; it's the dual of fold.</li>
-  <li>Separate the description of a computation from running it.</li>
+  <li><code>std::ranges</code> views are the standard's lazy pipelines.</li>
 </ul></div>
+
+<a class="listing" href="https://github.com/ashok281196/ashok281196.github.io/blob/main/reading/fp-scala/code/ch05.cpp"><span class="l-k">Full runnable listing</span>code/ch05.cpp · every example in this chapter, compiled and tested with g++ 13 -std=c++23 (opens on GitHub; <span style="white-space:nowrap">copy into godbolt.org to run</span>)</a>
 
 <nav class="booknav" id="booknav"></nav>
 
