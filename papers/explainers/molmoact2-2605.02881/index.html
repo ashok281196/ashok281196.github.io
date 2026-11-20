@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#F7F1E5">
+<title>MolmoAct2 Explained</title>
+<meta name="description" content="MolmoAct2, explained from zero: an open vision-language-action model with a spatial-reasoning backbone, per-layer KV conditioning, three open datasets and adaptive depth reasoning.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../folio.css">
+<style>
+/* page-only additions on top of folio.css (shared rules mirror the Diffusion Policy explainer) */
+.paper-meta { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s2); margin-top: var(--s5); }
+details.q { border: 1px solid var(--rule); border-radius: var(--radius); margin: var(--s3) 0; background: var(--sheet); }
+details.q summary { cursor: pointer; padding: var(--s4); min-height: 44px; font-weight: 600; list-style: none; }
+details.q summary::-webkit-details-marker { display: none; }
+details.q summary::before { content: "＋"; color: var(--oxblood); margin-right: var(--s2); font-family: var(--sans); }
+details.q[open] summary::before { content: "−"; }
+details.q div { padding: 0 var(--s4) var(--s4); color: var(--ink-soft); font-size: var(--fs-sm); }
+dl.gloss dt { font-weight: 600; margin-top: var(--s4); color: var(--oxblood); }
+dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-soft); }
+.demo { background: var(--sheet-alt); border: 1px solid var(--rule); border-radius: var(--radius-lg); padding: var(--s5); margin: var(--s6) 0; font-family: var(--sans); }
+.demo canvas { width: 100%; height: auto; aspect-ratio: 600 / 360; display: block; border-radius: var(--radius); background: var(--sheet); box-shadow: var(--shadow-card); touch-action: manipulation; }
+.demo-status { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); align-items: center; justify-content: space-between; margin-top: var(--s3); font-size: var(--fs-sm); color: var(--ink-soft); }
+.demo-status b { color: var(--ink); }
+.tally { font: 500 var(--fs-xs) var(--mono); color: var(--ink-faint); }
+.trio { display: grid; gap: var(--s4); grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); margin: var(--s5) 0; }
+.trio .card { border-top: 3px solid var(--c, var(--slate)); }
+.trio .card ul { font-size: var(--fs-sm); color: var(--ink-soft); padding-left: 1.1em; margin: var(--s2) 0 0; }
+.trio .card li { margin-bottom: var(--s1); }
+.verdict { display: inline-block; font: 600 var(--fs-xs) var(--sans); padding: 3px 8px; border-radius: 999px; margin-top: var(--s2); }
+.v-bad { background: var(--oxblood-tint); color: var(--oxblood); }
+.v-mid { background: var(--gold-tint); color: #7D5D1F; }
+.v-good { background: var(--sage-tint); color: var(--sage); }
+td.best { font-weight: 700; color: var(--oxblood); }
+.stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: var(--s3); margin: var(--s5) 0; }
+.stat { background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius-lg); padding: var(--s4); text-align: center; box-shadow: var(--shadow-card); }
+.stat b { display: block; font: 700 var(--fs-2xl)/1.1 var(--serif); color: var(--oxblood); }
+.stat span { font: var(--fs-xs)/1.4 var(--sans); color: var(--ink-soft); }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; margin-bottom: var(--s3); }
+.seg button { min-height: 44px; border: 0; border-radius: 7px; background: transparent; font: 500 var(--fs-xs)/1.25 var(--sans); color: var(--ink-soft); cursor: pointer; padding: 4px 6px; }
+.seg button[aria-pressed="true"] { background: var(--oxblood); color: #FFF8F2; }
+.seg.two { grid-template-columns: repeat(2, 1fr); }
+.sliders { display: grid; gap: var(--s3); margin: var(--s3) 0; }
+.sliders label { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--s3); font-size: var(--fs-sm); color: var(--ink-soft); }
+.sliders input[type=range] { grid-column: 1 / -1; width: 100%; min-height: 32px; accent-color: var(--oxblood); }
+.sliders output { font: 500 var(--fs-xs) var(--mono); color: var(--ink); }
+.frame-fig { background: var(--sheet-alt); border: 1px solid var(--rule); border-radius: var(--radius-lg); padding: var(--s4); }
+.frame-fig svg { width: 100%; max-width: 520px; margin: 0 auto; font-family: var(--sans); }
+.six { counter-reset: six; list-style: none; padding: 0; display: grid; gap: var(--s3); }
+.six li { counter-increment: six; position: relative; margin: 0; padding: var(--s4) var(--s4) var(--s4) calc(var(--s4) + 40px); background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }
+.six li::before { content: counter(six); position: absolute; left: var(--s4); top: var(--s4); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--oxblood); color: #FFF8F2; font: 600 var(--fs-sm) var(--sans); }
+.six b { display: block; margin-bottom: 2px; }
+.six span { font-size: var(--fs-sm); color: var(--ink-soft); }
+
+.eq { font: italic 1.05rem/1.7 var(--serif); text-align: center; margin: var(--s4) 0; overflow-x: auto; white-space: nowrap; }
+.eq small { display: block; font: normal var(--fs-xs) var(--sans); color: var(--ink-faint); white-space: normal; }
+.demo canvas.sq { aspect-ratio: 1 / 1; max-width: 420px; margin: 0 auto; }
+.note-flag { font-size: var(--fs-sm); color: var(--ink-faint); }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="topbar">
+  <button class="icon-btn menu-btn" id="menuBtn" aria-label="Open contents" aria-controls="sidebar" aria-expanded="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
+  </button>
+  <a class="icon-btn" href="../../" aria-label="Back to papers" title="Back to papers">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+  </a>
+  <div class="title"><b>Folio</b>MolmoAct2, Explained</div>
+  <span class="chapter-label" id="chapterLabel">Cover</span>
+  <div class="progress" id="progress"></div>
+</header>
+
+<div class="layout">
+  <nav class="sidebar" id="sidebar" aria-label="Table of contents">
+    <p class="toc-head">Contents</p>
+    <ol class="toc">
+      <li><a href="#cover"><span class="num">·</span>Cover</a></li>
+      <li><a href="#ch1"><span class="num">1</span>The Deployment Gap</a></li><li><a href="#ch2"><span class="num">2</span>Anatomy of a VLA</a></li><li><a href="#ch3"><span class="num">3</span>A Backbone That Sees Space</a></li><li><a href="#ch4"><span class="num">4</span>Three Datasets</a></li><li><a href="#ch5"><span class="num">5</span>Actions as Tokens</a></li><li><a href="#ch6"><span class="num">6</span>Per-Layer KV Conditioning</a></li><li><a href="#ch7"><span class="num">7</span>Three-Stage Training</a></li><li><a href="#ch8"><span class="num">8</span>Thinking in Depth, Cheaply</a></li><li><a href="#ch9"><span class="num">9</span>Out of the Box</a></li><li><a href="#ch10"><span class="num">10</span>Fine-Tuned</a></li><li><a href="#ch11"><span class="num">11</span>Speed, Ablations, Limits</a></li><li><a href="#ch12"><span class="num">12</span>Recap &amp; Quiz</a></li>
+    </ol>
+  </nav>
+  <div class="scrim" id="scrim"></div>
+
+  <main class="page" id="main">
+
+    <section class="cover" id="cover" data-label="Cover">
+      <svg class="mark" viewBox="0 0 56 56" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true">
+        <path d="M28 14c-5-4-13-5-20-4v32c7-1 15 0 20 4 5-4 13-5 20-4V10c-7-1-15 0-20 4Z"/><path d="M28 14v32"/>
+      </svg>
+      <span class="eyebrow">A Beginner’s Guide · arXiv 2605.02881</span>
+      <h1>MolmoAct2</h1>
+      <p class="lead">Action reasoning models for real-world deployment — an open robot foundation model built to run on arms a small lab can afford, and to think about depth without stopping to think.</p>
+      <div class="paper-meta">
+        <span class="chip accent">Haoquan Fang* · Jiafei Duan* · … · Ali Farhadi · Dieter Fox · Ranjay Krishna (29 authors)</span>
+        <span class="chip">Allen Institute for AI · University of Washington · and others</span>
+        <span class="chip">arXiv v2 · 8 May 2026</span>
+      </div>
+      <p class="meta">TWELVE CHAPTERS · ~40 MIN READ · <a href="https://arxiv.org/pdf/2605.02881">ORIGINAL PDF</a> · PREREQUISITE (OPTIONAL): <a href="../diffusion-policy-2303.04137/">DIFFUSION POLICY EXPLAINER</a></p>
+    </section>
+
+    <div class="callout key"><div><strong>The whole paper in one sentence</strong><p>Take a vision-language model that has been drilled on spatial reasoning, bolt on a fast action generator that reads the model’s internals at <em>every</em> layer instead of only the last, train it on three cleaned-up open datasets for three affordable robots, and release everything — then add an optional mode that reasons about depth but only re-thinks the parts of the scene that changed.</p></div></div>
+
+    <div class="stat-row">
+      <div class="stat"><b>87.1%</b><span>real-world success on a DROID Franka with no fine-tuning (π0.5: 45.2%)</span></div>
+      <div class="stat"><b>720+ h</b><span>new open bimanual dataset, collected on a rig under $6,000</span></div>
+      <div class="stat"><b>97.2%</b><span>LIBERO average; 98.1% with depth reasoning</span></div>
+      <div class="stat"><b>55.8 Hz</b><span>control rate on one H100 after inference optimisation</span></div>
+    </div>
+
+    <section class="chapter" id="ch1" data-label="1 · The Deployment Gap">
+<header class="chapter-head"><span class="num">Chapter 1</span><h2>The Deployment Gap</h2></header>
+      <p class="dropcap">By 2026 the recipe for a generalist robot policy was settled: a vision-language-action model, or VLA. One network takes camera images and an instruction and emits motor commands. The <a href="../diffusion-policy-2303.04137/">Diffusion Policy</a> and <a href="../umi-2402.10329/">UMI</a> explainers cover two of its ancestors. The open question was no longer whether this works in a demo. It was whether an ordinary lab could actually <em>use</em> one.</p>
+      <p>The authors list four reasons the answer was mostly no.</p>
+      <div class="trio">
+        <div class="card" style="--c:var(--slate)"><h4>Closed</h4><p>The strongest models keep their data, training recipe and often their weights private. You cannot inspect them, retrain them or fix them.</p></div>
+        <div class="card" style="--c:var(--gold)"><h4>Expensive bodies</h4><p>Open-weight models such as π0 and π0.5 work out of the box, but mainly on costly or specialised robot platforms.</p></div>
+        <div class="card" style="--c:var(--oxblood)"><h4>Slow thinking</h4><p>Models that reason before acting — predicting depth, goal images or trajectories — generate hundreds of tokens per step, so the robot waits.</p></div>
+        <div class="card" style="--c:var(--sage)"><h4>Not reliable enough</h4><p>After fine-tuning, success rates are still below what you would trust unattended.</p></div>
+      </div>
+      <p>MolmoAct2 is an attempt at all four at once. It is the successor to MolmoAct, an earlier “action reasoning model” from the same group that reasoned about depth and motion traces before every action — and paid for it in latency. The new paper keeps the reasoning idea, makes it optional and cheap, and spends most of its effort on the unglamorous parts: data cleaning, an open tokenizer, a better wire between the two halves of the model, and a very large evaluation.</p>
+      <div class="callout note"><div><strong>What “fully open” means here</strong><p>Weights, training code and the complete training data are released — including the action tokenizer and the list of what it was trained on. That last part is unusual; most releases stop at weights.</p></div></div>
+    <div class="folio"><span>The Deployment Gap</span><span>1</span></div>
+</section>
+
+    <section class="chapter" id="ch2" data-label="2 · Anatomy of a VLA">
+<header class="chapter-head"><span class="num">Chapter 2</span><h2>Anatomy of a VLA</h2></header>
+      <p class="dropcap">A modern VLA has two halves, and almost every design decision in this paper is about one of them or the connection between them.</p>
+      <h3>Half one: the vision-language model</h3>
+      <p>A VLM is a language model that also accepts images. A vision encoder cuts each image into patches and turns them into vectors; a small connector projects those into the same space as word embeddings; a large transformer then processes image tokens and text tokens together. It is pre-trained on enormous amounts of web data, so it already knows what a mug is and what “to the left of” means.</p>
+      <h3>Half two: the action expert</h3>
+      <p>Words are discrete; motor commands are continuous and fast. So most recent VLAs add a second, smaller network whose only job is to produce a short burst of future actions — an <em>action chunk</em> — conditioned on what the VLM understood. It is usually trained with diffusion or its close relative, flow matching: start from noise, refine it into a trajectory.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Part of MolmoAct2</th><th>What it is</th><th>Size</th></tr></thead>
+        <tbody>
+          <tr><td>Image encoder</td><td>SigLIP2 vision transformer</td><td>380M</td></tr>
+          <tr><td>Connector</td><td>Pools two ViT layers into image tokens</td><td>57M</td></tr>
+          <tr><td>Language model</td><td>Molmo2-ER, 36 layers</td><td>4.0B</td></tr>
+          <tr><td>Action expert</td><td>DiT-style transformer, 36 blocks, width 768</td><td>621M</td></tr>
+        </tbody>
+      </table></div>
+      <p>Roughly five billion parameters in total, most of them in the language model.</p>
+      <h3>Two ways to say an action</h3>
+      <p>MolmoAct2 can emit actions in two forms, and it is trained on both.</p>
+      <ul>
+        <li><strong>Discrete:</strong> the language model writes special action tokens, one after another, exactly as it would write a sentence. Simple, and it forces the VLM itself to understand actions. Slow, because each token is a separate forward pass.</li>
+        <li><strong>Continuous:</strong> the action expert produces the whole chunk at once in a handful of refinement steps. Fast and smooth. This is the default at run time.</li>
+      </ul>
+      <div class="callout tip"><div><strong>Why keep both</strong><p>The discrete path is a teacher: learning to write action tokens makes the backbone’s internal features action-aware. The continuous path is the worker: it reads those features and produces the motion. Chapter 11 shows the measured cost of using the teacher as the worker — about four times slower.</p></div></div>
+    <div class="folio"><span>Anatomy of a VLA</span><span>2</span></div>
+</section>
+
+    <section class="chapter" id="ch3" data-label="3 · A Backbone That Sees Space">
+<header class="chapter-head"><span class="num">Chapter 3</span><h2>A Backbone That Sees Space</h2></header>
+      <p class="dropcap">A general VLM is good at naming things and weak at geometry. Ask which of two cups is closer, or to point at the free space on a shelf, and it often fails. A robot needs exactly those answers. So before any robot data is involved, the authors build a better backbone, called <strong>Molmo2-ER</strong> (“embodied reasoning”).</p>
+      <p>They start from a mid-training checkpoint of Molmo2, a 4-billion-parameter VLM, and fine-tune it on about 3.3 million examples of spatial and embodied questions.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Kind of training example</th><th>Samples</th></tr></thead>
+        <tbody>
+          <tr><td>Embodied question answering on images</td><td>1.3M</td></tr>
+          <tr><td>Pointing at things in images</td><td>780K</td></tr>
+          <tr><td>Video embodied question answering</td><td>703K</td></tr>
+          <tr><td>Multi-image and first-person/third-person pairs</td><td>700K</td></tr>
+          <tr><td>Abstract spatial reasoning</td><td>150K</td></tr>
+          <tr><td>Object detection</td><td>100K</td></tr>
+        </tbody>
+      </table></div>
+      <h3>Specialise, then rehearse</h3>
+      <p>Fine-tuning hard on one kind of data makes a model forget the rest. The recipe has two stages to avoid that. First, 20,000 steps almost entirely on the embodied data, to specialise. Then a short 1,500-step stage mixing embodied data half-and-half with the original general data, to rehearse what was at risk of being lost. A small share of pure text is kept throughout.</p>
+      <h3>Did it work?</h3>
+      <p>On thirteen spatial and embodied reasoning benchmarks, averaged:</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Model</th><th>Average over 13 benchmarks</th></tr></thead>
+        <tbody>
+          <tr><td><b>Molmo2-ER</b></td><td class="best">63.8</td></tr>
+          <tr><td>Gemini Robotics-ER 1.5 (thinking)</td><td>61.3</td></tr>
+          <tr><td>GPT-5</td><td>57.9</td></tr>
+          <tr><td>Molmo2 (the starting point)</td><td>46.8</td></tr>
+        </tbody>
+      </table></div>
+      <p>Seventeen points over its own starting point, and the best score on nine of the thirteen. The more important number comes later: swapping this backbone into the robot policy lifts success on LIBERO’s hardest suite from 77.6% to 83.6% with nothing else changed. Better spatial understanding in the VLM turns into better manipulation.</p>
+    <div class="folio"><span>A Backbone That Sees Space</span><span>3</span></div>
+</section>
+
+    <section class="chapter" id="ch4" data-label="4 · Three Datasets">
+<header class="chapter-head"><span class="num">Chapter 4</span><h2>Three Datasets</h2></header>
+      <p class="dropcap">The second pillar is data, and the paper’s position is blunt: the public robot datasets are broad but messy. Episodes where the robot sits idle, failed attempts left in, instructions repeated word for word, and community uploads labelled things like “lerobot_test”. A model trained on that learns the mess.</p>
+      <p>MolmoAct2 is trained mainly on three datasets, one per target robot, each cleaned or collected for the purpose.</p>
+      <div class="trio">
+        <div class="card" style="--c:var(--oxblood)"><h4>BimanualYAM <span class="verdict v-good">new</span></h4><p>Collected by the authors over two months on a two-arm YAM rig.</p><ul><li>34.5K demonstrations</li><li>720+ hours, 28+ tasks</li><li>Rig costs under $6,000</li><li>Folding clothes, untangling cables, bussing tables, packing medication</li></ul></div>
+        <div class="card" style="--c:var(--gold)"><h4>SO-100/101 <span class="verdict v-mid">curated</span></h4><p>Filtered from the hobbyist arm community’s public uploads.</p><ul><li>1,222 datasets from 377 users</li><li>38,059 episodes, ~184 hours raw</li><li>Four-stage quality filter</li></ul></div>
+        <div class="card" style="--c:var(--slate)"><h4>DROID <span class="verdict v-mid">cleaned</span></h4><p>The well-known Franka dataset, with dead time removed.</p><ul><li>74,604 episodes</li><li>17.8M frames</li><li>Idle segments cut; richer instructions</li></ul></div>
+      </div>
+      <h3>The YAM rig</h3>
+      <p>The bimanual setup is deliberately ordinary: two YAM arms, Intel RealSense D435 and D405 cameras, an off-the-shelf extendable desk mount and an IKEA table. The paper calls the resulting dataset the largest open bimanual dataset to date. Collection rules capped how many failed retries and how much do-nothing time a demonstration could contain.</p>
+      <h3>Filtering the community data</h3>
+      <p>The SO-100 filter is worth knowing as a pattern. A dataset survives only if it passes (1) structural checks, (2) is not just somebody’s evaluation run, (3) has a usable licence, and (4) clears a learned quality gate — a reward model scores the last few episodes, and the dataset is kept only if it scores above a threshold set from human-audited examples.</p>
+      <h3>Re-writing the instructions</h3>
+      <p>A language model re-annotated episodes from sampled frames plus the original instruction, with a randomly chosen target length so phrasing varies. Unique instructions rose from 71,121 to 146,485 — from 22% to 46% of the relabelled data. A policy that has only ever heard one phrasing of a task is brittle to the second.</p>
+    <div class="folio"><span>Three Datasets</span><span>4</span></div>
+</section>
+
+    <section class="chapter" id="ch5" data-label="5 · Actions as Tokens">
+<header class="chapter-head"><span class="num">Chapter 5</span><h2>Actions as Tokens</h2></header>
+      <p class="dropcap">For the language model to “write” actions, a second of robot motion has to become a short string of tokens. The naive way — one token per joint per timestep — produces hundreds of tokens for a 30 Hz bimanual arm, most of them nearly identical to their neighbours. Smooth motion is highly compressible, and the tokenizer should exploit that.</p>
+      <p>MolmoAct2 uses the FAST scheme, re-implemented and re-trained in the open as <strong>MolmoAct2-FAST</strong>.</p>
+      <ol>
+        <li><strong>Normalise.</strong> Pad every action to 32 dimensions (so different robots share one format) and scale each dimension using its 1st-to-99th percentile range. Grippers are handled separately.</li>
+        <li><strong>Go to frequency space.</strong> A one-second chunk of smooth motion is mostly low-frequency. Transform it so a few coefficients carry almost everything.</li>
+        <li><strong>Quantise.</strong> Round the coefficients; most high-frequency ones become zero.</li>
+        <li><strong>Compress.</strong> Run byte-pair encoding — the same trick text tokenizers use — to merge common patterns into single tokens.</li>
+      </ol>
+      <p>The result is a vocabulary of 2,048 action tokens, trained on one million one-second action sequences drawn mostly from the three target robots in equal shares.</p>
+      <div class="callout note"><div><strong>An analogy</strong><p>It is JPEG for motion. JPEG does not store every pixel; it stores how much of each spatial frequency a block contains and throws away what the eye will not miss. FAST stores how much of each temporal frequency a trajectory contains and throws away what the motor will not miss.</p></div></div>
+      <p>The robot’s own state — joint angles, gripper opening — gets a simpler treatment: each normalised value is rounded into one of 256 state tokens. The prompt also carries plain-text tags naming the robot and control mode, so one model can tell a bimanual YAM in joint-position mode from a Franka.</p>
+    <div class="folio"><span>Actions as Tokens</span><span>5</span></div>
+</section>
+
+    <section class="chapter" id="ch6" data-label="6 · Per-Layer KV Conditioning">
+<header class="chapter-head"><span class="num">Chapter 6</span><h2>Per-Layer KV Conditioning</h2></header>
+      <p class="dropcap">This is the paper’s main architectural idea, and it is about a wire.</p>
+      <p>The action expert has to be told what the VLM understood. The usual way is to take the VLM’s <em>final</em> hidden state — the output of its last layer — and let the expert attend to it. That is one summary, taken at the very end, after 36 layers have each reshaped the information toward predicting the next token.</p>
+      <p>But different layers of a transformer hold different things. Early layers are close to raw visual detail: edges, positions, textures. Late layers are abstract: “the red block”, “task nearly done”. A hand reaching for an object needs both the abstract goal and the precise geometry — and the geometry has been partly washed out by the last layer.</p>
+      <figure class="frame-fig">
+        <svg viewBox="0 0 520 330" role="img" aria-label="Two stacks of layers side by side. Each layer of the vision-language model on the left sends its keys and values to the matching block of the action expert on the right.">
+          <text x="130" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="var(--slate)">VLM · 36 layers</text>
+          <text x="392" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="var(--oxblood)">Action expert · 36 blocks</text>
+          <g font-size="15" text-anchor="middle">
+            <g><rect x="30" y="44" width="200" height="44" rx="8" fill="var(--slate-tint)" stroke="var(--slate)"/><text x="130" y="72" fill="var(--ink)">layer 36 · abstract</text>
+               <rect x="292" y="44" width="200" height="44" rx="8" fill="var(--oxblood-tint)" stroke="var(--oxblood)"/><text x="392" y="72" fill="var(--ink)">block 36</text>
+               <path d="M230 66H286" stroke="var(--gold)" stroke-width="2.5" marker-end="url(#ah)"/></g>
+            <g><rect x="30" y="100" width="200" height="44" rx="8" fill="var(--slate-tint)" stroke="var(--slate)"/><text x="130" y="128" fill="var(--ink)">layer 35</text>
+               <rect x="292" y="100" width="200" height="44" rx="8" fill="var(--oxblood-tint)" stroke="var(--oxblood)"/><text x="392" y="128" fill="var(--ink)">block 35</text>
+               <path d="M230 122H286" stroke="var(--gold)" stroke-width="2.5" marker-end="url(#ah)"/></g>
+            <text x="130" y="172" font-size="20" fill="var(--ink-faint)">⋮</text><text x="392" y="172" font-size="20" fill="var(--ink-faint)">⋮</text><text x="261" y="170" font-size="13" font-weight="600" fill="#7D5D1F">K, V</text>
+            <g><rect x="30" y="188" width="200" height="44" rx="8" fill="var(--slate-tint)" stroke="var(--slate)"/><text x="130" y="216" fill="var(--ink)">layer 2</text>
+               <rect x="292" y="188" width="200" height="44" rx="8" fill="var(--oxblood-tint)" stroke="var(--oxblood)"/><text x="392" y="216" fill="var(--ink)">block 2</text>
+               <path d="M230 210H286" stroke="var(--gold)" stroke-width="2.5" marker-end="url(#ah)"/></g>
+            <g><rect x="30" y="244" width="200" height="44" rx="8" fill="var(--slate-tint)" stroke="var(--slate)"/><text x="130" y="272" fill="var(--ink)">layer 1 · detail</text>
+               <rect x="292" y="244" width="200" height="44" rx="8" fill="var(--oxblood-tint)" stroke="var(--oxblood)"/><text x="392" y="272" fill="var(--ink)">block 1</text>
+               <path d="M230 266H286" stroke="var(--gold)" stroke-width="2.5" marker-end="url(#ah)"/></g>
+          </g>
+          <text x="130" y="314" text-anchor="middle" font-size="14" fill="var(--ink-soft)">images · text · state</text>
+          <text x="392" y="314" text-anchor="middle" font-size="14" fill="var(--ink-soft)">noisy actions → actions</text>
+          <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--gold)"/></marker></defs>
+        </svg>
+        <figcaption><b>Figure 6.1</b> — Per-layer KV conditioning (after the paper’s Figure 4). The expert is built with the same depth as the VLM so that block <i>n</i> can read layer <i>n</i>.</figcaption>
+      </figure>
+      <h3>What “K” and “V” are</h3>
+      <p>Inside each attention layer, every token is turned into a <em>key</em> (“what I am about”) and a <em>value</em> (“what I contribute if you attend to me”). These are the layer’s working representation of the scene and instruction. MolmoAct2 takes the keys and values from each VLM layer, passes them through small learned adapters to match the expert’s width, and lets the matching expert block cross-attend to them.</p>
+      <p>So block 1 of the expert reads the VLM’s near-pixel view, block 36 reads its most abstract view, and everything between reads everything between. Nothing is summarised away before the expert sees it.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>How the expert reads the VLM (LIBERO)</th><th>Spatial</th><th>Object</th><th>Goal</th><th>Long</th><th>Avg</th></tr></thead>
+        <tbody>
+          <tr><td>Final hidden state only</td><td>97.0</td><td>95.4</td><td>96.6</td><td>87.0</td><td>94.0</td></tr>
+          <tr><td>Per-head, per-layer KV</td><td>95.8</td><td>97.2</td><td>96.6</td><td>89.6</td><td>94.8</td></tr>
+          <tr><td><b>Per-layer KV (used)</b></td><td>96.2</td><td>99.0</td><td>98.6</td><td>89.8</td><td class="best">95.9</td></tr>
+        </tbody>
+      </table></div>
+      <p>About two points on average, with the largest gain on the long-horizon suite.</p>
+      <h3>How the expert makes an action: flow matching</h3>
+      <p>The expert is trained to turn noise into an action chunk along a straight line. Pick a real chunk <i>a</i>, a random noise sample ε and a random time <i>t</i> between 0 and 1, and blend them:</p>
+      <p class="eq">x<sub>t</sub> = (1 − t)·ε + t·a<small>at t = 0 it is pure noise; at t = 1 it is the real action chunk</small></p>
+      <p>The network sees x<sub>t</sub> and must predict the direction from noise to data, which for a straight line is simply <i>a − ε</i>. The loss is the squared error on that direction, ignoring padded timesteps and unused dimensions. At run time you start from fresh noise and take ten small steps along the predicted direction. Ten forward passes of a 621M network, instead of a hundred or more passes of the 4B language model.</p>
+    <div class="folio"><span>Per-Layer KV Conditioning</span><span>6</span></div>
+</section>
+
+    <section class="chapter" id="ch7" data-label="7 · Three-Stage Training">
+<header class="chapter-head"><span class="num">Chapter 7</span><h2>Three-Stage Training</h2></header>
+      <p class="dropcap">The model is not trained in one go. Each stage has a different job, and the order matters.</p>
+      <figure class="flow2">
+        <div class="f2-head"><b>From a VLM to a robot policy</b><span>three stages</span></div>
+        <div class="f2-track" role="list"><div class="f2-step is-start" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg></span><div class="f2-card"><span class="k">Begin</span><b>Molmo2-ER, a VLM tuned for spatial reasoning</b><p>It can point, count, judge distances and answer questions about scenes. It cannot move a robot yet.</p></div></div><div class="f2-phase" aria-hidden="true">① Pre-train · 200K steps</div><div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="5" height="5" rx="1"/><rect x="10" y="5" width="5" height="5" rx="1"/><rect x="17" y="5" width="4" height="5" rx="1"/><rect x="3" y="14" width="5" height="5" rx="1"/><rect x="10" y="14" width="5" height="5" rx="1"/></svg><i>1</i></span><div class="f2-card"><span class="k">Stage A</span><b>Learn actions as words</b><p>Robot state and one-second action chunks become discrete tokens. The VLM learns to write them, like any other text. No continuous head exists yet.</p><code>90% robot data · 10% multimodal · 64 H100s · ~5,760 GPU-hours</code></div></div><div class="f2-phase" aria-hidden="true">② Post-train · 100K steps</div><div class="f2-step is-net" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12c2.5-6 5-6 7.5 0s5 6 7.5 0 3.5-4 5-2"/></svg><i>2</i></span><div class="f2-card"><span class="k">Stage B</span><b>Attach the flow-matching action expert</b><p>A 621M-parameter transformer learns continuous action chunks while the VLM keeps predicting tokens.</p><code>loss = L_LLM + L_flow · 4 noise samples per chunk</code></div></div><div class="f2-step is-dec" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><i>3</i></span><div class="f2-card"><span class="k">Insulate</span><b>Keep the expert’s gradients out of the VLM</b><p>The VLM’s keys and values are detached before the expert reads them, so a randomly initialised expert cannot scramble what the backbone knows.</p></div></div><div class="f2-phase" aria-hidden="true">③ Fine-tune · 50K–100K steps</div><div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h8M8 20v-6l6-6 4 2"/><circle cx="8" cy="14" r="1.6"/><circle cx="14" cy="8" r="1.6"/><path d="M18 10l2-1M18 10l1 2"/></svg><i>4</i></span><div class="f2-card"><span class="k">Stage C</span><b>Specialise to one robot</b><p>Robot-only data. Insulation is switched off so flow gradients now shape the VLM too; noise samples go from 4 to 8.</p><code>YAM & SO-100: 30 steps @ 30 Hz · DROID: 15 @ 15 Hz · LIBERO: 10 @ 10 Hz</code></div></div><div class="f2-step is-end" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg></span><div class="f2-card"><span class="k">Finish</span><b>A checkpoint per embodiment</b><p>MolmoAct2-YAM, -SO100/101, -DROID and -LIBERO, plus the Think variant.</p></div></div></div>
+        <div class="f2-stats"><span>pre-train <b>200K</b></span><span>post-train <b>100K</b></span><span>fine-tune <b>50–100K</b></span><span>hardware <b>32–64 H100</b></span></div>
+        <figcaption><b>Figure 7.1</b> — The MolmoAct2 training pipeline (paper Section 4).</figcaption>
+      </figure>
+      <h3>Knowledge insulation, and when to remove it</h3>
+      <p>When the action expert is first attached it is random. Its early gradients are large and uninformed; if they flowed back into the VLM they would damage features that took millions of examples to learn. So in stage B the connection is one-way: the expert reads the VLM’s keys and values, but the gradient is cut. The VLM keeps improving only through its own token-prediction loss.</p>
+      <p>In stage C the wall comes down. By then the expert is competent, the data is from a single robot, and letting the flow loss shape the backbone helps. The ablation agrees: full fine-tuning with discrete co-training and no insulation scores best (97.20 on LIBERO); training the action expert alone, with the VLM frozen, scores 93.05.</p>
+      <div class="callout note"><div><strong>No peeking</strong><p>During post-training the sequence contains the ground-truth action tokens, because the VLM is learning to predict them. Those tokens are masked out of what the expert can attend to. Otherwise the expert would learn to copy the answer rather than produce it.</p></div></div>
+      <h3>Several noise draws per example</h3>
+      <p>Running the VLM over images is the expensive part of a training step; the expert is cheap. So each action chunk is used several times per step with different noise and time values — four in post-training, eight in fine-tuning — getting more learning signal out of each costly VLM pass. Going from one draw to eight is worth about 1.75 points on LIBERO.</p>
+    <div class="folio"><span>Three-Stage Training</span><span>7</span></div>
+</section>
+
+    <section class="chapter" id="ch8" data-label="8 · Thinking in Depth, Cheaply">
+<header class="chapter-head"><span class="num">Chapter 8</span><h2>Thinking in Depth, Cheaply</h2></header>
+      <p class="dropcap">The original MolmoAct had a distinctive idea: before acting, have the model write out what it believes about the scene’s 3D structure, as tokens, and condition the action on that. It grounds the action in geometry. It also meant generating a full set of depth tokens at every single control step, for a scene that mostly had not changed.</p>
+      <p><strong>MolmoAct2-Think</strong> keeps the idea and removes the waste.</p>
+      <h3>Depth as a hundred tokens</h3>
+      <p>Each camera frame’s depth map is compressed to a 10×10 grid. Every cell holds one of 128 codes — a coarse “how far away is this patch” symbol. One hundred ordinary tokens describe the depth of the whole scene. For training, depth labels come from an off-the-shelf monocular depth estimator, so no depth camera is required.</p>
+      <h3>Only re-think what changed</h3>
+      <p>The model keeps a buffer of the last depth codes. At each step, the new frame is split into the same 10×10 patches and each patch is compared with the same patch in the previous frame. If they are nearly identical — cosine similarity at or above 0.996 — the old code is reused. Only patches that changed are decoded afresh. The first frame, with nothing to compare against, decodes all hundred.</p>
+      <div class="demo" id="depthDemo">
+        <div class="seg two" role="group" aria-label="Depth update rule">
+          <button type="button" data-m="0" aria-pressed="false">Regenerate everything</button>
+          <button type="button" data-m="1" aria-pressed="true">Adaptive (Think)</button>
+        </div>
+        <canvas class="sq" width="420" height="420" aria-label="A ten by ten grid over a tabletop scene with a moving gripper; cells light up when their depth code is regenerated"></canvas>
+        <div class="demo-status"><span>Depth tokens decoded this step: <b id="dNow">–</b> / 100</span><span>Running average: <b id="dAvg">–</b></span></div>
+      </div>
+      <p class="small muted">A toy, not the paper’s measurement. A gripper moves over a still table; a cell is marked for regeneration when the gripper enters or leaves it. The real rule compares image patches by cosine similarity, so lighting changes and camera motion would also trigger updates.</p>
+      <p>In a typical manipulation scene the camera is fixed and only the arm and one object move. Most of the grid is table, wall and clutter that does not change for seconds at a time. That is the entire saving.</p>
+      <h3>Two details that make it robust</h3>
+      <ul>
+        <li><strong>Noisy depth in training.</strong> At run time the depth tokens are the model’s own predictions and will contain errors. So during fine-tuning, 10% of the input depth tokens are replaced with random codes. The model learns to use depth as a hint, not to trust it blindly.</li>
+        <li><strong>A learned gate.</strong> Each layer has a small gate that scales how much the action expert attends to depth tokens, computed from the rest of the context. It starts almost closed, so depth cannot disrupt a policy that already works, and opens as far as training finds useful.</li>
+      </ul>
+      <div class="table-wrap"><table>
+        <thead><tr><th>LIBERO</th><th>Spatial</th><th>Object</th><th>Goal</th><th>Long</th><th>Avg</th></tr></thead>
+        <tbody>
+          <tr><td>MolmoAct2</td><td>97.8</td><td>100.0</td><td>97.8</td><td>93.2</td><td>97.2</td></tr>
+          <tr><td><b>MolmoAct2-Think</b></td><td>98.8</td><td>99.8</td><td>98.5</td><td>95.4</td><td class="best">98.1</td></tr>
+        </tbody>
+      </table></div>
+      <p>A gain of 0.9 points on average and 2.2 on the long-horizon suite, where a wrong spatial guess early on compounds. Removing the noise and the gate drops the average to 97.65.</p>
+    <div class="folio"><span>Thinking in Depth, Cheaply</span><span>8</span></div>
+</section>
+
+    <section class="chapter" id="ch9" data-label="9 · Out of the Box">
+<header class="chapter-head"><span class="num">Chapter 9</span><h2>Out of the Box</h2></header>
+      <p class="dropcap">The first question for any foundation model is what it does with no extra training: download the checkpoint, put it on the robot, give an instruction.</p>
+      <h3>A Franka arm, unseen objects, random camera positions</h3>
+      <p>Fifteen trials per task, in scenes and with objects not in the training data.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Real DROID setup</th><th>Apple on plate</th><th>Pipette in tray</th><th>Cube in tape roll</th><th>Knife in box</th><th>Objects in bowl</th><th>Avg</th></tr></thead>
+        <tbody>
+          <tr><td>π0.5-DROID</td><td>66.7</td><td>33.3</td><td>53.3</td><td>26.7</td><td>46.2</td><td>45.2</td></tr>
+          <tr><td>MolmoBot</td><td>86.7</td><td>53.3</td><td>33.3</td><td>40.0</td><td>28.6</td><td>48.4</td></tr>
+          <tr><td><b>MolmoAct2-DROID</b></td><td>100.0</td><td>86.7</td><td>93.3</td><td>93.3</td><td>62.0</td><td class="best">87.1</td></tr>
+        </tbody>
+      </table></div>
+      <h3>A hobbyist arm</h3>
+      <p>The SO-100/101 is a low-cost 3D-printed arm. Scoring gives partial credit: a quarter for reaching, half for picking up, full for placing.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Real SO-100/101</th><th>Fork on plate</th><th>Stack blocks</th><th>Tissues in basket</th><th>Pen on notebook</th><th>Block in box</th><th>Avg</th></tr></thead>
+        <tbody>
+          <tr><td>SmolVLA</td><td>3.3</td><td>5.0</td><td>0.0</td><td>3.3</td><td>0.0</td><td>2.3</td></tr>
+          <tr><td>π0-SO100/101</td><td>30.0</td><td>6.7</td><td>20.0</td><td>80.0</td><td>90.0</td><td>45.3</td></tr>
+          <tr><td><b>MolmoAct2-SO100/101</b></td><td>70.0</td><td>20.0</td><td>73.3</td><td>86.7</td><td>33.3</td><td class="best">56.7</td></tr>
+        </tbody>
+      </table></div>
+      <p>Ahead on average, but not uniformly: π0 is far better at “block in box” (90.0 against 33.3), and block stacking is poor for everyone.</p>
+      <h3>Simulation</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Benchmark (average)</th><th>π0.5-DROID</th><th>MolmoAct2-DROID</th></tr></thead>
+        <tbody>
+          <tr><td>MolmoSpaces — pick, pick-and-place, open, close</td><td>34.5</td><td class="best">37.7</td></tr>
+          <tr><td>MolmoBot — 1,000 episodes per task</td><td>10.0</td><td class="best">20.6</td></tr>
+        </tbody>
+      </table></div>
+      <div class="callout warn"><div><strong>Read these with two things in mind</strong><p>First, the absolute numbers in simulation are low — about one success in five on MolmoBot — so “twice as good” still means failing most of the time. Second, MolmoSpaces and MolmoBot are benchmarks from the same institute as the model, and on MolmoSpaces’ “open” skill MolmoAct2 scores 9.5 against π0.5’s 22.7. The real-robot tables are the stronger evidence.</p></div></div>
+    <div class="folio"><span>Out of the Box</span><span>9</span></div>
+</section>
+
+    <section class="chapter" id="ch10" data-label="10 · Fine-Tuned">
+<header class="chapter-head"><span class="num">Chapter 10</span><h2>Fine-Tuned</h2></header>
+      <p class="dropcap">The second question: given some demonstrations of a new task, how good does it get?</p>
+      <h3>LIBERO</h3>
+      <p>A standard simulated benchmark of four suites, ten tasks each. One model is trained on all four.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Method</th><th>Spatial</th><th>Object</th><th>Goal</th><th>Long</th><th>Avg</th></tr></thead>
+        <tbody>
+          <tr><td>OpenVLA</td><td>84.7</td><td>88.4</td><td>79.2</td><td>53.7</td><td>76.5</td></tr>
+          <tr><td>MolmoAct-7B-D (predecessor)</td><td>87.0</td><td>95.4</td><td>87.6</td><td>77.2</td><td>86.6</td></tr>
+          <tr><td>π0</td><td>96.8</td><td>98.8</td><td>95.8</td><td>85.2</td><td>94.2</td></tr>
+          <tr><td>π0.5</td><td>98.8</td><td>98.2</td><td>98.0</td><td>92.4</td><td>96.9</td></tr>
+          <tr><td>GR00T N1.7</td><td>97.7</td><td>97.5</td><td>98.5</td><td>94.4</td><td>97.0</td></tr>
+          <tr><td><b>MolmoAct2</b></td><td>97.8</td><td>100.0</td><td>97.8</td><td>93.2</td><td class="best">97.2</td></tr>
+          <tr><td><b>MolmoAct2-Think</b></td><td>98.8</td><td>99.8</td><td>98.5</td><td>95.4</td><td class="best">98.1</td></tr>
+        </tbody>
+      </table></div>
+      <p>The jump from its own predecessor is 10.6 points. Against the current best, the margins are fractions of a point: LIBERO is close to saturated, and it is fair to say MolmoAct2 <em>matches</em> the leaders here.</p>
+      <h3>Two real arms, eight new tasks</h3>
+      <p>On the bimanual YAM, eight tasks — stacking cups, storing test tubes, hanging tools, preparing a pipette, making popcorn and others — were each fine-tuned separately and run for 50 trials across a lab, kitchen, study, pantry and wet lab.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Real bimanual YAM, 8 tasks (average)</th><th>Success</th></tr></thead>
+        <tbody>
+          <tr><td><b>MolmoAct2</b></td><td class="best">~50%</td></tr>
+          <tr><td>OpenVLA-OFT</td><td>35.5</td></tr>
+          <tr><td>π0.5</td><td>32.2</td></tr>
+          <tr><td>Cosmos Policy</td><td>15.5</td></tr>
+          <tr><td>X-VLA</td><td>4.9</td></tr>
+        </tbody>
+      </table></div>
+      <p class="note-flag">The paper’s main text gives 50.1% for MolmoAct2 and its appendix table gives 50.6%; the baseline figures are from that appendix table. Best on seven of the eight tasks.</p>
+      <p>Fifteen points ahead of the next method — and still succeeding only half the time. Both halves of that sentence matter.</p>
+      <h3>When the world shifts</h3>
+      <p>Four of those tasks were re-run with deliberate changes: objects moved, lighting altered, the instruction rephrased, distracting objects added.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Model</th><th>Moved objects</th><th>Lighting</th><th>Rephrased</th><th>Distractors</th><th>Overall</th></tr></thead>
+        <tbody>
+          <tr><td>π0.5</td><td>15.0</td><td>33.7</td><td>26.2</td><td>33.2</td><td>27.0</td></tr>
+          <tr><td>OpenVLA-OFT</td><td>13.8</td><td>46.3</td><td>51.3</td><td>48.3</td><td>39.9</td></tr>
+          <tr><td><b>MolmoAct2</b></td><td>26.3</td><td>62.1</td><td>60.4</td><td>54.1</td><td class="best">50.7</td></tr>
+        </tbody>
+      </table></div>
+      <p>Lighting, wording and clutter cost relatively little. Moving the objects is what hurts: 26% for the best model. Spatial generalisation from a small fine-tuning set remains the hard part for every method tested.</p>
+      <h3>How it moves, not just whether it succeeds</h3>
+      <p>On RoboEval, a bimanual Franka benchmark, MolmoAct2 reaches 44.3% success, 3.8 points above π0.5. The benchmark also scores the trajectory. On block stacking, MolmoAct2 finished in 4.70 s against 5.87 s for π0.5, with about half the joint path length — it gets there more directly.</p>
+    <div class="folio"><span>Fine-Tuned</span><span>10</span></div>
+</section>
+
+    <section class="chapter" id="ch11" data-label="11 · Speed, Ablations, Limits">
+<header class="chapter-head"><span class="num">Chapter 11</span><h2>Speed, Ablations, Limits</h2></header>
+      <h3>How fast does it run?</h3>
+      <p class="dropcap">Control rate here means actions per second: the chunk length divided by the time to produce the chunk. Measured on LIBERO with ten-step chunks on a single H100.</p>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Configuration</th><th>MolmoAct2</th><th>MolmoAct2-Think</th></tr></thead>
+        <tbody>
+          <tr><td>Continuous path, unoptimised</td><td>23.0 Hz</td><td>8.0 Hz</td></tr>
+          <tr><td>+ caching</td><td>27.4 Hz</td><td>9.7 Hz</td></tr>
+          <tr><td><b>+ CUDA Graphs</b></td><td class="best">55.8 Hz</td><td class="best">12.7 Hz</td></tr>
+          <tr><td>Discrete (token) path instead</td><td>14.2 Hz</td><td>6.8 Hz</td></tr>
+        </tbody>
+      </table></div>
+      <p>Two engineering changes give a 2.4× speed-up for the base model. Caching avoids recomputing things that do not change across the ten flow steps. CUDA Graphs record the whole fixed-shape loop once and replay it, removing the overhead of launching thousands of small GPU operations one by one. Think gains less (1.6×) because decoding a variable number of depth tokens does not have a fixed shape to record.</p>
+      <p>Thinking still costs: about 13 Hz against 56 Hz. The adaptive scheme makes depth reasoning usable, not free. And these are H100 numbers; the paper does not report speed on smaller GPUs, which is what a robot would more likely carry.</p>
+      <h3>Which pieces mattered</h3>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Change (LIBERO)</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td>Molmo2 → Molmo2-ER backbone (Long suite, discrete only)</td><td>77.6 → 83.6</td></tr>
+          <tr><td>Final hidden state → per-layer KV</td><td>94.0 → 95.9</td></tr>
+          <tr><td>1 → 8 flow samples per chunk</td><td>94.15 → 95.90</td></tr>
+          <tr><td>Full fine-tuning → LoRA</td><td>97.20 → 96.25</td></tr>
+          <tr><td>Full fine-tuning → action expert only</td><td>97.20 → 93.05</td></tr>
+        </tbody>
+      </table></div>
+      <p>The backbone is the largest single lever. LoRA — the cheap way to fine-tune — costs about a point on average and nearly three on the long-horizon suite.</p>
+      <h3>Limitations the authors list</h3>
+      <ul>
+        <li><strong>Open-loop chunks.</strong> A chunk, once started, runs to the end. The policy cannot react to a bump or a slip until the next chunk.</li>
+        <li><strong>Seams between chunks.</strong> Nothing in training enforces that one chunk ends where the next begins, so motion can jump at the boundary.</li>
+        <li><strong>Three robots.</strong> Out-of-the-box use covers only the three embodiments with large datasets. Any other robot needs fine-tuning.</li>
+      </ul>
+      <h3>Things a careful reader should add</h3>
+      <ul>
+        <li>All training used 32 to 64 H100 GPUs. “Deployable on affordable robots” describes the arm, not the compute needed to train or, possibly, to run the model.</li>
+        <li>Several benchmarks and the real-robot evaluations were run by the authors or their collaborators. That is normal for the field, and still a reason to wait for independent replication.</li>
+        <li>Fifty percent on new real tasks is the best in the comparison and well short of dependable.</li>
+      </ul>
+      <h3>Why it matters</h3>
+      <p>The individual ideas are incremental; the package is not. A strong VLA with its data, tokenizer, training code and weights all public, aimed at arms that cost thousands rather than hundreds of thousands, lowers the price of doing serious robot-learning research. The per-layer conditioning and the adaptive reasoning trick are both easy to borrow. And the 720-hour bimanual dataset is useful to anyone with a pair of similar arms, whether or not they use this model.</p>
+    <div class="folio"><span>Speed, Ablations, Limits</span><span>11</span></div>
+</section>
+
+    <section class="chapter" id="ch12" data-label="12 · Recap &amp; Quiz">
+<header class="chapter-head"><span class="num">Chapter 12</span><h2>Recap &amp; Quiz</h2></header>
+      <h3>Eight-line recap</h3>
+      <ol>
+        <li>Strong robot foundation models were closed, tied to expensive hardware, slow when they reasoned, or unreliable.</li>
+        <li>MolmoAct2 starts from Molmo2-ER, a VLM drilled on 3.3M spatial-reasoning examples.</li>
+        <li>It is trained on three cleaned, open datasets — bimanual YAM (720+ hours, new), SO-100/101 and DROID.</li>
+        <li>Actions are compressed into a 2,048-token vocabulary so the VLM can learn them as text.</li>
+        <li>A 621M flow-matching action expert reads the VLM’s keys and values at every one of 36 layers.</li>
+        <li>Training is staged: tokens first, then the expert behind a gradient wall, then joint fine-tuning.</li>
+        <li>MolmoAct2-Think adds depth tokens on a 10×10 grid and only regenerates cells that changed.</li>
+        <li>Results: 87.1% zero-shot on a real Franka, 97.2–98.1% on LIBERO, about 50% on new real bimanual tasks, up to 56 Hz.</li>
+      </ol>
+
+      <h3>Check yourself</h3>
+      <details class="q"><summary>What are the two halves of MolmoAct2, and which does most of the work at run time?</summary><div>A vision-language model (Molmo2-ER, about 4.4B parameters with its vision encoder) that understands the scene and instruction, and a 621M action expert that generates continuous action chunks by flow matching. At run time the VLM runs once per chunk and the expert runs ten refinement steps.</div></details><details class="q"><summary>Why build Molmo2-ER before touching robot data?</summary><div>General VLMs are weak at spatial questions — distance, pointing, free space — which are exactly what manipulation depends on. Fine-tuning on 3.3M embodied-reasoning examples raised the 13-benchmark average from 46.8 to 63.8, and that backbone alone lifted LIBERO-Long from 77.6% to 83.6%.</div></details><details class="q"><summary>What does per-layer KV conditioning change compared with the usual design?</summary><div>Instead of the action expert attending only to the VLM’s final hidden state, each of its 36 blocks cross-attends to the keys and values of the matching VLM layer. The expert gets early-layer geometric detail as well as late-layer abstraction. Worth about 1.9 points on LIBERO.</div></details><details class="q"><summary>Why is knowledge insulation on in post-training and off in fine-tuning?</summary><div>When first attached, the expert is random and its gradients would damage the VLM’s pre-trained features, so they are blocked. By fine-tuning the expert is competent and the data is from one robot, so letting the flow loss shape the VLM helps; the ablation shows full fine-tuning without insulation scoring best.</div></details><details class="q"><summary>How does MolmoAct2-Think avoid the latency of its predecessor?</summary><div>Depth is a 10×10 grid of tokens kept in a buffer. Each step, only cells whose image patch changed (cosine similarity below 0.996 against the previous frame) are re-decoded; the rest are replayed. In a mostly static scene that is a small fraction of the hundred.</div></details><details class="q"><summary>Why are random codes injected into the depth tokens during fine-tuning?</summary><div>At run time the depth tokens are the model’s own imperfect predictions. Replacing 10% with random codes in training teaches the policy to tolerate wrong depth rather than rely on it absolutely.</div></details><details class="q"><summary>Which result most tempers the headline numbers?</summary><div>Several candidates: about 50% success on new real bimanual tasks; 26% when objects are moved; roughly 20% on the MolmoBot simulation; and Think running at about 13 Hz against 56 Hz for the base model. Best-in-comparison is not the same as dependable.</div></details>
+
+      <h3>Glossary</h3>
+      <dl class="gloss">
+        <dt>VLA</dt><dd>Vision-language-action model: one network mapping images and an instruction to robot actions.</dd>
+        <dt>VLM / backbone</dt><dd>The vision-language model at the core of a VLA, pre-trained on web-scale image and text data.</dd>
+        <dt>Action reasoning model</dt><dd>The authors’ term for a VLA that produces intermediate spatial reasoning (here, depth) before acting.</dd>
+        <dt>Embodiment</dt><dd>A particular robot body: its arms, joints, gripper and cameras.</dd>
+        <dt>Action chunk</dt><dd>A short sequence of future actions predicted in one go — here up to one second.</dd>
+        <dt>Action expert</dt><dd>The smaller network that generates continuous action chunks from the VLM’s features.</dd>
+        <dt>Flow matching</dt><dd>Training a network to predict the direction from noise to data, then integrating that direction to generate samples.</dd>
+        <dt>Keys and values (K, V)</dt><dd>The per-token vectors an attention layer uses to decide what to attend to and what to retrieve.</dd>
+        <dt>Cross-attention</dt><dd>Attention where one network’s tokens look up information in another network’s tokens.</dd>
+        <dt>Knowledge insulation</dt><dd>Blocking the action expert’s gradients from flowing into the VLM, to protect its pre-trained knowledge.</dd>
+        <dt>FAST tokenizer</dt><dd>Compresses action chunks via a frequency transform, quantisation and byte-pair encoding.</dd>
+        <dt>LoRA</dt><dd>A cheap fine-tuning method that trains small add-on matrices instead of all weights.</dd>
+        <dt>Zero-shot / out of the box</dt><dd>Used on a task or scene with no additional training.</dd>
+        <dt>Open-loop</dt><dd>Executing a plan without checking feedback along the way.</dd>
+        <dt>CUDA Graphs</dt><dd>A GPU feature that records a fixed sequence of operations once and replays it with far less overhead.</dd>
+        <dt>LIBERO</dt><dd>A widely used simulated manipulation benchmark with four task suites.</dd>
+      </dl>
+      <nav class="pager" aria-label="Chapter navigation">
+        <a href="../umi-2402.10329/"><small>Related</small>UMI explainer</a>
+        <a class="next" href="https://arxiv.org/pdf/2605.02881"><small>Next</small>Read the original paper</a>
+      </nav>
+    <div class="folio"><span>Recap &amp; Quiz</span><span>12</span></div>
+</section>
+  </main>
+</div>
+
+<script src="../folio.js"></script>
+<script>
+/* Adaptive-depth toy: a 10x10 grid over a still tabletop. A gripper wanders; a cell's
+   depth code is "regenerated" when the gripper enters or leaves it, otherwise replayed
+   from the buffer. In "regenerate everything" mode all 100 cells are decoded each step. */
+(() => {
+  const root = document.getElementById('depthDemo'); if (!root) return;
+  const cv = root.querySelector('canvas'), ctx = cv.getContext('2d');
+  const nowEl = document.getElementById('dNow'), avgEl = document.getElementById('dAvg');
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const C = { ox: css('--oxblood') || '#8E2F2A', sage: css('--sage') || '#5f7a5a', sageT: css('--sage-tint') || '#e3ead9', rule: css('--rule') || '#d9cfbd', gold: css('--gold') || '#b08a3c', slate: css('--slate') || '#4b6584', sheet: css('--sheet') || '#fffdf8', ink: css('--ink-soft') || '#5b5246' };
+  const N = 10, S = 420, c = S / N;
+  let adaptive = true, prev = new Set(), sum = 0, n = 0, last = 0, flash = new Array(N * N).fill(0);
+  root.querySelectorAll('.seg button').forEach(b => b.addEventListener('click', () => {
+    adaptive = b.dataset.m === '1';
+    root.querySelectorAll('.seg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+    sum = 0; n = 0; prev = new Set();
+  }));
+  const pos = t => [S / 2 + 135 * Math.sin(t * 0.55) * Math.cos(t * 0.13), S / 2 + 120 * Math.sin(t * 0.37 + 1.2)];
+  const cover = (x, y) => { const s = new Set(); for (let i = 0; i < N; i++) for (let j = 0; j < N; j++) {
+    const cx = i * c, cy = j * c; if (x + 46 > cx && x - 46 < cx + c && y + 34 > cy && y - 34 < cy + c) s.add(j * N + i); } return s; };
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function tick(ms) {
+    const t = ms / 1000, [x, y] = pos(t);
+    if (ms - last > 180 || still) {            /* one "control step" */
+      last = ms; const cur = cover(x, y); let k = 0;
+      if (!adaptive || n === 0 && prev.size === 0) { k = 100; flash.fill(1); }
+      else { for (let i = 0; i < N * N; i++) if (cur.has(i) !== prev.has(i)) { flash[i] = 1; k++; } }
+      prev = cur; sum += k; n++;
+      nowEl.textContent = k; avgEl.textContent = (sum / n).toFixed(1) + ' / 100';
+    }
+    ctx.fillStyle = C.sheet; ctx.fillRect(0, 0, S, S);
+    /* still scene */
+    ctx.fillStyle = C.sageT; ctx.fillRect(0, S * 0.62, S, S * 0.38);
+    ctx.fillStyle = C.gold; ctx.beginPath(); ctx.arc(S * 0.22, S * 0.74, 22, 0, 7); ctx.fill();
+    ctx.fillStyle = C.slate; ctx.fillRect(S * 0.68, S * 0.66, 62, 46);
+    /* regenerated cells */
+    for (let i = 0; i < N * N; i++) if (flash[i] > 0.02) {
+      ctx.globalAlpha = Math.min(0.55, flash[i] * 0.55); ctx.fillStyle = C.ox;
+      ctx.fillRect((i % N) * c, Math.floor(i / N) * c, c, c); flash[i] *= 0.9;
+    }
+    ctx.globalAlpha = 1;
+    /* gripper */
+    ctx.strokeStyle = C.ink; ctx.lineWidth = 7; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(x, y - 30); ctx.lineTo(x, 0); ctx.stroke();
+    ctx.fillStyle = C.ink; ctx.fillRect(x - 40, y - 34, 80, 12);
+    ctx.beginPath(); ctx.moveTo(x - 34, y - 22); ctx.lineTo(x - 34, y + 30); ctx.moveTo(x + 34, y - 22); ctx.lineTo(x + 34, y + 30); ctx.stroke();
+    /* grid */
+    ctx.strokeStyle = C.rule; ctx.lineWidth = 1; ctx.beginPath();
+    for (let i = 1; i < N; i++) { ctx.moveTo(i * c, 0); ctx.lineTo(i * c, S); ctx.moveTo(0, i * c); ctx.lineTo(S, i * c); }
+    ctx.stroke();
+    if (!still) requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>
