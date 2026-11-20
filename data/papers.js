@@ -55,6 +55,16 @@ const PAPERS = {
         minutes: 35,
         desc: 'How a $371 hand-held gripper and one GoPro replaced the robot during data collection: fisheye lens and side mirrors for context and depth, visual-inertial SLAM to recover the hand\'s path, and the two interface choices — latency matching and relative trajectories — that let the same policy run on different arms. Covers all four capability tasks, the 30-location in-the-wild experiment, and an interactive latency demo.',
         tags: ['explainer', 'robotics', 'data collection', 'imitation learning']
+      },
+      {
+        href: 'explainers/molmoact2-2605.02881/',
+        title: 'MolmoAct2: Action Reasoning Models for Real-World Deployment — explained in depth',
+        authors: 'Haoquan Fang, Jiafei Duan et al. · Allen Institute for AI, University of Washington',
+        stamp: 'arXiv:2605.02881 [cs.RO]',
+        year: 2026,
+        minutes: 40,
+        desc: 'An open vision-language-action model built for affordable arms: a spatial-reasoning backbone (Molmo2-ER), three cleaned open datasets including 720+ hours of bimanual YAM data, an action expert that reads the VLM at every layer, staged training with knowledge insulation, and a Think variant that reasons about depth but only re-decodes what changed. Covers every results table, the ablations, the speed numbers and the limits, with an interactive adaptive-depth demo.',
+        tags: ['explainer', 'robotics', 'VLA', 'flow matching']
       }
     ]
   },
@@ -182,6 +192,9 @@ const PAPERS = {
         { arxiv: "2510.10903", title: "Towards a Unified Understanding of Robot Manipulation: A Comprehensive Survey", authors: "", year: 2025,
           desc: "A very large survey of manipulation learning; the diffusion and flow policy sections double as a bibliography with 1000+ references.",
           tags: ["survey"] },
+        { arxiv: "2605.02881", title: "MolmoAct2: Action Reasoning Models for Real-World Deployment", authors: "Haoquan Fang, Jiafei Duan et al. · Allen Institute for AI", year: 2026,
+          desc: "Fully open VLA for low-cost arms: a spatial-reasoning VLM backbone, a flow-matching action expert conditioned on the VLM's keys and values at every layer, and an adaptive depth-reasoning variant. Releases 720+ hours of bimanual YAM data.",
+          tags: ["2026", "VLA", "flow matching"] },
         { arxiv: "2603.12480", title: "One-Step Flow Policy: Self-Distillation for Fast Visuomotor Policies", authors: "", year: 2026,
           desc: "Reaches single-step action generation through self-distillation, with no separate pretrained teacher.",
           tags: ["2026", "fast inference"] },
