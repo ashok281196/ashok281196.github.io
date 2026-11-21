@@ -24,11 +24,11 @@ const PAPERS = {
   explainers: {
     slug: 'explainers',
     title: 'Paper Explainers',
-    blurb: 'Landmark papers explained from zero — book-style walkthroughs with analogies, interactive demos, flowcharts and a quiz at the end. No prior background assumed.',
+    blurb: 'Landmark papers explained from zero: book-style walkthroughs with analogies, interactive demos, flowcharts and a quiz at the end. No prior background assumed.',
     items: [
       {
         href: 'explainers/ddpm-2006.11239/',
-        title: 'Denoising Diffusion Probabilistic Models — explained for absolute beginners',
+        title: 'Denoising Diffusion Probabilistic Models, explained for absolute beginners',
         authors: 'Jonathan Ho, Ajay Jain, Pieter Abbeel · UC Berkeley',
         stamp: 'arXiv:2006.11239 [cs.LG]',
         year: 2020,
@@ -38,7 +38,7 @@ const PAPERS = {
       },
       {
         href: 'explainers/diffusion-policy-2303.04137/',
-        title: "Diffusion Policy: Visuomotor Policy Learning via Action Diffusion — explained in depth",
+        title: "Diffusion Policy: Visuomotor Policy Learning via Action Diffusion, explained in depth",
         authors: "Cheng Chi, Zhenjia Xu et al. · Columbia, Toyota Research Institute, MIT",
         stamp: 'arXiv:2303.04137 [cs.RO]',
         year: 2023,
@@ -48,17 +48,17 @@ const PAPERS = {
       },
       {
         href: 'explainers/umi-2402.10329/',
-        title: 'Universal Manipulation Interface: In-The-Wild Robot Teaching Without In-The-Wild Robots — explained in depth',
+        title: 'Universal Manipulation Interface: In-The-Wild Robot Teaching Without In-The-Wild Robots, explained in depth',
         authors: 'Cheng Chi, Zhenjia Xu et al. · Stanford, Columbia, Toyota Research Institute',
         stamp: 'arXiv:2402.10329 [cs.RO]',
         year: 2024,
         minutes: 35,
-        desc: 'How a $371 hand-held gripper and one GoPro replaced the robot during data collection: fisheye lens and side mirrors for context and depth, visual-inertial SLAM to recover the hand\'s path, and the two interface choices — latency matching and relative trajectories — that let the same policy run on different arms. Covers all four capability tasks, the 30-location in-the-wild experiment, and an interactive latency demo.',
+        desc: 'How a $371 hand-held gripper and one GoPro replaced the robot during data collection: fisheye lens and side mirrors for context and depth, visual-inertial SLAM to recover the hand\'s path, and the two interface choices (latency matching and relative trajectories) that let the same policy run on different arms. Covers all four capability tasks, the 30-location in-the-wild experiment, and an interactive latency demo.',
         tags: ['explainer', 'robotics', 'data collection', 'imitation learning']
       },
       {
         href: 'explainers/molmoact2-2605.02881/',
-        title: 'MolmoAct2: Action Reasoning Models for Real-World Deployment — explained in depth',
+        title: 'MolmoAct2: Action Reasoning Models for Real-World Deployment, explained in depth',
         authors: 'Haoquan Fang, Jiafei Duan et al. · Allen Institute for AI, University of Washington',
         stamp: 'arXiv:2605.02881 [cs.RO]',
         year: 2026,
