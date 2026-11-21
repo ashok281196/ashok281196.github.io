@@ -4,12 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
-<meta name="theme-color" content="#F7F1E5">
+<meta name="theme-color" content="#ffffff">
 <title>UMI Explained</title>
 <meta name="description" content="Universal Manipulation Interface, explained from zero: hand-held grippers, a GoPro, and the interface design that lets robots learn from demos collected without robots.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300..900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="../folio.css">
 <style>
 /* page-only additions on top of folio.css (shared rules mirror the Diffusion Policy explainer) */
@@ -33,7 +33,7 @@ dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-s
 .trio .card li { margin-bottom: var(--s1); }
 .verdict { display: inline-block; font: 600 var(--fs-xs) var(--sans); padding: 3px 8px; border-radius: 999px; margin-top: var(--s2); }
 .v-bad { background: var(--oxblood-tint); color: var(--oxblood); }
-.v-mid { background: var(--gold-tint); color: #7D5D1F; }
+.v-mid { background: var(--gold-tint); color: #9a5b00; }
 .v-good { background: var(--sage-tint); color: var(--sage); }
 td.best { font-weight: 700; color: var(--oxblood); }
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: var(--s3); margin: var(--s5) 0; }
@@ -42,7 +42,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
 .stat span { font: var(--fs-xs)/1.4 var(--sans); color: var(--ink-soft); }
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; margin-bottom: var(--s3); }
 .seg button { min-height: 44px; border: 0; border-radius: 7px; background: transparent; font: 500 var(--fs-xs)/1.25 var(--sans); color: var(--ink-soft); cursor: pointer; padding: 4px 6px; }
-.seg button[aria-pressed="true"] { background: var(--oxblood); color: #FFF8F2; }
+.seg button[aria-pressed="true"] { background: var(--oxblood); color: #ffffff; }
 .seg.two { grid-template-columns: repeat(2, 1fr); }
 .sliders { display: grid; gap: var(--s3); margin: var(--s3) 0; }
 .sliders label { display: grid; grid-template-columns: 1fr auto; gap: 2px var(--s3); font-size: var(--fs-sm); color: var(--ink-soft); }
@@ -52,7 +52,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
 .frame-fig svg { width: 100%; max-width: 520px; margin: 0 auto; font-family: var(--sans); }
 .six { counter-reset: six; list-style: none; padding: 0; display: grid; gap: var(--s3); }
 .six li { counter-increment: six; position: relative; margin: 0; padding: var(--s4) var(--s4) var(--s4) calc(var(--s4) + 40px); background: var(--sheet); border: 1px solid var(--rule); border-radius: var(--radius-lg); box-shadow: var(--shadow-card); }
-.six li::before { content: counter(six); position: absolute; left: var(--s4); top: var(--s4); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--oxblood); color: #FFF8F2; font: 600 var(--fs-sm) var(--sans); }
+.six li::before { content: counter(six); position: absolute; left: var(--s4); top: var(--s4); width: 28px; height: 28px; border-radius: 50%; display: grid; place-items: center; background: var(--oxblood); color: #ffffff; font: 600 var(--fs-sm) var(--sans); }
 .six b { display: block; margin-bottom: 2px; }
 .six span { font-size: var(--fs-sm); color: var(--ink-soft); }
 </style>
@@ -476,7 +476,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
     ctx.beginPath(); ctx.moveTo(gx, 30); ctx.lineTo(gx, 96); ctx.stroke();
     ctx.fillRect(gx - 34, 92, 68, 12);
     ctx.beginPath(); ctx.moveTo(gx - 28, 104); ctx.lineTo(gx - 28, 172); ctx.moveTo(gx + 28, 104); ctx.lineTo(gx + 28, 172); ctx.stroke();
-    ctx.fillStyle = C.ink; ctx.font = '500 17px Inter, system-ui, sans-serif'; ctx.textAlign = 'center';
+    ctx.fillStyle = C.ink; ctx.font = '500 17px Figtree, system-ui, sans-serif'; ctx.textAlign = 'center';
     ctx.fillText('gripper', gx, 22); ctx.fillText('target', tx, 256);
     errSum += Math.abs(tx - gx); errN++;
     if (errN % 12 === 0 || still) errEl.textContent = (errSum / errN / 6).toFixed(1) + ' cm' + (matched ? ' (on target)' : '');
