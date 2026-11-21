@@ -4,11 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="color-scheme" content="light">
-<meta name="theme-color" content="#F7F1E5">
+<meta name="theme-color" content="#ffffff">
 <title>Diffusion Policy Explained</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Literata:ital,opsz,wght@0,7..72,400;0,7..72,600;0,7..72,700;1,7..72,400&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Figtree:wght@300..900&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/KaTeX/0.16.9/katex.min.css">
 <link rel="stylesheet" href="../folio.css">
 <style>
@@ -30,7 +30,7 @@ dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-s
 .demo canvas { width: 100%; height: auto; aspect-ratio: 600 / 360; display: block; border-radius: var(--radius); background: var(--sheet); box-shadow: var(--shadow-card); touch-action: manipulation; }
 .seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; padding: 4px; background: var(--sheet); border: 1px solid var(--rule); border-radius: 10px; margin-bottom: var(--s3); }
 .seg button { min-height: 44px; border: 0; border-radius: 7px; background: transparent; font: 500 var(--fs-xs)/1.25 var(--sans); color: var(--ink-soft); cursor: pointer; padding: 4px 6px; }
-.seg button[aria-pressed="true"] { background: var(--oxblood); color: #FFF8F2; }
+.seg button[aria-pressed="true"] { background: var(--oxblood); color: #ffffff; }
 .demo-status { display: flex; flex-wrap: wrap; gap: var(--s2) var(--s4); align-items: center; justify-content: space-between; margin-top: var(--s3); font-size: var(--fs-sm); color: var(--ink-soft); }
 .demo-status b { color: var(--ink); }
 .tally { font: 500 var(--fs-xs) var(--mono); color: var(--ink-faint); }
@@ -57,7 +57,7 @@ dl.gloss dd { margin: var(--s1) 0 0; font-size: var(--fs-sm); color: var(--ink-s
 .trio .card li { margin-bottom: var(--s1); }
 .verdict { display: inline-block; font: 600 var(--fs-xs) var(--sans); padding: 3px 8px; border-radius: 999px; margin-top: var(--s2); }
 .v-bad { background: var(--oxblood-tint); color: var(--oxblood); }
-.v-mid { background: var(--gold-tint); color: #7D5D1F; }
+.v-mid { background: var(--gold-tint); color: #9a5b00; }
 .v-good { background: var(--sage-tint); color: var(--sage); }
 td.best { font-weight: 700; color: var(--oxblood); }
 .stat-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 140px), 1fr)); gap: var(--s3); margin: var(--s5) 0; }
@@ -599,9 +599,9 @@ td.best { font-weight: 700; color: var(--oxblood); }
     for (const s of [-1, 1]) { ctx.beginPath(); for (let y = 330; y >= 36; y -= 4) ctx.lineTo(route(s, y), y); ctx.stroke(); }
     ctx.setLineDash([]);
     ctx.fillStyle = css('--gold'); ctx.beginPath(); ctx.roundRect(OB.x, OB.y, OB.w, OB.h, 8); ctx.fill();
-    ctx.fillStyle = '#FFFCF6'; ctx.font = '600 18px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('block', 300, OB.y + OB.h / 2 + 5);
+    ctx.fillStyle = '#FFFCF6'; ctx.font = '600 18px Figtree, sans-serif'; ctx.textAlign = 'center'; ctx.fillText('block', 300, OB.y + OB.h / 2 + 5);
     ctx.fillStyle = css('--sage'); ctx.beginPath(); ctx.arc(GOAL.x, GOAL.y, 14, 0, 7); ctx.fill();
-    ctx.fillStyle = css('--ink-faint'); ctx.font = '500 17px Inter, sans-serif'; ctx.fillText('goal', GOAL.x + 44, GOAL.y + 4); ctx.fillText('start', START.x + 46, START.y + 4);
+    ctx.fillStyle = css('--ink-faint'); ctx.font = '500 17px Figtree, sans-serif'; ctx.fillText('goal', GOAL.x + 44, GOAL.y + 4); ctx.fillText('start', START.x + 46, START.y + 4);
     ctx.fillText('demo: left', 105, 200); ctx.fillText('demo: right', 495, 200);
     if (plan.length) { ctx.strokeStyle = css('--oxblood'); ctx.globalAlpha = .3; ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.beginPath(); plan.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke(); ctx.globalAlpha = 1; }
     ctx.strokeStyle = css('--slate'); ctx.lineWidth = 3; ctx.lineJoin = 'round'; ctx.beginPath(); trail.forEach(p => ctx.lineTo(p.x, p.y)); ctx.stroke();
