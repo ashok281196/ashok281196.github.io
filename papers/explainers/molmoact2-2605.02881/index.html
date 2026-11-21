@@ -95,7 +95,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
       </svg>
       <span class="eyebrow">A Beginner’s Guide · arXiv 2605.02881</span>
       <h1>MolmoAct2</h1>
-      <p class="lead">Action reasoning models for real-world deployment — an open robot foundation model built to run on arms a small lab can afford, and to think about depth without stopping to think.</p>
+      <p class="lead">Action reasoning models for real-world deployment: an open robot foundation model built to run on arms a small lab can afford, and to reason about depth without a large latency cost.</p>
       <div class="paper-meta">
         <span class="chip accent">Haoquan Fang* · Jiafei Duan* · … · Ali Farhadi · Dieter Fox · Ranjay Krishna (29 authors)</span>
         <span class="chip">Allen Institute for AI · University of Washington · and others</span>
@@ -104,7 +104,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
       <p class="meta">TWELVE CHAPTERS · ~40 MIN READ · <a href="https://arxiv.org/pdf/2605.02881">ORIGINAL PDF</a> · PREREQUISITE (OPTIONAL): <a href="../diffusion-policy-2303.04137/">DIFFUSION POLICY EXPLAINER</a></p>
     </section>
 
-    <div class="callout key"><div><strong>The whole paper in one sentence</strong><p>Take a vision-language model that has been drilled on spatial reasoning, bolt on a fast action generator that reads the model’s internals at <em>every</em> layer instead of only the last, train it on three cleaned-up open datasets for three affordable robots, and release everything — then add an optional mode that reasons about depth but only re-thinks the parts of the scene that changed.</p></div></div>
+    <div class="callout key"><div><strong>The whole paper in one sentence</strong><p>Take a vision-language model that has been drilled on spatial reasoning, bolt on a fast action generator that reads the model’s internals at <em>every</em> layer instead of only the last, train it on three cleaned-up open datasets for three affordable robots, and release everything. Then add an optional mode that reasons about depth but only re-thinks the parts of the scene that changed.</p></div></div>
 
     <div class="stat-row">
       <div class="stat"><b>87.1%</b><span>real-world success on a DROID Franka with no fine-tuning (π0.5: 45.2%)</span></div>
@@ -115,16 +115,16 @@ td.best { font-weight: 700; color: var(--oxblood); }
 
     <section class="chapter" id="ch1" data-label="1 · The Deployment Gap">
 <header class="chapter-head"><span class="num">Chapter 1</span><h2>The Deployment Gap</h2></header>
-      <p class="dropcap">By 2026 the recipe for a generalist robot policy was settled: a vision-language-action model, or VLA. One network takes camera images and an instruction and emits motor commands. The <a href="../diffusion-policy-2303.04137/">Diffusion Policy</a> and <a href="../umi-2402.10329/">UMI</a> explainers cover two of its ancestors. The open question was no longer whether this works in a demo. It was whether an ordinary lab could actually <em>use</em> one.</p>
+      <p class="dropcap">By 2026 the recipe for a generalist robot policy was settled: a vision-language-action model, or VLA. One network takes camera images and an instruction and emits motor commands. The <a href="../diffusion-policy-2303.04137/">Diffusion Policy</a> and <a href="../umi-2402.10329/">UMI</a> explainers cover two of its ancestors. The open question was no longer whether this works in a demo. It was whether an ordinary lab could <em>use</em> one.</p>
       <p>The authors list four reasons the answer was mostly no.</p>
       <div class="trio">
         <div class="card" style="--c:var(--slate)"><h4>Closed</h4><p>The strongest models keep their data, training recipe and often their weights private. You cannot inspect them, retrain them or fix them.</p></div>
         <div class="card" style="--c:var(--gold)"><h4>Expensive bodies</h4><p>Open-weight models such as π0 and π0.5 work out of the box, but mainly on costly or specialised robot platforms.</p></div>
-        <div class="card" style="--c:var(--oxblood)"><h4>Slow thinking</h4><p>Models that reason before acting — predicting depth, goal images or trajectories — generate hundreds of tokens per step, so the robot waits.</p></div>
+        <div class="card" style="--c:var(--oxblood)"><h4>Slow thinking</h4><p>Models that reason before acting (predicting depth, goal images or trajectories) generate hundreds of tokens per step, so the robot waits.</p></div>
         <div class="card" style="--c:var(--sage)"><h4>Not reliable enough</h4><p>After fine-tuning, success rates are still below what you would trust unattended.</p></div>
       </div>
-      <p>MolmoAct2 is an attempt at all four at once. It is the successor to MolmoAct, an earlier “action reasoning model” from the same group that reasoned about depth and motion traces before every action — and paid for it in latency. The new paper keeps the reasoning idea, makes it optional and cheap, and spends most of its effort on the unglamorous parts: data cleaning, an open tokenizer, a better wire between the two halves of the model, and a very large evaluation.</p>
-      <div class="callout note"><div><strong>What “fully open” means here</strong><p>Weights, training code and the complete training data are released — including the action tokenizer and the list of what it was trained on. That last part is unusual; most releases stop at weights.</p></div></div>
+      <p>MolmoAct2 is an attempt at all four at once. It is the successor to MolmoAct, an earlier “action reasoning model” from the same group that reasoned about depth and motion traces before every action, at a cost in latency. The new paper keeps the reasoning idea, makes it optional and cheap, and spends most of its effort on engineering: data cleaning, an open tokenizer, a better wire between the two halves of the model, and a very large evaluation.</p>
+      <div class="callout note"><div><strong>What “fully open” means here</strong><p>Weights, training code and the complete training data are released, including the action tokenizer and the list of what it was trained on. That last part is unusual; most releases stop at weights.</p></div></div>
     <div class="folio"><span>The Deployment Gap</span><span>1</span></div>
 </section>
 
@@ -134,7 +134,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
       <h3>Half one: the vision-language model</h3>
       <p>A VLM is a language model that also accepts images. A vision encoder cuts each image into patches and turns them into vectors; a small connector projects those into the same space as word embeddings; a large transformer then processes image tokens and text tokens together. It is pre-trained on enormous amounts of web data, so it already knows what a mug is and what “to the left of” means.</p>
       <h3>Half two: the action expert</h3>
-      <p>Words are discrete; motor commands are continuous and fast. So most recent VLAs add a second, smaller network whose only job is to produce a short burst of future actions — an <em>action chunk</em> — conditioned on what the VLM understood. It is usually trained with diffusion or its close relative, flow matching: start from noise, refine it into a trajectory.</p>
+      <p>Words are discrete; motor commands are continuous and fast. So most recent VLAs add a second, smaller network whose only job is to produce a short burst of future actions (an <em>action chunk</em>), conditioned on what the VLM understood. It is usually trained with diffusion or its close relative, flow matching: start from noise, refine it into a trajectory.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Part of MolmoAct2</th><th>What it is</th><th>Size</th></tr></thead>
         <tbody>
@@ -151,13 +151,13 @@ td.best { font-weight: 700; color: var(--oxblood); }
         <li><strong>Discrete:</strong> the language model writes special action tokens, one after another, exactly as it would write a sentence. Simple, and it forces the VLM itself to understand actions. Slow, because each token is a separate forward pass.</li>
         <li><strong>Continuous:</strong> the action expert produces the whole chunk at once in a handful of refinement steps. Fast and smooth. This is the default at run time.</li>
       </ul>
-      <div class="callout tip"><div><strong>Why keep both</strong><p>The discrete path is a teacher: learning to write action tokens makes the backbone’s internal features action-aware. The continuous path is the worker: it reads those features and produces the motion. Chapter 11 shows the measured cost of using the teacher as the worker — about four times slower.</p></div></div>
+      <div class="callout tip"><div><strong>Why keep both</strong><p>The discrete path is a teacher: learning to write action tokens makes the backbone’s internal features action-aware. The continuous path is the worker: it reads those features and produces the motion. Chapter 11 shows the measured cost of using the teacher as the worker: about four times slower.</p></div></div>
     <div class="folio"><span>Anatomy of a VLA</span><span>2</span></div>
 </section>
 
     <section class="chapter" id="ch3" data-label="3 · A Backbone That Sees Space">
 <header class="chapter-head"><span class="num">Chapter 3</span><h2>A Backbone That Sees Space</h2></header>
-      <p class="dropcap">A general VLM is good at naming things and weak at geometry. Ask which of two cups is closer, or to point at the free space on a shelf, and it often fails. A robot needs exactly those answers. So before any robot data is involved, the authors build a better backbone, called <strong>Molmo2-ER</strong> (“embodied reasoning”).</p>
+      <p class="dropcap">A general VLM is good at naming things and weak at geometry. Ask which of two cups is closer, or to point at the free space on a shelf, and it often fails. A robot needs those answers. So before any robot data is involved, the authors build a better backbone, called <strong>Molmo2-ER</strong> (“embodied reasoning”).</p>
       <p>They start from a mid-training checkpoint of Molmo2, a 4-billion-parameter VLM, and fine-tune it on about 3.3 million examples of spatial and embodied questions.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Kind of training example</th><th>Samples</th></tr></thead>
@@ -189,7 +189,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
 
     <section class="chapter" id="ch4" data-label="4 · Three Datasets">
 <header class="chapter-head"><span class="num">Chapter 4</span><h2>Three Datasets</h2></header>
-      <p class="dropcap">The second pillar is data, and the paper’s position is blunt: the public robot datasets are broad but messy. Episodes where the robot sits idle, failed attempts left in, instructions repeated word for word, and community uploads labelled things like “lerobot_test”. A model trained on that learns the mess.</p>
+      <p class="dropcap">The second contribution is data. The paper’s position is that the public robot datasets are broad but messy. Episodes where the robot sits idle, failed attempts left in, instructions repeated word for word, and community uploads labelled things like “lerobot_test”. A model trained on that learns the mess.</p>
       <p>MolmoAct2 is trained mainly on three datasets, one per target robot, each cleaned or collected for the purpose.</p>
       <div class="trio">
         <div class="card" style="--c:var(--oxblood)"><h4>BimanualYAM <span class="verdict v-good">new</span></h4><p>Collected by the authors over two months on a two-arm YAM rig.</p><ul><li>34.5K demonstrations</li><li>720+ hours, 28+ tasks</li><li>Rig costs under $6,000</li><li>Folding clothes, untangling cables, bussing tables, packing medication</li></ul></div>
@@ -197,35 +197,35 @@ td.best { font-weight: 700; color: var(--oxblood); }
         <div class="card" style="--c:var(--slate)"><h4>DROID <span class="verdict v-mid">cleaned</span></h4><p>The well-known Franka dataset, with dead time removed.</p><ul><li>74,604 episodes</li><li>17.8M frames</li><li>Idle segments cut; richer instructions</li></ul></div>
       </div>
       <h3>The YAM rig</h3>
-      <p>The bimanual setup is deliberately ordinary: two YAM arms, Intel RealSense D435 and D405 cameras, an off-the-shelf extendable desk mount and an IKEA table. The paper calls the resulting dataset the largest open bimanual dataset to date. Collection rules capped how many failed retries and how much do-nothing time a demonstration could contain.</p>
+      <p>The bimanual setup uses ordinary parts: two YAM arms, Intel RealSense D435 and D405 cameras, an off-the-shelf extendable desk mount and an IKEA table. The paper calls the resulting dataset the largest open bimanual dataset to date. Collection rules capped how many failed retries and how much do-nothing time a demonstration could contain.</p>
       <h3>Filtering the community data</h3>
-      <p>The SO-100 filter is worth knowing as a pattern. A dataset survives only if it passes (1) structural checks, (2) is not just somebody’s evaluation run, (3) has a usable licence, and (4) clears a learned quality gate — a reward model scores the last few episodes, and the dataset is kept only if it scores above a threshold set from human-audited examples.</p>
+      <p>The SO-100 filter has four stages. A dataset survives only if it passes (1) structural checks, (2) is not just somebody’s evaluation run, (3) has a usable licence, and (4) clears a learned quality gate. For that gate, a reward model scores the last few episodes, and the dataset is kept only if it scores above a threshold set from human-audited examples.</p>
       <h3>Re-writing the instructions</h3>
-      <p>A language model re-annotated episodes from sampled frames plus the original instruction, with a randomly chosen target length so phrasing varies. Unique instructions rose from 71,121 to 146,485 — from 22% to 46% of the relabelled data. A policy that has only ever heard one phrasing of a task is brittle to the second.</p>
+      <p>A language model re-annotated episodes from sampled frames plus the original instruction, with a randomly chosen target length so phrasing varies. Unique instructions rose from 71,121 to 146,485, from 22% to 46% of the relabelled data. A policy that has only ever heard one phrasing of a task is brittle to the second.</p>
     <div class="folio"><span>Three Datasets</span><span>4</span></div>
 </section>
 
     <section class="chapter" id="ch5" data-label="5 · Actions as Tokens">
 <header class="chapter-head"><span class="num">Chapter 5</span><h2>Actions as Tokens</h2></header>
-      <p class="dropcap">For the language model to “write” actions, a second of robot motion has to become a short string of tokens. The naive way — one token per joint per timestep — produces hundreds of tokens for a 30 Hz bimanual arm, most of them nearly identical to their neighbours. Smooth motion is highly compressible, and the tokenizer should exploit that.</p>
+      <p class="dropcap">For the language model to “write” actions, a second of robot motion has to become a short string of tokens. The naive way, one token per joint per timestep, produces hundreds of tokens for a 30 Hz bimanual arm, most of them nearly identical to their neighbours. Smooth motion is highly compressible, and the tokenizer should exploit that.</p>
       <p>MolmoAct2 uses the FAST scheme, re-implemented and re-trained in the open as <strong>MolmoAct2-FAST</strong>.</p>
       <ol>
         <li><strong>Normalise.</strong> Pad every action to 32 dimensions (so different robots share one format) and scale each dimension using its 1st-to-99th percentile range. Grippers are handled separately.</li>
         <li><strong>Go to frequency space.</strong> A one-second chunk of smooth motion is mostly low-frequency. Transform it so a few coefficients carry almost everything.</li>
         <li><strong>Quantise.</strong> Round the coefficients; most high-frequency ones become zero.</li>
-        <li><strong>Compress.</strong> Run byte-pair encoding — the same trick text tokenizers use — to merge common patterns into single tokens.</li>
+        <li><strong>Compress.</strong> Run byte-pair encoding, the same method text tokenizers use, to merge common patterns into single tokens.</li>
       </ol>
       <p>The result is a vocabulary of 2,048 action tokens, trained on one million one-second action sequences drawn mostly from the three target robots in equal shares.</p>
       <div class="callout note"><div><strong>An analogy</strong><p>It is JPEG for motion. JPEG does not store every pixel; it stores how much of each spatial frequency a block contains and throws away what the eye will not miss. FAST stores how much of each temporal frequency a trajectory contains and throws away what the motor will not miss.</p></div></div>
-      <p>The robot’s own state — joint angles, gripper opening — gets a simpler treatment: each normalised value is rounded into one of 256 state tokens. The prompt also carries plain-text tags naming the robot and control mode, so one model can tell a bimanual YAM in joint-position mode from a Franka.</p>
+      <p>The robot’s own state (joint angles, gripper opening) gets a simpler treatment: each normalised value is rounded into one of 256 state tokens. The prompt also carries plain-text tags naming the robot and control mode, so one model can tell a bimanual YAM in joint-position mode from a Franka.</p>
     <div class="folio"><span>Actions as Tokens</span><span>5</span></div>
 </section>
 
     <section class="chapter" id="ch6" data-label="6 · Per-Layer KV Conditioning">
 <header class="chapter-head"><span class="num">Chapter 6</span><h2>Per-Layer KV Conditioning</h2></header>
-      <p class="dropcap">This is the paper’s main architectural idea, and it is about a wire.</p>
-      <p>The action expert has to be told what the VLM understood. The usual way is to take the VLM’s <em>final</em> hidden state — the output of its last layer — and let the expert attend to it. That is one summary, taken at the very end, after 36 layers have each reshaped the information toward predicting the next token.</p>
-      <p>But different layers of a transformer hold different things. Early layers are close to raw visual detail: edges, positions, textures. Late layers are abstract: “the red block”, “task nearly done”. A hand reaching for an object needs both the abstract goal and the precise geometry — and the geometry has been partly washed out by the last layer.</p>
+      <p class="dropcap">This is the paper’s main architectural idea. It concerns how the two halves are connected.</p>
+      <p>The action expert has to be told what the VLM understood. The usual way is to take the VLM’s <em>final</em> hidden state, the output of its last layer, and let the expert attend to it. That is one summary, taken at the very end, after 36 layers have each reshaped the information toward predicting the next token.</p>
+      <p>But different layers of a transformer hold different things. Early layers are close to raw visual detail: edges, positions, textures. Late layers are abstract: “the red block”, “task nearly done”. A hand reaching for an object needs both the abstract goal and the precise geometry, and the geometry has been partly washed out by the last layer.</p>
       <figure class="frame-fig">
         <svg viewBox="0 0 520 330" role="img" aria-label="Two stacks of layers side by side. Each layer of the vision-language model on the left sends its keys and values to the matching block of the action expert on the right.">
           <text x="130" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="var(--slate)">VLM · 36 layers</text>
@@ -249,7 +249,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
           <text x="392" y="314" text-anchor="middle" font-size="14" fill="var(--ink-soft)">noisy actions → actions</text>
           <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0 0L10 5L0 10z" fill="var(--gold)"/></marker></defs>
         </svg>
-        <figcaption><b>Figure 6.1</b> — Per-layer KV conditioning (after the paper’s Figure 4). The expert is built with the same depth as the VLM so that block <i>n</i> can read layer <i>n</i>.</figcaption>
+        <figcaption><b>Figure 6.1.</b> Per-layer KV conditioning (after the paper’s Figure 4). The expert is built with the same depth as the VLM so that block <i>n</i> can read layer <i>n</i>.</figcaption>
       </figure>
       <h3>What “K” and “V” are</h3>
       <p>Inside each attention layer, every token is turned into a <em>key</em> (“what I am about”) and a <em>value</em> (“what I contribute if you attend to me”). These are the layer’s working representation of the scene and instruction. MolmoAct2 takes the keys and values from each VLM layer, passes them through small learned adapters to match the expert’s width, and lets the matching expert block cross-attend to them.</p>
@@ -266,7 +266,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
       <h3>How the expert makes an action: flow matching</h3>
       <p>The expert is trained to turn noise into an action chunk along a straight line. Pick a real chunk <i>a</i>, a random noise sample ε and a random time <i>t</i> between 0 and 1, and blend them:</p>
       <p class="eq">x<sub>t</sub> = (1 − t)·ε + t·a<small>at t = 0 it is pure noise; at t = 1 it is the real action chunk</small></p>
-      <p>The network sees x<sub>t</sub> and must predict the direction from noise to data, which for a straight line is simply <i>a − ε</i>. The loss is the squared error on that direction, ignoring padded timesteps and unused dimensions. At run time you start from fresh noise and take ten small steps along the predicted direction. Ten forward passes of a 621M network, instead of a hundred or more passes of the 4B language model.</p>
+      <p>The network sees x<sub>t</sub> and must predict the direction from noise to data, which for a straight line is <i>a − ε</i>. The loss is the squared error on that direction, ignoring padded timesteps and unused dimensions. At run time you start from fresh noise and take ten small steps along the predicted direction. Ten forward passes of a 621M network, instead of a hundred or more passes of the 4B language model.</p>
     <div class="folio"><span>Per-Layer KV Conditioning</span><span>6</span></div>
 </section>
 
@@ -277,14 +277,14 @@ td.best { font-weight: 700; color: var(--oxblood); }
         <div class="f2-head"><b>From a VLM to a robot policy</b><span>three stages</span></div>
         <div class="f2-track" role="list"><div class="f2-step is-start" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 5v14l11-7z" fill="currentColor" stroke="none"/></svg></span><div class="f2-card"><span class="k">Begin</span><b>Molmo2-ER, a VLM tuned for spatial reasoning</b><p>It can point, count, judge distances and answer questions about scenes. It cannot move a robot yet.</p></div></div><div class="f2-phase" aria-hidden="true">① Pre-train · 200K steps</div><div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="5" width="5" height="5" rx="1"/><rect x="10" y="5" width="5" height="5" rx="1"/><rect x="17" y="5" width="4" height="5" rx="1"/><rect x="3" y="14" width="5" height="5" rx="1"/><rect x="10" y="14" width="5" height="5" rx="1"/></svg><i>1</i></span><div class="f2-card"><span class="k">Stage A</span><b>Learn actions as words</b><p>Robot state and one-second action chunks become discrete tokens. The VLM learns to write them, like any other text. No continuous head exists yet.</p><code>90% robot data · 10% multimodal · 64 H100s · ~5,760 GPU-hours</code></div></div><div class="f2-phase" aria-hidden="true">② Post-train · 100K steps</div><div class="f2-step is-net" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12c2.5-6 5-6 7.5 0s5 6 7.5 0 3.5-4 5-2"/></svg><i>2</i></span><div class="f2-card"><span class="k">Stage B</span><b>Attach the flow-matching action expert</b><p>A 621M-parameter transformer learns continuous action chunks while the VLM keeps predicting tokens.</p><code>loss = L_LLM + L_flow · 4 noise samples per chunk</code></div></div><div class="f2-step is-dec" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg><i>3</i></span><div class="f2-card"><span class="k">Insulate</span><b>Keep the expert’s gradients out of the VLM</b><p>The VLM’s keys and values are detached before the expert reads them, so a randomly initialised expert cannot scramble what the backbone knows.</p></div></div><div class="f2-phase" aria-hidden="true">③ Fine-tune · 50K–100K steps</div><div class="f2-step is-proc" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h8M8 20v-6l6-6 4 2"/><circle cx="8" cy="14" r="1.6"/><circle cx="14" cy="8" r="1.6"/><path d="M18 10l2-1M18 10l1 2"/></svg><i>4</i></span><div class="f2-card"><span class="k">Stage C</span><b>Specialise to one robot</b><p>Robot-only data. Insulation is switched off so flow gradients now shape the VLM too; noise samples go from 4 to 8.</p><code>YAM & SO-100: 30 steps @ 30 Hz · DROID: 15 @ 15 Hz · LIBERO: 10 @ 10 Hz</code></div></div><div class="f2-step is-end" role="listitem"><span class="f2-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 21V4M5 4h11l-2 4 2 4H5"/></svg></span><div class="f2-card"><span class="k">Finish</span><b>A checkpoint per embodiment</b><p>MolmoAct2-YAM, -SO100/101, -DROID and -LIBERO, plus the Think variant.</p></div></div></div>
         <div class="f2-stats"><span>pre-train <b>200K</b></span><span>post-train <b>100K</b></span><span>fine-tune <b>50–100K</b></span><span>hardware <b>32–64 H100</b></span></div>
-        <figcaption><b>Figure 7.1</b> — The MolmoAct2 training pipeline (paper Section 4).</figcaption>
+        <figcaption><b>Figure 7.1.</b> The MolmoAct2 training pipeline (paper Section 4).</figcaption>
       </figure>
       <h3>Knowledge insulation, and when to remove it</h3>
       <p>When the action expert is first attached it is random. Its early gradients are large and uninformed; if they flowed back into the VLM they would damage features that took millions of examples to learn. So in stage B the connection is one-way: the expert reads the VLM’s keys and values, but the gradient is cut. The VLM keeps improving only through its own token-prediction loss.</p>
-      <p>In stage C the wall comes down. By then the expert is competent, the data is from a single robot, and letting the flow loss shape the backbone helps. The ablation agrees: full fine-tuning with discrete co-training and no insulation scores best (97.20 on LIBERO); training the action expert alone, with the VLM frozen, scores 93.05.</p>
+      <p>In stage C the insulation is removed. By then the expert is competent, the data is from a single robot, and letting the flow loss shape the backbone helps. The ablation agrees: full fine-tuning with discrete co-training and no insulation scores best (97.20 on LIBERO); training the action expert alone, with the VLM frozen, scores 93.05.</p>
       <div class="callout note"><div><strong>No peeking</strong><p>During post-training the sequence contains the ground-truth action tokens, because the VLM is learning to predict them. Those tokens are masked out of what the expert can attend to. Otherwise the expert would learn to copy the answer rather than produce it.</p></div></div>
       <h3>Several noise draws per example</h3>
-      <p>Running the VLM over images is the expensive part of a training step; the expert is cheap. So each action chunk is used several times per step with different noise and time values — four in post-training, eight in fine-tuning — getting more learning signal out of each costly VLM pass. Going from one draw to eight is worth about 1.75 points on LIBERO.</p>
+      <p>Running the VLM over images is the expensive part of a training step; the expert is cheap. So each action chunk is used several times per step with different noise and time values (four in post-training, eight in fine-tuning), getting more learning signal out of each costly VLM pass. Going from one draw to eight is worth about 1.75 points on LIBERO.</p>
     <div class="folio"><span>Three-Stage Training</span><span>7</span></div>
 </section>
 
@@ -293,9 +293,9 @@ td.best { font-weight: 700; color: var(--oxblood); }
       <p class="dropcap">The original MolmoAct had a distinctive idea: before acting, have the model write out what it believes about the scene’s 3D structure, as tokens, and condition the action on that. It grounds the action in geometry. It also meant generating a full set of depth tokens at every single control step, for a scene that mostly had not changed.</p>
       <p><strong>MolmoAct2-Think</strong> keeps the idea and removes the waste.</p>
       <h3>Depth as a hundred tokens</h3>
-      <p>Each camera frame’s depth map is compressed to a 10×10 grid. Every cell holds one of 128 codes — a coarse “how far away is this patch” symbol. One hundred ordinary tokens describe the depth of the whole scene. For training, depth labels come from an off-the-shelf monocular depth estimator, so no depth camera is required.</p>
+      <p>Each camera frame’s depth map is compressed to a 10×10 grid. Every cell holds one of 128 codes, a coarse “how far away is this patch” symbol. One hundred ordinary tokens describe the depth of the whole scene. For training, depth labels come from an off-the-shelf monocular depth estimator, so no depth camera is required.</p>
       <h3>Only re-think what changed</h3>
-      <p>The model keeps a buffer of the last depth codes. At each step, the new frame is split into the same 10×10 patches and each patch is compared with the same patch in the previous frame. If they are nearly identical — cosine similarity at or above 0.996 — the old code is reused. Only patches that changed are decoded afresh. The first frame, with nothing to compare against, decodes all hundred.</p>
+      <p>The model keeps a buffer of the last depth codes. At each step, the new frame is split into the same 10×10 patches and each patch is compared with the same patch in the previous frame. If they are nearly identical (cosine similarity at or above 0.996), the old code is reused. Only patches that changed are decoded afresh. The first frame, with nothing to compare against, decodes all hundred.</p>
       <div class="demo" id="depthDemo">
         <div class="seg two" role="group" aria-label="Depth update rule">
           <button type="button" data-m="0" aria-pressed="false">Regenerate everything</button>
@@ -305,7 +305,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
         <div class="demo-status"><span>Depth tokens decoded this step: <b id="dNow">–</b> / 100</span><span>Running average: <b id="dAvg">–</b></span></div>
       </div>
       <p class="small muted">A toy, not the paper’s measurement. A gripper moves over a still table; a cell is marked for regeneration when the gripper enters or leaves it. The real rule compares image patches by cosine similarity, so lighting changes and camera motion would also trigger updates.</p>
-      <p>In a typical manipulation scene the camera is fixed and only the arm and one object move. Most of the grid is table, wall and clutter that does not change for seconds at a time. That is the entire saving.</p>
+      <p>In a typical manipulation scene the camera is fixed and only the arm and one object move. Most of the grid is table, wall and clutter that does not change for seconds at a time. That is where the saving comes from.</p>
       <h3>Two details that make it robust</h3>
       <ul>
         <li><strong>Noisy depth in training.</strong> At run time the depth tokens are the model’s own predictions and will contain errors. So during fine-tuning, 10% of the input depth tokens are replaced with random codes. The model learns to use depth as a hint, not to trust it blindly.</li>
@@ -350,11 +350,11 @@ td.best { font-weight: 700; color: var(--oxblood); }
       <div class="table-wrap"><table>
         <thead><tr><th>Benchmark (average)</th><th>π0.5-DROID</th><th>MolmoAct2-DROID</th></tr></thead>
         <tbody>
-          <tr><td>MolmoSpaces — pick, pick-and-place, open, close</td><td>34.5</td><td class="best">37.7</td></tr>
-          <tr><td>MolmoBot — 1,000 episodes per task</td><td>10.0</td><td class="best">20.6</td></tr>
+          <tr><td>MolmoSpaces: pick, pick-and-place, open, close</td><td>34.5</td><td class="best">37.7</td></tr>
+          <tr><td>MolmoBot: 1,000 episodes per task</td><td>10.0</td><td class="best">20.6</td></tr>
         </tbody>
       </table></div>
-      <div class="callout warn"><div><strong>Read these with two things in mind</strong><p>First, the absolute numbers in simulation are low — about one success in five on MolmoBot — so “twice as good” still means failing most of the time. Second, MolmoSpaces and MolmoBot are benchmarks from the same institute as the model, and on MolmoSpaces’ “open” skill MolmoAct2 scores 9.5 against π0.5’s 22.7. The real-robot tables are the stronger evidence.</p></div></div>
+      <div class="callout warn"><div><strong>Read these with two things in mind</strong><p>First, the absolute numbers in simulation are low (about one success in five on MolmoBot), so “twice as good” still means failing most of the time. Second, MolmoSpaces and MolmoBot are benchmarks from the same institute as the model, and on MolmoSpaces’ “open” skill MolmoAct2 scores 9.5 against π0.5’s 22.7. The real-robot tables are the stronger evidence.</p></div></div>
     <div class="folio"><span>Out of the Box</span><span>9</span></div>
 </section>
 
@@ -377,7 +377,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
       </table></div>
       <p>The jump from its own predecessor is 10.6 points. Against the current best, the margins are fractions of a point: LIBERO is close to saturated, and it is fair to say MolmoAct2 <em>matches</em> the leaders here.</p>
       <h3>Two real arms, eight new tasks</h3>
-      <p>On the bimanual YAM, eight tasks — stacking cups, storing test tubes, hanging tools, preparing a pipette, making popcorn and others — were each fine-tuned separately and run for 50 trials across a lab, kitchen, study, pantry and wet lab.</p>
+      <p>On the bimanual YAM, eight tasks (stacking cups, storing test tubes, hanging tools, preparing a pipette, making popcorn and others) were each fine-tuned separately and run for 50 trials across a lab, kitchen, study, pantry and wet lab.</p>
       <div class="table-wrap"><table>
         <thead><tr><th>Real bimanual YAM, 8 tasks (average)</th><th>Success</th></tr></thead>
         <tbody>
@@ -389,7 +389,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
         </tbody>
       </table></div>
       <p class="note-flag">The paper’s main text gives 50.1% for MolmoAct2 and its appendix table gives 50.6%; the baseline figures are from that appendix table. Best on seven of the eight tasks.</p>
-      <p>Fifteen points ahead of the next method — and still succeeding only half the time. Both halves of that sentence matter.</p>
+      <p>That is fifteen points ahead of the next method, and it still succeeds only half the time.</p>
       <h3>When the world shifts</h3>
       <p>Four of those tasks were re-run with deliberate changes: objects moved, lighting altered, the instruction rephrased, distracting objects added.</p>
       <div class="table-wrap"><table>
@@ -402,7 +402,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
       </table></div>
       <p>Lighting, wording and clutter cost relatively little. Moving the objects is what hurts: 26% for the best model. Spatial generalisation from a small fine-tuning set remains the hard part for every method tested.</p>
       <h3>How it moves, not just whether it succeeds</h3>
-      <p>On RoboEval, a bimanual Franka benchmark, MolmoAct2 reaches 44.3% success, 3.8 points above π0.5. The benchmark also scores the trajectory. On block stacking, MolmoAct2 finished in 4.70 s against 5.87 s for π0.5, with about half the joint path length — it gets there more directly.</p>
+      <p>On RoboEval, a bimanual Franka benchmark, MolmoAct2 reaches 44.3% success, 3.8 points above π0.5. The benchmark also scores the trajectory. On block stacking, MolmoAct2 finished in 4.70 s against 5.87 s for π0.5, with about half the joint path length, so it takes a more direct route.</p>
     <div class="folio"><span>Fine-Tuned</span><span>10</span></div>
 </section>
 
@@ -432,7 +432,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
           <tr><td>Full fine-tuning → action expert only</td><td>97.20 → 93.05</td></tr>
         </tbody>
       </table></div>
-      <p>The backbone is the largest single lever. LoRA — the cheap way to fine-tune — costs about a point on average and nearly three on the long-horizon suite.</p>
+      <p>The backbone is the largest single lever. LoRA, the cheap way to fine-tune, costs about a point on average and nearly three on the long-horizon suite.</p>
       <h3>Limitations the authors list</h3>
       <ul>
         <li><strong>Open-loop chunks.</strong> A chunk, once started, runs to the end. The policy cannot react to a bump or a slip until the next chunk.</li>
@@ -446,7 +446,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
         <li>Fifty percent on new real tasks is the best in the comparison and well short of dependable.</li>
       </ul>
       <h3>Why it matters</h3>
-      <p>The individual ideas are incremental; the package is not. A strong VLA with its data, tokenizer, training code and weights all public, aimed at arms that cost thousands rather than hundreds of thousands, lowers the price of doing serious robot-learning research. The per-layer conditioning and the adaptive reasoning trick are both easy to borrow. And the 720-hour bimanual dataset is useful to anyone with a pair of similar arms, whether or not they use this model.</p>
+      <p>The individual ideas are incremental. The value is in the complete package. A strong VLA with its data, tokenizer, training code and weights all public, aimed at arms that cost thousands rather than hundreds of thousands, lowers the price of doing serious robot-learning research. The per-layer conditioning and the adaptive reasoning trick are both easy to borrow. And the 720-hour bimanual dataset is useful to anyone with a pair of similar arms, whether or not they use this model.</p>
     <div class="folio"><span>Speed, Ablations, Limits</span><span>11</span></div>
 </section>
 
@@ -456,7 +456,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
       <ol>
         <li>Strong robot foundation models were closed, tied to expensive hardware, slow when they reasoned, or unreliable.</li>
         <li>MolmoAct2 starts from Molmo2-ER, a VLM drilled on 3.3M spatial-reasoning examples.</li>
-        <li>It is trained on three cleaned, open datasets — bimanual YAM (720+ hours, new), SO-100/101 and DROID.</li>
+        <li>It is trained on three cleaned, open datasets: bimanual YAM (720+ hours, new), SO-100/101 and DROID.</li>
         <li>Actions are compressed into a 2,048-token vocabulary so the VLM can learn them as text.</li>
         <li>A 621M flow-matching action expert reads the VLM’s keys and values at every one of 36 layers.</li>
         <li>Training is staged: tokens first, then the expert behind a gradient wall, then joint fine-tuning.</li>
@@ -465,7 +465,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
       </ol>
 
       <h3>Check yourself</h3>
-      <details class="q"><summary>What are the two halves of MolmoAct2, and which does most of the work at run time?</summary><div>A vision-language model (Molmo2-ER, about 4.4B parameters with its vision encoder) that understands the scene and instruction, and a 621M action expert that generates continuous action chunks by flow matching. At run time the VLM runs once per chunk and the expert runs ten refinement steps.</div></details><details class="q"><summary>Why build Molmo2-ER before touching robot data?</summary><div>General VLMs are weak at spatial questions — distance, pointing, free space — which are exactly what manipulation depends on. Fine-tuning on 3.3M embodied-reasoning examples raised the 13-benchmark average from 46.8 to 63.8, and that backbone alone lifted LIBERO-Long from 77.6% to 83.6%.</div></details><details class="q"><summary>What does per-layer KV conditioning change compared with the usual design?</summary><div>Instead of the action expert attending only to the VLM’s final hidden state, each of its 36 blocks cross-attends to the keys and values of the matching VLM layer. The expert gets early-layer geometric detail as well as late-layer abstraction. Worth about 1.9 points on LIBERO.</div></details><details class="q"><summary>Why is knowledge insulation on in post-training and off in fine-tuning?</summary><div>When first attached, the expert is random and its gradients would damage the VLM’s pre-trained features, so they are blocked. By fine-tuning the expert is competent and the data is from one robot, so letting the flow loss shape the VLM helps; the ablation shows full fine-tuning without insulation scoring best.</div></details><details class="q"><summary>How does MolmoAct2-Think avoid the latency of its predecessor?</summary><div>Depth is a 10×10 grid of tokens kept in a buffer. Each step, only cells whose image patch changed (cosine similarity below 0.996 against the previous frame) are re-decoded; the rest are replayed. In a mostly static scene that is a small fraction of the hundred.</div></details><details class="q"><summary>Why are random codes injected into the depth tokens during fine-tuning?</summary><div>At run time the depth tokens are the model’s own imperfect predictions. Replacing 10% with random codes in training teaches the policy to tolerate wrong depth rather than rely on it absolutely.</div></details><details class="q"><summary>Which result most tempers the headline numbers?</summary><div>Several candidates: about 50% success on new real bimanual tasks; 26% when objects are moved; roughly 20% on the MolmoBot simulation; and Think running at about 13 Hz against 56 Hz for the base model. Best-in-comparison is not the same as dependable.</div></details>
+      <details class="q"><summary>What are the two halves of MolmoAct2, and which does most of the work at run time?</summary><div>A vision-language model (Molmo2-ER, about 4.4B parameters with its vision encoder) that understands the scene and instruction, and a 621M action expert that generates continuous action chunks by flow matching. At run time the VLM runs once per chunk and the expert runs ten refinement steps.</div></details><details class="q"><summary>Why build Molmo2-ER before touching robot data?</summary><div>General VLMs are weak at spatial questions (distance, pointing, free space), which are what manipulation depends on. Fine-tuning on 3.3M embodied-reasoning examples raised the 13-benchmark average from 46.8 to 63.8, and that backbone alone lifted LIBERO-Long from 77.6% to 83.6%.</div></details><details class="q"><summary>What does per-layer KV conditioning change compared with the usual design?</summary><div>Instead of the action expert attending only to the VLM’s final hidden state, each of its 36 blocks cross-attends to the keys and values of the matching VLM layer. The expert gets early-layer geometric detail as well as late-layer abstraction. Worth about 1.9 points on LIBERO.</div></details><details class="q"><summary>Why is knowledge insulation on in post-training and off in fine-tuning?</summary><div>When first attached, the expert is random and its gradients would damage the VLM’s pre-trained features, so they are blocked. By fine-tuning the expert is competent and the data is from one robot, so letting the flow loss shape the VLM helps; the ablation shows full fine-tuning without insulation scoring best.</div></details><details class="q"><summary>How does MolmoAct2-Think avoid the latency of its predecessor?</summary><div>Depth is a 10×10 grid of tokens kept in a buffer. Each step, only cells whose image patch changed (cosine similarity below 0.996 against the previous frame) are re-decoded; the rest are replayed. In a mostly static scene that is a small fraction of the hundred.</div></details><details class="q"><summary>Why are random codes injected into the depth tokens during fine-tuning?</summary><div>At run time the depth tokens are the model’s own imperfect predictions. Replacing 10% with random codes in training teaches the policy to tolerate wrong depth rather than rely on it absolutely.</div></details><details class="q"><summary>Which result most tempers the headline numbers?</summary><div>Several candidates: about 50% success on new real bimanual tasks; 26% when objects are moved; roughly 20% on the MolmoBot simulation; and Think running at about 13 Hz against 56 Hz for the base model. Best-in-comparison is not the same as dependable.</div></details>
 
       <h3>Glossary</h3>
       <dl class="gloss">
@@ -473,7 +473,7 @@ td.best { font-weight: 700; color: var(--oxblood); }
         <dt>VLM / backbone</dt><dd>The vision-language model at the core of a VLA, pre-trained on web-scale image and text data.</dd>
         <dt>Action reasoning model</dt><dd>The authors’ term for a VLA that produces intermediate spatial reasoning (here, depth) before acting.</dd>
         <dt>Embodiment</dt><dd>A particular robot body: its arms, joints, gripper and cameras.</dd>
-        <dt>Action chunk</dt><dd>A short sequence of future actions predicted in one go — here up to one second.</dd>
+        <dt>Action chunk</dt><dd>A short sequence of future actions predicted in one go, here up to one second.</dd>
         <dt>Action expert</dt><dd>The smaller network that generates continuous action chunks from the VLM’s features.</dd>
         <dt>Flow matching</dt><dd>Training a network to predict the direction from noise to data, then integrating that direction to generate samples.</dd>
         <dt>Keys and values (K, V)</dt><dd>The per-token vectors an attention layer uses to decide what to attend to and what to retrieve.</dd>

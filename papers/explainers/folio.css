@@ -278,7 +278,7 @@ th .nt { text-transform: none; letter-spacing: 0; }
   a { color: inherit; }
 }
 
-/* ============ 9. FLOW v2 — modern timeline flowchart ============ */
+/* ============ 9. FLOW v2: modern timeline flowchart ============ */
 /* Markup: .flow2 > .f2-track > (.f2-step | .f2-phase | .f2-loop > ...).
    Step colour via .is-start/.is-proc/.is-net/.is-dec/.is-end. */
 .flow2 {
